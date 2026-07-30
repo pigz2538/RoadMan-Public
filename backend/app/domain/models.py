@@ -131,7 +131,8 @@ class MovementStage(BaseModel):
     day_id: str
     sequence: int = Field(ge=0)
     title: str
-    mode: Literal["driving", "transit", "walking", "taxi", "flight", "train"]
+    mode: Literal["driving", "transit", "walking", "riding", "taxi", "flight", "train"]
+    transit_type: Literal["bus", "subway", "shuttle"] | None = None
     origin: PlaceRef
     destination: PlaceRef
     waypoints: list[PlaceRef] = Field(default_factory=list)
@@ -140,6 +141,8 @@ class MovementStage(BaseModel):
     planned_end: datetime
     distance_km: float = Field(ge=0)
     duration_minutes: int = Field(ge=0)
+    traffic_summary: str | None = None
+    weather_summary: str | None = None
     toll_fee: MoneyRange | None = None
     energy_estimate: EnergyEstimate | None = None
     weather_samples: list[WeatherSample] = Field(default_factory=list)

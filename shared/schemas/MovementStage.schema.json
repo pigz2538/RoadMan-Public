@@ -386,12 +386,30 @@
         "driving",
         "transit",
         "walking",
+        "riding",
         "taxi",
         "flight",
         "train"
       ],
       "title": "Mode",
       "type": "string"
+    },
+    "transit_type": {
+      "anyOf": [
+        {
+          "enum": [
+            "bus",
+            "subway",
+            "shuttle"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Transit Type"
     },
     "origin": {
       "$ref": "#/$defs/PlaceRef"
@@ -432,6 +450,30 @@
       "minimum": 0,
       "title": "Duration Minutes",
       "type": "integer"
+    },
+    "traffic_summary": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Traffic Summary"
+    },
+    "weather_summary": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Weather Summary"
     },
     "toll_fee": {
       "anyOf": [

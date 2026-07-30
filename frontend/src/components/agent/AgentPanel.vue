@@ -37,7 +37,7 @@ function send() {
     <div class="chat-stream">
       <div v-for="(item, index) in messages" :key="index" :class="['message', item.side]">{{ item.text }}</div>
       <div v-if="store.patchVisible" class="patch-card">
-        <span>PLAN PATCH · 待确认</span>
+        <span>PLAN PATCH · 修改建议</span>
         <strong>提前 30 分钟离开黄石服务区</strong>
         <dl>
           <div><dt>时间变化</dt><dd>-30 min</dd></div>

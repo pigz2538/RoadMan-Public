@@ -22,14 +22,22 @@ export interface Stage {
   sequence: number
   title: string
   mode: string
+  transit_type?: 'bus' | 'subway' | 'shuttle'
   origin: Place
   destination: Place
   waypoints: Place[]
   route_segments: Array<{
     coordinates: Array<{ longitude: number; latitude: number }>
+    road_name?: string
   }>
+  planned_start: string
+  planned_end: string
   distance_km: number
   duration_minutes: number
+  traffic_summary?: string
+  weather_summary?: string
+  toll_fee?: { currency: string; minimum: number; maximum: number; estimated: boolean }
+  energy_estimate?: { amount: number; unit: string; remaining_percent?: number; estimated: boolean }
   status: string
   warnings: Array<{ code: string; message: string }>
 }
@@ -39,6 +47,7 @@ export interface DayPlan {
   day_index: number
   date: string
   title: string
+  items: Array<{ type: 'stage' | 'activity'; id: string }>
   activities: Activity[]
   stages: Stage[]
   weather_summary?: string

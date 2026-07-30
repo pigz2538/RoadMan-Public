@@ -43,3 +43,10 @@ SSE 使用命名事件，`data` 是 `SSEEvent` JSON。当前版本依次发出�
 
 未配置 `AMAP_WEBSERVICE_KEY` 时接口返回合法 `SkillResult`，
 `success=false` 且 `error_code=SKILL_NOT_CONFIGURED`，不会泄露密钥。
+
+驾车失败后切换骑行、步行或同城公交的后端统一编排接口仍处于设计阶段，详见
+[`routing-fallback-design.md`](routing-fallback-design.md)，当前不能视为已上线 API。
+
+`MovementStage.mode` 支持驾车、步行、骑行与公共交通等移动方式；当
+`mode=transit` 时可通过 `transit_type` 标记 `bus`、`subway` 或 `shuttle`。
+景点、餐厅、酒店等活动节点之间发生位移时也必须返回独立 `MovementStage`。

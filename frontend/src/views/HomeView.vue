@@ -79,17 +79,19 @@ function activate(label: string) {
         <component
           :is="'model-viewer'"
           class="vehicle-model"
+          :class="{ loaded: modelLoaded }"
           src="/models/car-concept.glb"
-          poster="/car-suv.svg"
           alt="可旋转的 RoadMan 3D 车辆模型"
           camera-controls
           auto-rotate
           auto-rotate-delay="1200"
           rotation-per-second="12deg"
-          camera-orbit="35deg 70deg 75%"
+          camera-orbit="35deg 70deg 275%"
+          min-camera-orbit="auto auto 55%"
+          max-camera-orbit="auto auto 450%"
           field-of-view="28deg"
-          min-field-of-view="20deg"
-          max-field-of-view="45deg"
+          min-field-of-view="26deg"
+          max-field-of-view="38deg"
           variant-name="Pearly Swirly"
           shadow-intensity="1.2"
           shadow-softness=".8"
@@ -99,6 +101,13 @@ function activate(label: string) {
           @load="modelLoaded = true"
           @error="modelError = true"
         />
+        <div v-if="!modelLoaded && !modelError" class="vehicle-loading" role="status">
+          <i />
+          <span>正在加载车辆模型…</span>
+        </div>
+        <div v-else-if="modelError" class="vehicle-loading error" role="status">
+          车辆模型加载失败，请刷新重试
+        </div>
         <span class="sr-only">{{ modelLoaded ? '3D 模型已加载' : modelError ? '3D 模型加载失败' : '正在加载 3D 模型' }}</span>
       </div>
     </section>
