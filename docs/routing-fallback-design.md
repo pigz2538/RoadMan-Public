@@ -1,6 +1,6 @@
 # RoadMan 多交通方式路线降级设计
 
-状态：后端目标设计；前端 JSAPI 已先实现顺序降级
+状态：后端与前端均已实现
 更新日期：2026-07-30
 
 ## 1. 目标
@@ -19,7 +19,7 @@
 4. `transit`
 5. `direct_hint`，仅为前端灰色虚线，不是可执行路线
 
-后端正式实现时根据直线距离调整候选顺序：
+后端根据直线距离调整候选顺序：
 
 | 条件 | 驾车失败后的候选 |
 |---|---|
@@ -34,7 +34,7 @@
 
 ## 3. 建议统一接口
 
-计划新增：
+已上线：
 
 ```text
 POST /api/v1/skills/amap/route
@@ -98,7 +98,7 @@ POST /api/v1/skills/amap/route
 
 ## 4. Adapter 设计
 
-Skill Registry 中建议拆分以下 Adapter：
+Skill Registry 中由统一 Adapter 编排以下交通方式：
 
 - `amap.driving`
 - `amap.riding`
@@ -138,9 +138,7 @@ Skill Registry 中建议拆分以下 Adapter：
 
 ## 7. 当前实现状态
 
-当前前端 `AmapRouteMap.vue` 已加载 Driving、Riding、Walking 和 Transfer 插件，
-并按驾车、骑行、步行、公交顺序尝试。日内 Stage 与 Activity 之间也使用相同策略
-补齐真实连接路线，例如牯岭镇到如琴湖。
-
-后端当前仍只有 `amap.driving` 接口。本文件描述的 `amap.route` 统一编排接口属于
-下一步实现范围，不能在 API 文档中标记为已上线。
+前端 `AmapRouteMap.vue` 已加载 Driving、Riding、Walking 和 Transfer 插件并支持
+真实路线降级。后端 `/api/v1/skills/amap/route` 已实现同一策略，返回统一 geometry、
+steps、transfers、来源和失败原因；日内 Stage 与 Activity 之间的移动可作为正式
+`MovementStage` 消费该接口。

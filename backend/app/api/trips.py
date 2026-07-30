@@ -2,14 +2,15 @@ import asyncio
 import json
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, Response, status
+from fastapi import APIRouter, Depends, Header, Response, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.errors import AppError
 from ..db import get_session
-from ..domain.models import SSEEvent, Trip, TripCreate, TripStatus, TripUpdate
+from ..domain.models import Trip, TripCreate, TripStatus, TripUpdate
 from ..repositories import TripRepository
+from ..services.sse import sse_manager
 
 router = APIRouter(prefix="/api/v1/trips", tags=["trips"])
 MOCK_TRIP_PATH = Path(__file__).resolve().parents[3] / "shared" / "examples" / "wuhan-lushan-trip.json"
@@ -74,30 +75,28 @@ async def start_mock_planning(
 
 
 @router.get("/{trip_id}/planning/events")
-async def planning_events(trip_id: str, repo: TripRepository = Depends(get_repo)) -> StreamingResponse:
-    if not await repo.get(trip_id):
+async def planning_events(
+    trip_id: str,
+    repo: TripRepository = Depends(get_repo),
+    last_event_id: str | None = Header(default=None, alias="Last-Event-ID"),
+) -> StreamingResponse:
+    if not await repo.get(trip_id) and trip_id != "trip_wuhan_lushan_demo":
         raise AppError("TRIP_NOT_FOUND", "行程不存在", 404, {"trip_id": trip_id})
+    try:
+        cursor = int(last_event_id or 0)
+    except ValueError:
+        raise AppError("INVALID_LAST_EVENT_ID", "Last-Event-ID 必须为整数", 400)
+    await sse_manager.seed_planning_demo(trip_id)
 
     async def event_stream():
-        events = [
-            ("planning_started", "正在建立行程上下文", 5, "load_context", None),
-            ("node_started", "正在识别出发地与目的地", 20, "extract_trip_request", None),
-            ("tool_started", "正在查询武汉—庐山路线", 42, "build_base_route", "amap.driving"),
-            ("tool_completed", "Mock 路线已返回", 68, "build_base_route", "amap.driving"),
-            ("progress", "正在拆分天和阶段", 84, "build_stages", None),
-            ("planning_completed", "路书 Mock 已生成", 100, "persist_trip", None),
-        ]
-        for event, label, progress, node, tool in events:
-            payload = SSEEvent(
-                event=event,
-                trip_id=trip_id,
-                node=node,
-                tool=tool,
-                label=label,
-                progress=progress,
+        for stored in await sse_manager.after(trip_id, cursor):
+            payload = stored.payload
+            yield (
+                f"id: {stored.id}\n"
+                f"event: {payload.event}\n"
+                f"data: {json.dumps(payload.model_dump(mode='json'), ensure_ascii=False)}\n\n"
             )
-            yield f"event: {event}\ndata: {json.dumps(payload.model_dump(mode='json'), ensure_ascii=False)}\n\n"
-            await asyncio.sleep(0.35)
+            await asyncio.sleep(0.15)
 
     return StreamingResponse(
         event_stream(),

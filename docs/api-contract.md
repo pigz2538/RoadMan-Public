@@ -1,6 +1,7 @@
-# RoadMan API 契约 v0.1
+# RoadMan API 契约 v0.2
 
-开发地址：`http://localhost:8000`。交互式文档：`/docs`。
+开发地址：`http://localhost:8000`，交互式文档：`/docs`。Docker 统一入口为
+`http://localhost:8080`。
 
 错误统一为：
 
@@ -9,44 +10,67 @@
   "error": {
     "code": "TRIP_NOT_FOUND",
     "message": "行程不存在",
-    "details": {"trip_id": "trip_x"}
+    "details": {"trip_id": "trip_x"},
+    "request_id": "req_x"
   }
 }
 ```
 
-## Trip
+响应头 `X-Request-ID` 可用于串联日志。服务不会在响应、日志或 SkillCall 审计中
+记录第三方 API Key。
+
+## 业务资源
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| POST | `/api/v1/trips` | 创建空白/收集中 Trip |
-| GET | `/api/v1/trips` | 查询 Trip 列表 |
-| GET | `/api/v1/trips/{trip_id}` | 查询 Trip |
-| PATCH | `/api/v1/trips/{trip_id}` | 更新标题、状态或所选车辆 |
-| DELETE | `/api/v1/trips/{trip_id}` | 删除 Trip |
-| GET | `/api/v1/trips/mock/wuhan-lushan` | 固定验收 Mock |
+| POST/GET | `/api/v1/trips` | 创建、列出 Trip |
+| GET/PATCH/DELETE | `/api/v1/trips/{trip_id}` | 查询、更新、删除 Trip |
+| GET | `/api/v1/trips/mock/wuhan-lushan` | 固定验收行程 |
+| POST/GET | `/api/v1/vehicles` | 创建、列出车辆 |
+| GET/PATCH/DELETE | `/api/v1/vehicles/{vehicle_id}` | 车辆 CRUD |
+| POST | `/api/v1/files` | 校验大小、扩展名、MIME 和文件签名后上传 |
+| GET | `/api/v1/files/{file_id}` | 文件元数据 |
+| GET | `/api/v1/files/{file_id}/content` | 下载文件内容 |
+| POST | `/api/v1/jobs` | 创建异步任务并投递 ARQ |
+| GET | `/api/v1/jobs/{job_id}` | 查询任务状态与进度 |
+| POST | `/api/v1/jobs/{job_id}/cancel` | 取消排队中或执行中的任务 |
 
-## 规划 Mock 与 SSE
+## 规划与 SSE
 
 - `POST /api/v1/trips/{trip_id}/planning/start`
 - `GET /api/v1/trips/{trip_id}/planning/events`
 
-SSE 使用命名事件，`data` 是 `SSEEvent` JSON。当前版本依次发出启动、
-需求抽取、工具调用、阶段构建和完成事件；不包含模型私有推理。
+SSE 使用命名事件，每条事件包含单调递增的 `id:`。客户端断线重连时传
+`Last-Event-ID`，服务只续发其后的保留事件。当前事件内容仍是阶段 D 工作流接入前的
+可展示演示进度，不包含模型私有推理。
 
 ## Skill Registry
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/api/v1/skills/health` | Adapter 健康状态 |
+| GET | `/api/v1/skills/health` | Adapter 与 Redis/内存缓存健康状态 |
+| GET | `/api/v1/skills/calls` | 最近 SkillCall 审计记录 |
 | POST | `/api/v1/skills/amap/geocode` | 高德地理编码 |
 | POST | `/api/v1/skills/amap/driving` | 高德驾车路线 |
+| POST | `/api/v1/skills/amap/route` | 驾车/骑行/步行/公交统一路线编排 |
+| POST | `/api/v1/skills/amap/poi` | 高德 POI 检索 |
+| POST | `/api/v1/skills/weather/forecast` | Open-Meteo 坐标天气预报 |
+| POST | `/api/v1/skills/carinfo/search` | 固定车型样本与能耗参数 |
 
-未配置 `AMAP_WEBSERVICE_KEY` 时接口返回合法 `SkillResult`，
-`success=false` 且 `error_code=SKILL_NOT_CONFIGURED`，不会泄露密钥。
+所有 Adapter 返回统一 `SkillResult`。缓存键包含 Adapter 版本与规范化参数；Redis
+不可用时自动降级到进程内缓存。只有网络传输错误和超时会重试，参数错误与无结果
+不会重试。
 
-驾车失败后切换骑行、步行或同城公交的后端统一编排接口仍处于设计阶段，详见
-[`routing-fallback-design.md`](routing-fallback-design.md)，当前不能视为已上线 API。
+`amap.route` 尊重 `preferred_mode`。驾车无结果时按距离和同城条件尝试骑行、步行或
+公共交通；全部真实方式失败时返回 `ROUTE_UNAVAILABLE`，不把直线伪装成道路点列。
+详细契约见 [`routing-fallback-design.md`](routing-fallback-design.md)。
 
-`MovementStage.mode` 支持驾车、步行、骑行与公共交通等移动方式；当
-`mode=transit` 时可通过 `transit_type` 标记 `bus`、`subway` 或 `shuttle`。
-景点、餐厅、酒店等活动节点之间发生位移时也必须返回独立 `MovementStage`。
+未配置第三方凭据时返回合法的失败 `SkillResult`，例如
+`error_code=SKILL_NOT_CONFIGURED`，不会抛出不透明异常。
+
+## 数据与运行约束
+
+- PostgreSQL 结构由 Alembic 管理；本地测试保留 SQLite 兼容。
+- Job Worker 使用 Redis + ARQ，Web API 与 Worker 共享任务状态。
+- 文件内容存储在 `UPLOAD_DIR`，数据库只保存安全文件名和元数据。
+- JSON Schema 位于 `shared/schemas/`，由 `backend/scripts/export_schemas.py` 生成。

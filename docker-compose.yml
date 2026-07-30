@@ -35,6 +35,9 @@ services:
       AMAP_WEBSERVICE_KEY: ${AMAP_WEBSERVICE_KEY:-}
       LOAD_LOCAL_SKILL_CREDENTIALS: "false"
       CORS_ORIGINS: http://localhost:8080
+      UPLOAD_DIR: /app/data/uploads
+    volumes:
+      - roadman_uploads:/app/data/uploads
     depends_on:
       postgres:
         condition: service_healthy
@@ -45,6 +48,28 @@ services:
       interval: 8s
       timeout: 3s
       retries: 10
+
+  worker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    command: ["arq", "app.workers.main.WorkerSettings"]
+    environment:
+      APP_ENV: docker
+      DATABASE_URL: postgresql+asyncpg://roadman:roadman_dev@postgres:5432/roadman
+      REDIS_URL: redis://redis:6379/0
+      AMAP_WEBSERVICE_KEY: ${AMAP_WEBSERVICE_KEY:-}
+      LOAD_LOCAL_SKILL_CREDENTIALS: "false"
+      UPLOAD_DIR: /app/data/uploads
+    volumes:
+      - roadman_uploads:/app/data/uploads
+    depends_on:
+      backend:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
 
   frontend:
     build:
@@ -59,3 +84,4 @@ services:
 volumes:
   roadman_postgres:
   roadman_redis:
+  roadman_uploads:

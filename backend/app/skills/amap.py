@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import time
-from typing import Any
+from math import asin, cos, radians, sin, sqrt
+from typing import Any, Literal
 
 import httpx
 from pydantic import BaseModel, Field
@@ -21,6 +22,40 @@ class DrivingInput(BaseModel):
     origin: str = Field(pattern=r"^-?\d+(\.\d+)?,-?\d+(\.\d+)?$")
     destination: str = Field(pattern=r"^-?\d+(\.\d+)?,-?\d+(\.\d+)?$")
     strategy: int = Field(default=0, ge=0, le=20)
+
+
+class RoutePoint(BaseModel):
+    longitude: float = Field(ge=-180, le=180)
+    latitude: float = Field(ge=-90, le=90)
+    city: str | None = None
+
+    @property
+    def location(self) -> str:
+        return f"{self.longitude},{self.latitude}"
+
+
+class UnifiedRouteInput(BaseModel):
+    origin: RoutePoint
+    destination: RoutePoint
+    preferred_mode: str = Field(default="driving", pattern="^(driving|riding|walking|transit)$")
+    allowed_fallback_modes: list[Literal["driving", "riding", "walking", "transit"]] = Field(
+        default_factory=lambda: ["riding", "walking", "transit"],
+    )
+    waypoints: list[RoutePoint] = Field(default_factory=list)
+    strategy: int = Field(default=0, ge=0, le=20)
+
+
+class PoiInput(BaseModel):
+    keywords: str = Field(min_length=1)
+    city: str | None = None
+    types: str | None = None
+    location: str | None = Field(
+        default=None,
+        pattern=r"^-?\d+(\.\d+)?,-?\d+(\.\d+)?$",
+    )
+    radius: int = Field(default=5000, ge=0, le=50000)
+    page: int = Field(default=1, ge=1, le=100)
+    page_size: int = Field(default=20, ge=1, le=25)
 
 
 class AmapGeocodeAdapter(SkillAdapter):
@@ -135,6 +170,303 @@ class AmapDrivingAdapter(SkillAdapter):
                 ],
             },
             sources=[SourceRecord(provider="高德地图", title="驾车路径规划 API", url=f"{AMAP_BASE_URL}/v3/direction/driving")],
+            latency_ms=int((time.perf_counter() - started) * 1000),
+        )
+
+    async def health_check(self) -> dict[str, Any]:
+        return {"status": "ready" if self.api_key else "degraded", "configured": bool(self.api_key)}
+
+
+def _polyline_points(polyline: str) -> list[dict[str, float]]:
+    points: list[dict[str, float]] = []
+    for item in polyline.split(";"):
+        if not item or "," not in item:
+            continue
+        longitude, latitude = item.split(",", 1)
+        points.append({"longitude": float(longitude), "latitude": float(latitude)})
+    return points
+
+
+def _haversine_km(origin: RoutePoint, destination: RoutePoint) -> float:
+    earth_radius_km = 6371.0
+    lat1, lat2 = radians(origin.latitude), radians(destination.latitude)
+    delta_lat = lat2 - lat1
+    delta_lng = radians(destination.longitude - origin.longitude)
+    value = sin(delta_lat / 2) ** 2 + cos(lat1) * cos(lat2) * sin(delta_lng / 2) ** 2
+    return 2 * earth_radius_km * asin(sqrt(value))
+
+
+class AmapRouteAdapter(SkillAdapter):
+    name = "amap.route"
+    category = "routing"
+    cache_ttl_seconds = 1800
+    timeout_seconds = 7.0
+    max_retries = 1
+
+    def __init__(self, api_key: str):
+        self.api_key = api_key
+
+    async def validate_input(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return UnifiedRouteInput.model_validate(payload).model_dump()
+
+    async def execute(self, payload: dict[str, Any], _: SkillContext) -> SkillResult:
+        if not self.api_key:
+            return SkillResult(
+                success=False,
+                provider="高德地图",
+                warnings=["未配置 AMAP_WEBSERVICE_KEY"],
+                error_code="SKILL_NOT_CONFIGURED",
+            )
+        request = UnifiedRouteInput.model_validate(payload)
+        candidates = self._candidates(request)
+        attempted: list[str] = []
+        failure_reasons: list[str] = []
+        started = time.perf_counter()
+        async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+            for mode in candidates:
+                attempted.append(mode)
+                route, reason = await self._fetch_mode(client, mode, request)
+                if route:
+                    endpoint = route.pop("endpoint")
+                    return SkillResult(
+                        success=True,
+                        provider="高德地图",
+                        data={
+                            "requested_mode": request.preferred_mode,
+                            "selected_mode": mode,
+                            "fallback_used": mode != request.preferred_mode,
+                            "fallback_reason": failure_reasons[-1] if failure_reasons else None,
+                            "attempted_modes": attempted,
+                            **route,
+                        },
+                        sources=[
+                            SourceRecord(
+                                provider="高德地图",
+                                title=f"{mode} 路径规划 API",
+                                url=endpoint,
+                            )
+                        ],
+                        latency_ms=int((time.perf_counter() - started) * 1000),
+                    )
+                failure_reasons.append(reason or f"AMAP_{mode.upper()}_NO_RESULT")
+        return SkillResult(
+            success=False,
+            provider="高德地图",
+            data={"attempted_modes": attempted, "failure_reasons": failure_reasons},
+            warnings=["允许的交通方式均未返回可执行路线"],
+            latency_ms=int((time.perf_counter() - started) * 1000),
+            error_code="ROUTE_UNAVAILABLE",
+        )
+
+    def _candidates(self, request: UnifiedRouteInput) -> list[str]:
+        distance = _haversine_km(request.origin, request.destination)
+        same_city = (
+            bool(request.origin.city)
+            and request.origin.city == request.destination.city
+        )
+        fallback = list(request.allowed_fallback_modes)
+        if request.preferred_mode == "driving":
+            if same_city and distance <= 3:
+                preference = ["walking", "riding", "transit"]
+            elif same_city and distance <= 30:
+                preference = ["riding", "transit", "walking"]
+            elif same_city:
+                preference = ["transit"]
+            else:
+                preference = []
+            fallback = [mode for mode in preference if mode in fallback]
+        candidates = [request.preferred_mode, *fallback]
+        return list(dict.fromkeys(candidates))
+
+    async def _fetch_mode(
+        self,
+        client: httpx.AsyncClient,
+        mode: str,
+        request: UnifiedRouteInput,
+    ) -> tuple[dict[str, Any] | None, str | None]:
+        origin = request.origin.location
+        destination = request.destination.location
+        if mode == "riding":
+            endpoint = f"{AMAP_BASE_URL}/v4/direction/bicycling"
+            response = await client.get(
+                endpoint,
+                params={"key": self.api_key, "origin": origin, "destination": destination},
+            )
+            response.raise_for_status()
+            body = response.json()
+            paths = body.get("data", {}).get("paths", [])
+            if str(body.get("errcode")) not in {"0", "10000"} or not paths:
+                return None, body.get("errmsg") or "AMAP_RIDING_NO_RESULT"
+            return self._normal_path(paths[0], endpoint), None
+
+        if mode == "transit":
+            city = request.origin.city
+            if not city or city != request.destination.city:
+                return None, "AMAP_TRANSIT_REQUIRES_SAME_CITY"
+            endpoint = f"{AMAP_BASE_URL}/v3/direction/transit/integrated"
+            response = await client.get(
+                endpoint,
+                params={
+                    "key": self.api_key,
+                    "origin": origin,
+                    "destination": destination,
+                    "city": city,
+                    "cityd": request.destination.city,
+                    "extensions": "all",
+                },
+            )
+            response.raise_for_status()
+            body = response.json()
+            transits = body.get("route", {}).get("transits", [])
+            if body.get("status") != "1" or not transits:
+                return None, body.get("info") or "AMAP_TRANSIT_NO_RESULT"
+            return self._transit_path(transits[0], endpoint), None
+
+        endpoint = f"{AMAP_BASE_URL}/v3/direction/{mode}"
+        params: dict[str, Any] = {
+            "key": self.api_key,
+            "origin": origin,
+            "destination": destination,
+            "extensions": "all",
+        }
+        if mode == "driving":
+            params["strategy"] = request.strategy
+            if request.waypoints:
+                params["waypoints"] = ";".join(point.location for point in request.waypoints)
+        response = await client.get(endpoint, params=params)
+        response.raise_for_status()
+        body = response.json()
+        paths = body.get("route", {}).get("paths", [])
+        if body.get("status") != "1" or not paths:
+            return None, body.get("info") or f"AMAP_{mode.upper()}_NO_RESULT"
+        return self._normal_path(paths[0], endpoint), None
+
+    @staticmethod
+    def _normal_path(path: dict[str, Any], endpoint: str) -> dict[str, Any]:
+        steps = path.get("steps", [])
+        geometry = [
+            point
+            for step in steps
+            for point in _polyline_points(step.get("polyline", ""))
+        ]
+        return {
+            "distance_km": round(float(path.get("distance") or 0) / 1000, 2),
+            "duration_minutes": round(float(path.get("duration") or 0) / 60),
+            "tolls_cny": float(path.get("tolls") or 0),
+            "geometry": geometry,
+            "steps": [
+                {
+                    "instruction": step.get("instruction"),
+                    "road": step.get("road"),
+                    "distance_m": int(float(step.get("distance") or 0)),
+                    "duration_s": int(float(step.get("duration") or 0)),
+                }
+                for step in steps
+            ],
+            "transfers": [],
+            "fare_cny": None,
+            "endpoint": endpoint,
+        }
+
+    @staticmethod
+    def _transit_path(transit: dict[str, Any], endpoint: str) -> dict[str, Any]:
+        geometry: list[dict[str, float]] = []
+        transfers: list[dict[str, Any]] = []
+        for segment in transit.get("segments", []):
+            for step in segment.get("walking", {}).get("steps", []):
+                geometry.extend(_polyline_points(step.get("polyline", "")))
+            for line in segment.get("bus", {}).get("buslines", []):
+                geometry.extend(_polyline_points(line.get("polyline", "")))
+                transfers.append(
+                    {
+                        "name": line.get("name"),
+                        "departure_stop": line.get("departure_stop", {}).get("name"),
+                        "arrival_stop": line.get("arrival_stop", {}).get("name"),
+                    }
+                )
+        return {
+            "distance_km": round(float(transit.get("distance") or 0) / 1000, 2),
+            "duration_minutes": round(float(transit.get("duration") or 0) / 60),
+            "tolls_cny": 0,
+            "geometry": geometry,
+            "steps": [],
+            "transfers": transfers,
+            "fare_cny": float(transit.get("cost") or 0) or None,
+            "endpoint": endpoint,
+        }
+
+    async def health_check(self) -> dict[str, Any]:
+        return {"status": "ready" if self.api_key else "degraded", "configured": bool(self.api_key)}
+
+
+class AmapPoiAdapter(SkillAdapter):
+    name = "amap.poi"
+    category = "poi"
+    cache_ttl_seconds = 6 * 3600
+
+    def __init__(self, api_key: str):
+        self.api_key = api_key
+
+    async def validate_input(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return PoiInput.model_validate(payload).model_dump(exclude_none=True)
+
+    async def execute(self, payload: dict[str, Any], _: SkillContext) -> SkillResult:
+        if not self.api_key:
+            return SkillResult(
+                success=False,
+                provider="高德地图",
+                warnings=["未配置 AMAP_WEBSERVICE_KEY"],
+                error_code="SKILL_NOT_CONFIGURED",
+            )
+        started = time.perf_counter()
+        endpoint = f"{AMAP_BASE_URL}/v5/place/text"
+        request = PoiInput.model_validate(payload)
+        params = {
+            "key": self.api_key,
+            "keywords": request.keywords,
+            "region": request.city,
+            "city_limit": "true" if request.city else None,
+            "types": request.types,
+            "location": request.location,
+            "radius": request.radius if request.location else None,
+            "page_num": request.page,
+            "page_size": request.page_size,
+            "show_fields": "business",
+        }
+        async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+            response = await client.get(
+                endpoint,
+                params={key: value for key, value in params.items() if value is not None},
+            )
+            response.raise_for_status()
+            body = response.json()
+        pois = body.get("pois", [])
+        if body.get("status") != "1":
+            return SkillResult(
+                success=False,
+                provider="高德地图",
+                warnings=[body.get("info", "POI 查询失败")],
+                error_code="AMAP_POI_FAILED",
+            )
+        return SkillResult(
+            success=True,
+            provider="高德地图",
+            data={
+                "count": int(body.get("count") or len(pois)),
+                "items": [
+                    {
+                        "id": poi.get("id"),
+                        "name": poi.get("name"),
+                        "address": poi.get("address"),
+                        "type": poi.get("type"),
+                        "location": poi.get("location"),
+                        "city": poi.get("cityname"),
+                        "district": poi.get("adname"),
+                    }
+                    for poi in pois
+                ],
+            },
+            sources=[SourceRecord(provider="高德地图", title="POI 2.0 API", url=endpoint)],
             latency_ms=int((time.perf_counter() - started) * 1000),
         )
 

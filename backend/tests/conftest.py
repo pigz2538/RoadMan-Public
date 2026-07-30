@@ -1,7 +1,10 @@
 import os
+import tempfile
 
 os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
 os.environ["LOAD_LOCAL_SKILL_CREDENTIALS"] = "false"
+os.environ["ENABLE_JOB_QUEUE"] = "false"
+os.environ["UPLOAD_DIR"] = tempfile.mkdtemp(prefix="roadman-test-uploads-")
 
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient

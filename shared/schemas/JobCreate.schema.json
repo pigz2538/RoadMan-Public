@@ -1,0 +1,33 @@
+{
+  "properties": {
+    "kind": {
+      "default": "skill_probe",
+      "enum": [
+        "planning",
+        "file_processing",
+        "skill_probe"
+      ],
+      "title": "Kind",
+      "type": "string"
+    },
+    "trip_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Trip Id"
+    },
+    "payload": {
+      "additionalProperties": true,
+      "title": "Payload",
+      "type": "object"
+    }
+  },
+  "title": "JobCreate",
+  "type": "object"
+}

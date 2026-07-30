@@ -85,6 +85,73 @@ class VehicleProfile(BaseModel):
     unpaved_ready: bool = False
 
 
+class VehicleUpdate(BaseModel):
+    brand: str | None = None
+    series: str | None = None
+    model: str | None = None
+    year: int | None = Field(default=None, ge=1980, le=2100)
+    power_type: Literal["electric", "hybrid", "fuel"] | None = None
+    rated_range_km: float | None = Field(default=None, gt=0)
+    current_energy_percent: float | None = Field(default=None, ge=0, le=100)
+    battery_kwh: float | None = Field(default=None, gt=0)
+    consumption_per_100km: float | None = Field(default=None, gt=0)
+    max_charge_kw: float | None = Field(default=None, gt=0)
+    height_m: float | None = Field(default=None, gt=0)
+    width_m: float | None = Field(default=None, gt=0)
+    seats: int | None = Field(default=None, ge=1, le=20)
+    plate_region: str | None = None
+    has_etc: bool | None = None
+    mountain_ready: bool | None = None
+    unpaved_ready: bool | None = None
+
+
+class FileStatus(StrEnum):
+    uploaded = "uploaded"
+    processing = "processing"
+    ready = "ready"
+    rejected = "rejected"
+    deleted = "deleted"
+
+
+class FileRecord(BaseModel):
+    id: str = Field(default_factory=lambda: f"file_{uuid4().hex[:12]}")
+    trip_id: str | None = None
+    original_name: str
+    stored_name: str
+    mime_type: str
+    size_bytes: int = Field(ge=0)
+    status: FileStatus = FileStatus.uploaded
+    created_at: datetime = Field(default_factory=utc_now)
+
+
+class JobStatus(StrEnum):
+    queued = "queued"
+    running = "running"
+    completed = "completed"
+    failed = "failed"
+    cancelled = "cancelled"
+
+
+class JobCreate(BaseModel):
+    kind: Literal["planning", "file_processing", "skill_probe"] = "skill_probe"
+    trip_id: str | None = None
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class JobRecord(BaseModel):
+    id: str = Field(default_factory=lambda: f"job_{uuid4().hex[:12]}")
+    kind: str
+    trip_id: str | None = None
+    status: JobStatus = JobStatus.queued
+    progress: int = Field(default=0, ge=0, le=100)
+    payload: dict[str, Any] = Field(default_factory=dict)
+    result: dict[str, Any] | None = None
+    error: dict[str, Any] | None = None
+    cancel_requested: bool = False
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
+
+
 class TripRequest(BaseModel):
     raw_text: str
     origin: PlaceRef | None = None
@@ -266,6 +333,20 @@ class SkillResult(BaseModel):
     cache_hit: bool = False
     latency_ms: int = Field(default=0, ge=0)
     error_code: str | None = None
+
+
+class SkillCallRecord(BaseModel):
+    id: str
+    request_id: str | None = None
+    trip_id: str | None = None
+    adapter: str
+    provider: str
+    success: bool
+    cache_hit: bool = False
+    latency_ms: int = 0
+    error_code: str | None = None
+    source_summary: list[dict[str, str | None]] = Field(default_factory=list)
+    created_at: datetime
 
 
 class SSEEvent(BaseModel):

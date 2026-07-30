@@ -1,0 +1,67 @@
+{
+  "$defs": {
+    "FileStatus": {
+      "enum": [
+        "uploaded",
+        "processing",
+        "ready",
+        "rejected",
+        "deleted"
+      ],
+      "title": "FileStatus",
+      "type": "string"
+    }
+  },
+  "properties": {
+    "id": {
+      "title": "Id",
+      "type": "string"
+    },
+    "trip_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Trip Id"
+    },
+    "original_name": {
+      "title": "Original Name",
+      "type": "string"
+    },
+    "stored_name": {
+      "title": "Stored Name",
+      "type": "string"
+    },
+    "mime_type": {
+      "title": "Mime Type",
+      "type": "string"
+    },
+    "size_bytes": {
+      "minimum": 0,
+      "title": "Size Bytes",
+      "type": "integer"
+    },
+    "status": {
+      "$ref": "#/$defs/FileStatus",
+      "default": "uploaded"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    }
+  },
+  "required": [
+    "original_name",
+    "stored_name",
+    "mime_type",
+    "size_bytes"
+  ],
+  "title": "FileRecord",
+  "type": "object"
+}

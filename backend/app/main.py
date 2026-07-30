@@ -7,8 +7,11 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from .api.files import router as files_router
+from .api.jobs import router as jobs_router
 from .api.skills import router as skills_router
 from .api.trips import router as trips_router
+from .api.vehicles import router as vehicles_router
 from .core.config import get_settings
 from .core.errors import (
     AppError,
@@ -18,14 +21,34 @@ from .core.errors import (
     validation_error_handler,
 )
 from .db import create_tables
-from .skills.amap import AmapDrivingAdapter, AmapGeocodeAdapter
+from .repositories.skill_calls import record_skill_call
+from .skills.amap import (
+    AmapDrivingAdapter,
+    AmapGeocodeAdapter,
+    AmapPoiAdapter,
+    AmapRouteAdapter,
+)
+from .skills.cache import RedisFallbackSkillCache
+from .skills.carinfo import CarInfoDemoAdapter
 from .skills.registry import SkillRegistry
+from .skills.weather import OpenMeteoForecastAdapter
 
 settings = get_settings()
 logger = structlog.get_logger()
-registry = SkillRegistry()
+registry = SkillRegistry(
+    cache=RedisFallbackSkillCache(
+        settings.redis_url,
+        settings.skill_cache_prefix,
+        settings.redis_connect_timeout_seconds,
+    ),
+    audit_sink=record_skill_call,
+)
 registry.register(AmapGeocodeAdapter(settings.amap_webservice_key))
 registry.register(AmapDrivingAdapter(settings.amap_webservice_key))
+registry.register(AmapRouteAdapter(settings.amap_webservice_key))
+registry.register(AmapPoiAdapter(settings.amap_webservice_key))
+registry.register(OpenMeteoForecastAdapter())
+registry.register(CarInfoDemoAdapter())
 
 
 @asynccontextmanager
@@ -33,12 +56,13 @@ async def lifespan(_: FastAPI):
     await create_tables()
     logger.info("roadman_started", environment=settings.app_env)
     yield
+    await registry.close()
 
 
 app = FastAPI(
     title="RoadMan API",
-    version="0.1.0",
-    description="RoadMan 第一阶段 Trip、SSE 与 Skill Registry API",
+    version="0.2.0",
+    description="RoadMan 阶段 C 后端平台、真实数据适配器与异步任务 API",
     lifespan=lifespan,
 )
 app.add_exception_handler(AppError, app_error_handler)
@@ -65,6 +89,9 @@ async def attach_request_id(request: Request, call_next):
 
 app.include_router(trips_router)
 app.include_router(skills_router)
+app.include_router(vehicles_router)
+app.include_router(files_router)
+app.include_router(jobs_router)
 
 
 @app.get("/health")
