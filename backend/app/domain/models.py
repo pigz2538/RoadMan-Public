@@ -83,6 +83,7 @@ class VehicleProfile(BaseModel):
     has_etc: bool = False
     mountain_ready: bool = True
     unpaved_ready: bool = False
+    safe_energy_reserve_percent: float = Field(default=15, ge=5, le=40)
 
 
 class VehicleUpdate(BaseModel):
@@ -103,6 +104,7 @@ class VehicleUpdate(BaseModel):
     has_etc: bool | None = None
     mountain_ready: bool | None = None
     unpaved_ready: bool | None = None
+    safe_energy_reserve_percent: float | None = Field(default=None, ge=5, le=40)
 
 
 class FileStatus(StrEnum):
@@ -190,6 +192,9 @@ class WeatherSample(BaseModel):
     temperature_c: float | None = None
     condition: str | None = None
     precipitation_probability: float | None = Field(default=None, ge=0, le=100)
+    weather_code: int | None = None
+    visibility_m: float | None = Field(default=None, ge=0)
+    wind_speed_kmh: float | None = Field(default=None, ge=0)
     estimated: bool = False
 
 
@@ -213,6 +218,8 @@ class MovementStage(BaseModel):
     toll_fee: MoneyRange | None = None
     energy_estimate: EnergyEstimate | None = None
     weather_samples: list[WeatherSample] = Field(default_factory=list)
+    risk_level: Literal["low", "moderate", "high"] = "low"
+    risk_tags: list[str] = Field(default_factory=list)
     status: Literal["pending", "active", "completed", "skipped"] = "pending"
     warnings: list[PlanWarning] = Field(default_factory=list)
     source_records: list[SourceRecord] = Field(default_factory=list)

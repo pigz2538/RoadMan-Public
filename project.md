@@ -2,9 +2,9 @@
 
 更新日期：2026-07-30
 
-当前版本：`0.3.1`
+当前版本：`0.4.0`
 
-当前里程碑：总规划阶段 D 已完成，下一步进入阶段 E 自驾深度能力
+当前里程碑：总规划阶段 E 已完成，下一步进入阶段 F 旅游活动与酒店能力
 
 ## 已完成功能
 
@@ -37,6 +37,13 @@
   不伪装成未来拥堵预测。
 - Ollama Cloud Requirement Agent；严格 JSON 解析失败时使用确定性中文解析回退。
 - 追问 State/Agent 消息持久化，澄清接口恢复；Job 取消后 Trip 进入短期暂停。
+- Vehicle Agent：采用用户选中车辆或显式估算车型，计算逐段能耗、安全余量、
+  山路/车高限制并插入必要补能。
+- Weather Risk Agent：按阶段预计到达时刻匹配温度、降水、能见度和风速，
+  形成路线风险等级与标签。
+- Schedule Agent：限制最大连续驾驶，合并补能与休息，并安排午餐和夜间风险。
+- Verification Agent：阻断无法满足的续航/休息要求，对天气或非关键 POI 失败降级。
+- 七类沿途服务与 `/risks`、`/services` API；风险路线和阶段卡已接入前端。
 
 核心 API 见 [`docs/api-contract.md`](docs/api-contract.md)。
 
@@ -103,7 +110,7 @@ npm run dev
 
 ## 已验证
 
-- 后端 pytest：23 项通过，1 个真实接口集成用例默认跳过。
+- 后端 pytest：27 项通过，1 个真实接口集成用例默认跳过。
 - Alembic：Docker PostgreSQL 迁移到 `20260730_0002 (head)`。
 - 共享 Schema：18 个成功导出。
 - Docker：PostgreSQL、Redis、Backend、Worker、Frontend 全部健康。
@@ -113,15 +120,17 @@ npm run dev
 - 真实 Agent 输入“下周六从武汉去庐山，五天四夜”完成 5 天、8 阶段路线，
   最终采用驾车、公交、步行和骑行四种交通方式；8 个阶段均包含天气与路况摘要。
 - 容器 API 与 Playwright 页面验收通过，真实验收行程为
-  `trip_5a45692d7085`；缺失出发地时一次追问后恢复完成。
+  `trip_b75aed1513e2`；低电量纯电车往返均插入充电并通过全部校验。
 
 阶段 D 的详细验收证据见
 [`docs/backend-phase-d-plan.md`](docs/backend-phase-d-plan.md)。
+阶段 E 的详细规则与验收证据见
+[`docs/backend-phase-e-plan.md`](docs/backend-phase-e-plan.md)。
 
 ## 当前边界与后续
 
-- 阶段 D 已覆盖基础多日移动阶段与目的地接驳；景点复杂排程、开放时间、酒店库存
-  和局部编辑仍留在后续阶段。
+- 阶段 E 已覆盖自驾深度能力；景点复杂排程、开放时间、酒店库存和局部编辑仍留在
+  后续阶段。
 - 语音识别、真实酒店价格/库存、充电动态和完整导出将在后续阶段实现。
 - 总规划只定义到阶段 J；本轮把“阶段 K”解释为 D–J 完成后的全链路验收、
   文档冻结和发布检查，不虚构额外产品范围。

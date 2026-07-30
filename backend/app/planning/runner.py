@@ -13,7 +13,7 @@ from ..domain.models import (
     TripRequest,
     TripStatus,
 )
-from ..repositories import TripRepository
+from ..repositories import TripRepository, VehicleRepository
 from ..services.registry_factory import build_skill_registry
 from ..services.sse import sse_manager
 from ..skills.registry import SkillRegistry
@@ -49,6 +49,11 @@ async def run_planning(
                 "clarification_answers": saved.get("clarification_answers", []),
                 "repair_attempted": False,
             }
+            if trip.selected_vehicle_id:
+                vehicle = await VehicleRepository(session).get(trip.selected_vehicle_id)
+                state["vehicle_profile"] = (
+                    vehicle.model_dump(mode="json") if vehicle else None
+                )
             if clarification_answer:
                 state = _apply_clarification(state, clarification_answer)
             trip.status = TripStatus.planning

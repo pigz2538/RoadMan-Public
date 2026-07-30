@@ -242,21 +242,22 @@ async function renderRoutes() {
       : route.path
     if (displayPath.length < 2) continue
     const active = stage.id === props.activeStageId
+    const risky = stage.risk_level === 'high' || stage.risk_level === 'moderate'
     const polyline = new AMap.value.Polyline({
       path: displayPath,
       isOutline: active && !unavailable,
-      outlineColor: '#c7e2ff',
+      outlineColor: risky ? '#ffe2b5' : '#c7e2ff',
       borderWeight: 3,
-      strokeColor: unavailable ? '#9aa5b4' : active ? modeColor[route.mode] : '#8d98a8',
-      strokeOpacity: unavailable ? 0.72 : active ? 0.94 : 0.58,
-      strokeWeight: unavailable ? 3 : active ? 6 : 4,
+      strokeColor: unavailable ? '#9aa5b4' : risky ? '#f08a18' : active ? modeColor[route.mode] : '#8d98a8',
+      strokeOpacity: unavailable ? 0.72 : active || risky ? 0.94 : 0.58,
+      strokeWeight: unavailable ? 3 : active || risky ? 6 : 4,
       strokeStyle: unavailable ? 'dashed' : 'solid',
       strokeDasharray: unavailable ? [8, 8] : undefined,
       lineJoin: 'round',
       lineCap: 'round',
       showDir: !unavailable,
-      zIndex: active ? 80 : 50,
-      extData: { stageId: stage.id, unavailable, mode: route.mode },
+      zIndex: active ? 80 : risky ? 70 : 50,
+      extData: { stageId: stage.id, unavailable, mode: route.mode, riskLevel: stage.risk_level },
     })
     polyline.on('click', () => emit('selectStage', stage.id))
     routeOverlays.value.push({ stageId: stage.id, polyline })
@@ -295,7 +296,7 @@ async function renderRoutes() {
       title: place.name,
       content: `<div class="amap-number-marker"><b>${index + 1}</b><span>${place.name}</span></div>`,
       offset: new AMap.value.Pixel(-16, -38),
-      zIndex: 1000 - index,
+      zIndex: 1000 + index,
     })
     otherOverlays.value.push(marker)
   }

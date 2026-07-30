@@ -16,6 +16,10 @@ Trip
 - `TripRequest` 保存原始自然语言、结构化需求以及可见默认值。
 - `MovementStage` 只表达移动，游览、住宿、休息和补能均使用 `Activity`。
 - `MovementStage` 同时保存计划起止时间、路况摘要、天气摘要、费用和耗能信息。
+- `MovementStage.risk_level/risk_tags` 保存可直接展示的路线风险；详细依据仍保留
+  在 `warnings`，估算风险必须带 `estimated=true`。
+- `WeatherSample` 包含阶段预计到达时刻的温度、降水概率、天气码、能见度和风速。
+- `VehicleProfile.safe_energy_reserve_percent` 控制补能安全余量，默认 15%。
 - 任意两个连续活动节点（景点、餐厅、酒店等）之间若发生位移，都必须插入
   `MovementStage`；步行、骑行、公交、地铁和景区接驳与驾车段使用同一套卡片和接口契约。
 - `transit_type` 用于把公共交通进一步区分为 `bus`、`subway` 或 `shuttle`。

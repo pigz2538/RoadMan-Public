@@ -4,11 +4,12 @@ from typing import Any
 import pytest
 
 from app.core.config import Settings
+from app.api.trips import get_trip_risks, get_trip_services
 from app.db import SessionLocal, create_tables
-from app.domain.models import SkillResult, TripCreate, TripRequest
+from app.domain.models import SkillResult, TripCreate, TripRequest, VehicleProfile
 from app.planning.graph import build_planning_graph
 from app.planning.runner import run_planning
-from app.repositories import TripRepository
+from app.repositories import TripRepository, VehicleRepository
 from app.skills.base import SkillAdapter, SkillContext
 from app.skills.registry import SkillRegistry
 
@@ -158,6 +159,15 @@ async def test_graph_builds_two_day_markdown_plan():
     assert len(stages) == 4
     assert {stage["mode"] for stage in stages} >= {"driving", "transit", "walking"}
     assert all(stage["weather_summary"].startswith("预计抵达") for stage in stages)
+    driving = [stage for stage in stages if stage["mode"] == "driving"]
+    assert all(stage["energy_estimate"]["estimated"] for stage in driving)
+    assert result["vehicle_profile"]["power_type"] == "electric"
+    assert result["service_pois"]
+    assert any(
+        activity["type"] in {"rest", "charging"}
+        for day in result["day_plans"]
+        for activity in day["activities"]
+    )
     assert "武汉—庐山自驾路书" in result["plan_markdown"]
     assert "travelers=1" in result["trip_request"]["defaults_applied"]
 
@@ -187,6 +197,12 @@ async def test_graph_builds_five_days_and_multiple_transport_modes():
     }
     assert all(stage["route_segments"][0]["coordinates"] for stage in stages)
     assert all(stage["weather_samples"] for stage in stages)
+    assert result["verification_result"]["passed"] is True
+    assert {"rest", "charging", "fueling", "parking", "meal", "hospital", "toilet"} <= {
+        category
+        for stage_services in result["service_pois"].values()
+        for category in stage_services
+    }
 
 
 @pytest.mark.asyncio
@@ -228,3 +244,54 @@ async def test_runner_persists_state_markdown_and_trip_days():
         saved = await TripRepository(session).get(trip.id)
         assert saved is not None
         assert len(saved.days) == 2
+        risks = await get_trip_risks(trip.id, TripRepository(session))
+        services = await get_trip_services(trip.id, TripRepository(session))
+        assert risks["summary"]["moderate"] >= 1
+        assert services["services"]
+        assert services["selected"]
+
+
+@pytest.mark.asyncio
+async def test_runner_uses_selected_vehicle_for_energy_and_charging_plan():
+    await create_tables()
+    vehicle = VehicleProfile(
+        id="vehicle_low_battery_test",
+        brand="RoadMan",
+        series="Explorer",
+        model="低电量纯电 SUV",
+        power_type="electric",
+        rated_range_km=560,
+        current_energy_percent=25,
+        battery_kwh=82,
+        consumption_per_100km=18,
+        max_charge_kw=180,
+        mountain_ready=True,
+    )
+    async with SessionLocal() as session:
+        existing = await VehicleRepository(session).get(vehicle.id)
+        if not existing:
+            await VehicleRepository(session).create(vehicle)
+        trip = await TripRepository(session).create(
+            TripCreate(
+                title="低电量武汉—庐山",
+                request=TripRequest(raw_text="周六从武汉去庐山，两天一夜"),
+                selected_vehicle_id=vehicle.id,
+            )
+        )
+
+    result = await run_planning(trip.id, registry=fake_registry())
+    assert result["status"] == "completed"
+    async with SessionLocal() as session:
+        saved = await TripRepository(session).get(trip.id)
+        state = await TripRepository(session).load_planning_state(trip.id)
+        assert saved is not None and state is not None
+        assert state["vehicle_profile"]["id"] == vehicle.id
+        driving = [
+            stage for day in saved.days for stage in day.stages if stage.mode == "driving"
+        ]
+        assert all(stage.energy_estimate for stage in driving)
+        assert any(
+            activity.type == "charging"
+            for day in saved.days
+            for activity in day.activities
+        )

@@ -171,6 +171,59 @@ async def get_roadbook(
     return PlainTextResponse(markdown, media_type="text/markdown; charset=utf-8")
 
 
+@router.get("/{trip_id}/risks")
+async def get_trip_risks(
+    trip_id: str,
+    repo: TripRepository = Depends(get_repo),
+) -> dict:
+    trip = await repo.get(trip_id)
+    if not trip:
+        raise AppError("TRIP_NOT_FOUND", "行程不存在", 404, {"trip_id": trip_id})
+    stages = [
+        {
+            "day_id": day.id,
+            "stage_id": stage.id,
+            "title": stage.title,
+            "risk_level": stage.risk_level,
+            "risk_tags": stage.risk_tags,
+            "warnings": [item.model_dump(mode="json") for item in stage.warnings],
+        }
+        for day in trip.days
+        for stage in day.stages
+        if stage.risk_level != "low" or stage.warnings
+    ]
+    return {
+        "trip_id": trip_id,
+        "summary": {
+            "high": sum(item["risk_level"] == "high" for item in stages),
+            "moderate": sum(item["risk_level"] == "moderate" for item in stages),
+        },
+        "stages": stages,
+        "warnings": [item.model_dump(mode="json") for item in trip.warnings],
+    }
+
+
+@router.get("/{trip_id}/services")
+async def get_trip_services(
+    trip_id: str,
+    repo: TripRepository = Depends(get_repo),
+) -> dict:
+    trip = await repo.get(trip_id)
+    if not trip:
+        raise AppError("TRIP_NOT_FOUND", "行程不存在", 404, {"trip_id": trip_id})
+    state, _ = await repo.get_planning_snapshot(trip_id)
+    return {
+        "trip_id": trip_id,
+        "services": (state or {}).get("service_pois", {}),
+        "selected": [
+            item.model_dump(mode="json")
+            for day in trip.days
+            for item in day.activities
+            if item.type in {"rest", "charging", "fueling", "parking", "service", "meal"}
+        ],
+    }
+
+
 @router.get("/{trip_id}/planning/events")
 async def planning_events(
     trip_id: str,

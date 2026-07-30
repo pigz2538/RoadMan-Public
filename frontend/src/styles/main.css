@@ -245,6 +245,7 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 }
 .amap-number-marker span {
   margin-top: 5px; padding: 3px 7px; border-radius: 8px; background: rgba(255,255,255,.94);
+  max-width: 170px; overflow: hidden; text-overflow: ellipsis;
   color: #17365f; white-space: nowrap; font-size: 12px; font-weight: 700;
 }
 .mock-map svg { width: 100%; height: 100%; display: block; }
@@ -259,7 +260,7 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .map-legend { position: absolute; left: 15px; bottom: 14px; padding: 8px 12px; border-radius: 12px; background: rgba(255,255,255,.86); display: flex; gap: 12px; font-size: 13px; }
 .map-legend span { display: flex; align-items: center; gap: 5px; }.map-legend i { width: 18px; height: 4px; border-radius: 5px; }
 .active-route { background: #1475f4; }.day-route { background: #82b8ed; }.risk-route { background: #f0a027; }
-.stage-nav { min-height: 268px; border-radius: 24px; padding: 12px; display: flex; align-items: stretch; gap: 10px; overflow: hidden; position: relative; }
+.stage-nav { min-height: 300px; border-radius: 24px; padding: 12px; display: flex; align-items: stretch; gap: 10px; overflow: hidden; position: relative; }
 .stage-track {
   min-width: 0; flex: 1; display: flex; gap: 10px; overflow-x: auto; padding: 0 34px;
   scroll-behavior: smooth; scroll-snap-type: x mandatory; scrollbar-width: none;
@@ -347,8 +348,14 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .stage-card footer { display: flex; gap: 6px; flex-wrap: wrap; }
 .stage-card footer span { padding: 5px 8px; border-radius: 7px; background: #eef4fb; color: #405776; font-size: 14px; font-weight: 700; }
 .stage-card small { color: #c66e07; font-size: 13px; line-height: 1.4; }
+.stage-risk-tags { display: flex; gap: 5px; min-height: 23px; overflow: hidden; }
+.stage-risk-tags span {
+  padding: 3px 7px; border-radius: 10px; white-space: nowrap;
+  color: #9a5b08; background: #fff2d9; font-size: 12px; font-weight: 750;
+}
+.stage-risk-tags.high span { color: #b33d2f; background: #ffe5df; }
 .stage-card.active { border: 2px solid #4187fa; color: #1d66e9; box-shadow: 0 0 0 5px rgba(70,134,249,.09), 0 8px 22px rgba(47,102,205,.13); }
-.demo-sse { position: absolute; right: 16px; bottom: 280px; border: 0; border-radius: 20px; padding: 8px 12px; background: #17365f; color: white; font-size: 12px; cursor: pointer; }
+.demo-sse { position: absolute; right: 16px; bottom: 312px; border: 0; border-radius: 20px; padding: 8px 12px; background: #17365f; color: white; font-size: 12px; cursor: pointer; }
 .agent-panel { display: flex; flex-direction: column; }
 .agent-panel > header { height: 66px; flex: 0 0 auto; display: flex; align-items: center; justify-content: center; gap: 10px; border-bottom: 1px solid #e5ebf3; font-size: 17px; }
 .agent-panel header svg { color: var(--blue); }.online-dot { width: 7px; height: 7px; border-radius: 50%; background: #22c69a; }
@@ -467,6 +474,23 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
   color: #223955;
   font: 14px/1.75 ui-monospace, SFMono-Regular, Consolas, monospace;
 }
+
+.risk-card summary { display: flex; justify-content: space-between; gap: 16px; }
+.risk-card summary b { color: #b84b35; font-size: 14px; }
+.risk-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 12px; padding-top: 15px;
+}
+.risk-item {
+  padding: 14px; border: 1px solid #ead9b9; border-radius: 14px; background: #fffaf0;
+}
+.risk-item.high { border-color: #efb8ad; background: #fff5f2; }
+.risk-item p { margin: 7px 0; color: #58708f; }
+.risk-item > div { display: flex; gap: 5px; flex-wrap: wrap; margin-bottom: 7px; }
+.risk-item > div span {
+  padding: 3px 7px; border-radius: 10px; background: #ffe9c5; color: #925c0e; font-size: 12px;
+}
+.risk-item small { display: block; color: #8b5428; line-height: 1.55; }
 
 @media (max-width: 1150px) {
   .plan-grid { grid-template-columns: 290px minmax(440px, 1fr); }

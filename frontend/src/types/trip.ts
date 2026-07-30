@@ -13,6 +13,10 @@ export interface Activity {
   type: string
   place: Place
   duration_minutes: number
+  planned_start?: string
+  planned_end?: string
+  required?: boolean
+  backup?: boolean
   user_note?: string
 }
 
@@ -38,8 +42,17 @@ export interface Stage {
   weather_summary?: string
   toll_fee?: { currency: string; minimum: number; maximum: number; estimated: boolean }
   energy_estimate?: { amount: number; unit: string; remaining_percent?: number; estimated: boolean }
+  weather_samples?: Array<{
+    sampled_at: string
+    temperature_c?: number
+    precipitation_probability?: number
+    visibility_m?: number
+    wind_speed_kmh?: number
+  }>
+  risk_level?: 'low' | 'moderate' | 'high'
+  risk_tags?: string[]
   status: string
-  warnings: Array<{ code: string; message: string }>
+  warnings: Array<{ code: string; message: string; severity?: string; estimated?: boolean }>
 }
 
 export interface DayPlan {

@@ -20,6 +20,11 @@ from ..domain.models import (
 )
 from ..skills.base import SkillContext
 from ..skills.registry import SkillRegistry
+from .deep_drive import (
+    default_vehicle,
+    enrich_deep_drive_plan,
+    verify_deep_drive_plan,
+)
 from .llm import OllamaRequirementExtractor
 from .state import RoadManState
 
@@ -453,6 +458,9 @@ def build_planning_graph(
                             "sampled_at": sample["sampled_at"],
                             "temperature_c": temperature,
                             "precipitation_probability": precipitation,
+                            "weather_code": sample.get("weather_code"),
+                            "visibility_m": sample.get("visibility_m"),
+                            "wind_speed_kmh": sample.get("wind_speed_kmh"),
                             "estimated": False,
                         }
                     ]
@@ -468,9 +476,187 @@ def build_planning_graph(
         )
         return {
             "day_plans": plans,
-            "weather_results": list(weather_cache.values()),
+            "weather_results": [
+                value for value in weather_cache.values() if value is not None
+            ],
             "sources": [*state.get("sources", []), *weather_sources],
             "progress": {"node": "sample_weather", "value": 86},
+        }
+
+    async def load_vehicle_profile(state: RoadManState) -> dict[str, Any]:
+        await emit(
+            state,
+            "load_vehicle_profile",
+            "Vehicle Agent 正在读取续航、电量与车辆限制",
+            79,
+            event="tool_started",
+            tool="carinfo.demo",
+        )
+        vehicle = state.get("vehicle_profile")
+        sources: list[dict[str, Any]] = []
+        if not vehicle:
+            result = await registry.execute(
+                "carinfo.demo",
+                {"power_type": "electric"},
+                SkillContext(trip_id=state["trip_id"]),
+            )
+            items = result.data.get("items", []) if isinstance(result.data, dict) else []
+            vehicle = {**items[0], "current_energy_percent": 80} if items else default_vehicle()
+            sources = [item.model_dump(mode="json") for item in result.sources]
+        vehicle = {
+            **default_vehicle(),
+            **vehicle,
+            "safe_energy_reserve_percent": (
+                vehicle.get("safe_energy_reserve_percent") or 15
+            ),
+            "estimated": bool(vehicle.get("estimated", state.get("vehicle_profile") is None)),
+        }
+        await emit(
+            state,
+            "load_vehicle_profile",
+            f"车辆上下文已就绪：{vehicle['model']}",
+            81,
+            event="tool_completed",
+            tool="carinfo.demo",
+        )
+        return {
+            "vehicle_profile": vehicle,
+            "sources": [*state.get("sources", []), *sources],
+            "progress": {"node": "load_vehicle_profile", "value": 81},
+        }
+
+    async def discover_services(state: RoadManState) -> dict[str, Any]:
+        await emit(
+            state,
+            "discover_services",
+            "正在查询沿途服务区、补能、停车、餐饮、医院和厕所",
+            83,
+            event="tool_started",
+            tool="amap.poi",
+        )
+        categories = {
+            "rest": "服务区",
+            "charging": "充电站",
+            "fueling": "加油站",
+            "parking": "停车场",
+            "meal": "餐厅",
+            "hospital": "医院",
+            "toilet": "公共厕所",
+        }
+        services: dict[str, dict[str, list[dict[str, Any]]]] = {}
+        service_centers: dict[str, tuple[float, float]] = {}
+        sources: list[dict[str, Any]] = []
+        reused_categories = 0
+        for day in state.get("day_plans", []):
+            for stage in day.get("stages", []):
+                if stage["mode"] != "driving" or not stage.get("route_segments"):
+                    continue
+                coordinates = stage["route_segments"][0].get("coordinates", [])
+                if not coordinates:
+                    continue
+                center = coordinates[len(coordinates) // 2]
+                center_key = (center["longitude"], center["latitude"])
+                stage_services: dict[str, list[dict[str, Any]]] = {}
+                for category, keyword in categories.items():
+                    result = await registry.execute(
+                        "amap.poi",
+                        {
+                            "keywords": keyword,
+                            "location": (
+                                f"{center['longitude']},{center['latitude']}"
+                            ),
+                            "radius": 30000,
+                            "page_size": 3,
+                        },
+                        SkillContext(trip_id=state["trip_id"]),
+                    )
+                    if result.success and isinstance(result.data, dict):
+                        places = [
+                            _poi_place(item)
+                            for item in result.data.get("items", [])
+                            if item.get("name") and item.get("location")
+                        ]
+                        stage_services[category] = places
+                        sources.extend(
+                            item.model_dump(mode="json") for item in result.sources
+                        )
+                    else:
+                        stage_services[category] = []
+                for category, places in stage_services.items():
+                    if places:
+                        continue
+                    reusable = next(
+                        (
+                            previous[category]
+                            for stage_id, previous in services.items()
+                            if previous.get(category)
+                            and _nearby_corridor(
+                                center_key,
+                                service_centers[stage_id],
+                            )
+                        ),
+                        None,
+                    )
+                    if reusable:
+                        stage_services[category] = reusable
+                        reused_categories += 1
+                services[stage["id"]] = stage_services
+                service_centers[stage["id"]] = center_key
+        await emit(
+            state,
+            "discover_services",
+            f"已为 {len(services)} 个驾车阶段建立沿途服务清单",
+            85,
+            event="tool_completed",
+            tool="amap.poi",
+        )
+        return {
+            "service_pois": services,
+            "sources": [*state.get("sources", []), *sources],
+            "warnings": [
+                *state.get("warnings", []),
+                *(
+                    [
+                        {
+                            "code": "SERVICE_POI_CORRIDOR_REUSED",
+                            "message": (
+                                f"{reused_categories} 类沿途服务查询失败，"
+                                "已复用同一往返走廊的已确认 POI"
+                            ),
+                            "severity": "warning",
+                            "estimated": True,
+                        }
+                    ]
+                    if reused_categories
+                    else []
+                ),
+            ],
+            "progress": {"node": "discover_services", "value": 85},
+        }
+
+    async def enrich_deep_drive(state: RoadManState) -> dict[str, Any]:
+        await emit(
+            state,
+            "enrich_deep_drive",
+            "正在合并补能、驾驶休息、午餐与天气风险",
+            88,
+        )
+        plans, warnings = enrich_deep_drive_plan(
+            state.get("day_plans", []),
+            state.get("vehicle_profile") or default_vehicle(),
+            state.get("service_pois", {}),
+            int(state["trip_request"].get("max_continuous_drive_minutes") or 120),
+        )
+        for day in plans:
+            day["total_drive_minutes"] = sum(
+                stage["duration_minutes"]
+                for stage in day.get("stages", [])
+                if stage["mode"] == "driving"
+            )
+        return {
+            "day_plans": plans,
+            "warnings": [*state.get("warnings", []), *warnings],
+            "progress": {"node": "enrich_deep_drive", "value": 88},
         }
 
     async def verify_plan(state: RoadManState) -> dict[str, Any]:
@@ -492,6 +678,13 @@ def build_planning_graph(
                     "description": "未生成可执行移动阶段",
                 }
             )
+        issues.extend(
+            verify_deep_drive_plan(
+                state.get("day_plans", []),
+                state.get("vehicle_profile"),
+                int(state["trip_request"].get("max_continuous_drive_minutes") or 120),
+            )
+        )
         return {
             "verification_result": {
                 "passed": not any(item["severity"] == "blocker" for item in issues),
@@ -537,8 +730,16 @@ def build_planning_graph(
                         f"- 预计耗时：{stage['duration_minutes']} 分钟",
                         f"- 路况：{stage.get('traffic_summary') or '不适用'}",
                         f"- 天气：{stage.get('weather_summary') or '待更新'}",
+                        f"- 风险：{stage.get('risk_level', 'low')} · "
+                        f"{'、'.join(stage.get('risk_tags', [])) or '无'}",
+                        f"- 能耗：{_energy_markdown(stage.get('energy_estimate'))}",
                         "",
                     ]
+                )
+            for activity in day.get("activities", []):
+                lines.append(
+                    f"- 沿途服务：{activity['place']['name']}（{activity['type']}，"
+                    f"{activity['duration_minutes']} 分钟，估算安排）"
                 )
         if state.get("verification_result", {}).get("issues"):
             lines.extend(["## 校验提示", ""])
@@ -573,6 +774,9 @@ def build_planning_graph(
     builder.add_node("build_local_routes", build_local_routes)
     builder.add_node("build_stages", build_stages)
     builder.add_node("sample_weather", sample_weather)
+    builder.add_node("load_vehicle_profile", load_vehicle_profile)
+    builder.add_node("discover_services", discover_services)
+    builder.add_node("enrich_deep_drive", enrich_deep_drive)
     builder.add_node("verify_plan", verify_plan)
     builder.add_node("repair_plan", repair_plan)
     builder.add_node("render_markdown", render_markdown)
@@ -590,8 +794,11 @@ def build_planning_graph(
     builder.add_edge("build_base_route", "split_into_days")
     builder.add_edge("split_into_days", "build_local_routes")
     builder.add_edge("build_local_routes", "build_stages")
-    builder.add_edge("build_stages", "sample_weather")
-    builder.add_edge("sample_weather", "verify_plan")
+    builder.add_edge("build_stages", "load_vehicle_profile")
+    builder.add_edge("load_vehicle_profile", "discover_services")
+    builder.add_edge("discover_services", "sample_weather")
+    builder.add_edge("sample_weather", "enrich_deep_drive")
+    builder.add_edge("enrich_deep_drive", "verify_plan")
     builder.add_conditional_edges(
         "verify_plan",
         after_verification,
@@ -725,6 +932,41 @@ def _local_stage_title(mode: str | None) -> str:
         "riding": "骑行游览接驳",
         "driving": "目的地短途接驳",
     }.get(mode, "目的地接驳")
+
+
+def _poi_place(item: dict[str, Any]) -> dict[str, Any]:
+    longitude, latitude = item["location"].split(",", 1)
+    return {
+        "id": item.get("id"),
+        "name": item["name"],
+        "address": item.get("address"),
+        "city": item.get("city"),
+        "coordinates": {
+            "longitude": float(longitude),
+            "latitude": float(latitude),
+        },
+        "source_id": item.get("id"),
+    }
+
+
+def _energy_markdown(estimate: dict[str, Any] | None) -> str:
+    if not estimate:
+        return "不适用"
+    remaining = estimate.get("remaining_percent")
+    remaining_text = f"，预计剩余 {remaining}%" if remaining is not None else ""
+    return (
+        f"{estimate['amount']} {estimate['unit']}{remaining_text}"
+        f"{'（估算）' if estimate.get('estimated') else ''}"
+    )
+
+
+def _nearby_corridor(
+    first: tuple[float, float],
+    second: tuple[float, float],
+) -> bool:
+    longitude_delta = (first[0] - second[0]) * 0.87
+    latitude_delta = first[1] - second[1]
+    return (longitude_delta**2 + latitude_delta**2) ** 0.5 <= 0.6
 
 
 def _closest_weather_sample(

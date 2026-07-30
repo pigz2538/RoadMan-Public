@@ -479,6 +479,23 @@
           "title": "Weather Samples",
           "type": "array"
         },
+        "risk_level": {
+          "default": "low",
+          "enum": [
+            "low",
+            "moderate",
+            "high"
+          ],
+          "title": "Risk Level",
+          "type": "string"
+        },
+        "risk_tags": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Risk Tags",
+          "type": "array"
+        },
         "status": {
           "default": "pending",
           "enum": [
@@ -930,6 +947,44 @@
           ],
           "default": null,
           "title": "Precipitation Probability"
+        },
+        "weather_code": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Weather Code"
+        },
+        "visibility_m": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Visibility M"
+        },
+        "wind_speed_kmh": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Wind Speed Kmh"
         },
         "estimated": {
           "default": false,

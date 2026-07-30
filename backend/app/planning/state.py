@@ -5,6 +5,7 @@ class RoadManState(TypedDict, total=False):
     trip_id: str
     raw_input: str
     selected_vehicle_id: str | None
+    vehicle_profile: dict[str, Any] | None
     trip_request: dict[str, Any]
     missing_fields: list[str]
     clarification_round: int
@@ -14,6 +15,7 @@ class RoadManState(TypedDict, total=False):
     local_routes: list[dict[str, Any]]
     selected_route: dict[str, Any] | None
     weather_results: list[dict[str, Any]]
+    service_pois: dict[str, dict[str, list[dict[str, Any]]]]
     day_plans: list[dict[str, Any]]
     warnings: list[dict[str, Any]]
     verification_result: dict[str, Any] | None

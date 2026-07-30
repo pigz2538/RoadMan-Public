@@ -56,12 +56,17 @@ async def test_live_five_day_multimodal_planning():
         item["route"]["data"]["requested_mode"] for item in result["local_routes"]
     }
     selected_modes = {stage["mode"] for stage in stages}
+    activities = [
+        activity for day in result["day_plans"] for activity in day["activities"]
+    ]
     print(
         {
             "days": len(result["day_plans"]),
             "stages": len(stages),
             "requested_local_modes": sorted(requested_local_modes),
             "selected_modes": sorted(selected_modes),
+            "activities": sorted({item["type"] for item in activities}),
+            "risk_levels": sorted({stage["risk_level"] for stage in stages}),
         }
     )
     assert len(stages) >= 6
@@ -72,3 +77,7 @@ async def test_live_five_day_multimodal_planning():
     assert all(stage["weather_summary"] for stage in stages)
     driving = [stage for stage in stages if stage["mode"] == "driving"]
     assert all(stage["traffic_summary"] for stage in driving)
+    assert all(stage["energy_estimate"]["estimated"] for stage in driving)
+    assert any(item["type"] in {"rest", "charging"} for item in activities)
+    assert all(stage_services.keys() >= {"rest", "charging", "fueling", "parking", "meal", "hospital", "toilet"}
+               for stage_services in result["service_pois"].values())

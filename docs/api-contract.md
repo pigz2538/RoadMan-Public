@@ -1,4 +1,4 @@
-# RoadMan API 契约 v0.3
+# RoadMan API 契约 v0.4
 
 开发地址：`http://localhost:8000`，交互式文档：`/docs`。Docker 统一入口为
 `http://localhost:8080`。
@@ -42,6 +42,8 @@
 - `POST /api/v1/trips/{trip_id}/planning/clarifications`：补充答案并恢复规划。
 - `GET /api/v1/trips/{trip_id}/planning/events`：跨进程 SSE 进度。
 - `GET /api/v1/trips/{trip_id}/roadbook`：`text/markdown` 路书。
+- `GET /api/v1/trips/{trip_id}/risks`：按阶段返回风险等级、标签、警告和汇总。
+- `GET /api/v1/trips/{trip_id}/services`：返回七类沿途 POI 清单与已选停靠。
 
 SSE 使用命名事件，每条事件包含单调递增的 `id:`。客户端断线重连时传
 `Last-Event-ID`，服务只续发其后的保留事件。真实 Planning Worker 在每个 LangGraph
@@ -63,6 +65,10 @@ SSE 使用命名事件，每条事件包含单调递增的 `id:`。客户端断�
 所有 Adapter 返回统一 `SkillResult`。缓存键包含 Adapter 版本与规范化参数；Redis
 不可用时自动降级到进程内缓存。只有网络传输错误和超时会重试，参数错误与无结果
 不会重试。
+
+阶段 E 的沿途服务按驾车道路中部搜索服务区、充电、加油、停车、餐饮、医院和
+公共厕所。第三方查询失败不会伪造 POI；仅在往返阶段中心相距不超过约 60 km 时
+复用同一走廊已成功返回的真实 POI，并写入估算 Warning。
 
 `amap.route` 尊重 `preferred_mode`。驾车无结果时按距离和同城条件尝试骑行、步行或
 公共交通；全部真实方式失败时返回 `ROUTE_UNAVAILABLE`，不把直线伪装成道路点列。

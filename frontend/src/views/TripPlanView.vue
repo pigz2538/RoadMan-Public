@@ -52,6 +52,13 @@ const allStages = computed(() =>
 const currentGlobalStageIndex = computed(() =>
   allStages.value.findIndex((item) => item.stage.id === store.currentStageId),
 )
+const riskStages = computed(() =>
+  allStages.value.filter(({ stage }) =>
+    stage.risk_level === 'high'
+    || stage.risk_level === 'moderate'
+    || stage.warnings.length > 0,
+  ),
+)
 
 async function load() {
   const tripId = String(route.params.tripId)
@@ -324,6 +331,12 @@ watch(
                   <span :class="nameClass(item.stage.title)" :title="item.stage.title">{{ item.stage.title }}</span>
                   <b>第 {{ item.dayIndexLabel }} 天</b>
                 </header>
+                <div
+                  v-if="item.stage.risk_tags?.length"
+                  :class="['stage-risk-tags', item.stage.risk_level]"
+                >
+                  <span v-for="tag in item.stage.risk_tags.slice(0, 3)" :key="tag">{{ tag }}</span>
+                </div>
                 <div class="stage-route">
                   <div class="stage-stop">
                     <small>起点</small>
@@ -368,6 +381,28 @@ watch(
 
         <AgentPanel />
       </section>
+      <details v-if="riskStages.length" class="roadbook-card risk-card glass-card">
+        <summary>
+          风险与自驾校验
+          <b>{{ riskStages.filter((item) => item.stage.risk_level === 'high').length }} 项高风险</b>
+        </summary>
+        <div class="risk-grid">
+          <article
+            v-for="item in riskStages"
+            :key="item.stage.id"
+            :class="['risk-item', item.stage.risk_level]"
+          >
+            <header><strong>第 {{ item.dayIndexLabel }} 天 · {{ item.stage.title }}</strong></header>
+            <p>{{ item.stage.origin.name }} → {{ item.stage.destination.name }}</p>
+            <div>
+              <span v-for="tag in item.stage.risk_tags" :key="tag">{{ tag }}</span>
+            </div>
+            <small v-for="warning in item.stage.warnings" :key="`${warning.code}-${warning.message}`">
+              {{ warning.message }}{{ warning.estimated ? '（估算）' : '' }}
+            </small>
+          </article>
+        </div>
+      </details>
       <details v-if="planningSnapshot?.plan_markdown" class="roadbook-card glass-card">
         <summary>查看 Markdown 路书</summary>
         <pre>{{ planningSnapshot.plan_markdown }}</pre>
