@@ -56,7 +56,7 @@ class SSEManager:
             ("tool_started", "正在查询真实道路路线", 42, "build_base_route", "amap.route"),
             ("tool_completed", "路线查询已返回", 68, "build_base_route", "amap.route"),
             ("progress", "正在拆分天和阶段", 84, "build_stages", None),
-            ("planning_completed", "路书已生成", 100, "persist_trip", None),
+            ("planning_completed", "规划完成", 100, "persist_trip", None),
         ]
         for event, label, progress, node, tool in templates:
             await self.publish(

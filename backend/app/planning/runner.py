@@ -78,7 +78,7 @@ async def run_planning(
             trip.request = request
             if request.origin and request.destination and request.start_date and request.end_date:
                 day_count = max(1, (request.end_date - request.start_date).days + 1)
-                trip.title = f"{request.origin.name}—{request.destination.name}{day_count}天自驾路书"
+                trip.title = f"{request.origin.name}—{request.destination.name}{day_count}天自驾行程"
             trip.origin = request.origin
             trip.destination = request.destination
             trip.start_date = request.start_date
@@ -104,6 +104,29 @@ async def run_planning(
                 result.get("plan_markdown"),
                 result.get("messages", []),
             )
+            if trip.status == TripStatus.completed:
+                result["progress"] = {
+                    "node": "persist_trip",
+                    "value": 100,
+                    "label": "规划完成",
+                }
+                await _publish_progress(
+                    trip_id,
+                    "persist_trip",
+                    "规划完成",
+                    100,
+                    "planning_completed",
+                    None,
+                )
+            elif trip.status == TripStatus.failed:
+                await _publish_progress(
+                    trip_id,
+                    "persist_trip",
+                    "规划校验未通过",
+                    100,
+                    "planning_failed",
+                    None,
+                )
             return {
                 "trip_id": trip.id,
                 "status": trip.status.value,
@@ -147,6 +170,8 @@ async def _publish_progress(
 
 
 def _job_aware_progress(job_id: str | None):
+    last_progress = 0
+
     async def callback(
         trip_id: str,
         node: str,
@@ -155,6 +180,9 @@ def _job_aware_progress(job_id: str | None):
         event: str,
         tool: str | None,
     ) -> None:
+        nonlocal last_progress
+        progress = max(last_progress, progress)
+        last_progress = progress
         if job_id:
             async with SessionLocal() as session:
                 row = await session.get(JobRow, job_id)
@@ -208,7 +236,7 @@ async def _mark_failed(trip_id: str, exc: Exception) -> None:
             event="planning_failed",
             trip_id=trip_id,
             node=None,
-            label="规划执行失败",
+            label="规划失败",
             progress=100,
         )
     )

@@ -1,5 +1,8 @@
 import pytest
 
+from app.domain.models import SSEEvent
+from app.services.sse import sse_manager
+
 
 @pytest.mark.asyncio
 async def test_health(client):
@@ -31,6 +34,48 @@ async def test_trip_crud(client):
 
     deleted = await client.delete(f"/api/v1/trips/{trip_id}")
     assert deleted.status_code == 204
+
+
+@pytest.mark.asyncio
+async def test_preflight_blocks_temporal_and_cross_sea_conflicts(client):
+    response = await client.post(
+        "/api/v1/trips/preflight",
+        json={
+            "raw_text": (
+                "2026-08-02从上海出发跨海去海岛，2026-08-01返回，"
+                "下午3点出发到下午3点抵达"
+            )
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    codes = {item["code"] for item in body["issues"]}
+    assert body["ready"] is False
+    assert "INVALID_DATE_ORDER" in codes
+    assert "CROSS_SEA_MODE_REQUIRED" in codes
+    assert "IMPOSSIBLE_TIME_WINDOW" in codes
+
+
+@pytest.mark.asyncio
+async def test_preflight_understands_departure_then_arrival_clock_order(client):
+    response = await client.post(
+        "/api/v1/trips/preflight",
+        json={
+            "raw_text": (
+                "2026年8月2日下午3点从武汉出发，下午4点到北京，"
+                "2026年8月3日返回"
+            )
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["extracted"]["origin_name"] == "武汉"
+    assert body["extracted"]["destination_name"] == "北京"
+    assert "IMPOSSIBLE_TIME_WINDOW" in {
+        item["code"] for item in body["issues"]
+    }
 
 
 @pytest.mark.asyncio
@@ -192,6 +237,47 @@ async def test_sse_supports_last_event_id(client):
     assert "id: 3" not in resumed.text
     assert "id: 4" in resumed.text
     assert "id: 6" in resumed.text
+
+
+@pytest.mark.asyncio
+async def test_real_trip_sse_uses_only_published_progress(client):
+    created = await client.post(
+        "/api/v1/trips",
+        json={
+            "title": "真实进度测试",
+            "request": {
+                "raw_text": "从武汉到庐山两天",
+                "origin": {"name": "武汉"},
+                "destination": {"name": "庐山"},
+            },
+        },
+    )
+    trip_id = created.json()["id"]
+    await sse_manager.publish(
+        SSEEvent(
+            event="planning_started",
+            trip_id=trip_id,
+            node="load_context",
+            label="真实规划开始",
+            progress=3,
+        )
+    )
+    await sse_manager.publish(
+        SSEEvent(
+            event="planning_completed",
+            trip_id=trip_id,
+            node="persist_trip",
+            label="规划完成",
+            progress=100,
+        )
+    )
+
+    response = await client.get(f"/api/v1/trips/{trip_id}/planning/events")
+
+    assert response.status_code == 200
+    assert "真实规划开始" in response.text
+    assert "规划完成" in response.text
+    assert "正在查询真实道路路线" not in response.text
 
 
 @pytest.mark.asyncio

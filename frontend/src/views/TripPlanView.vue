@@ -94,6 +94,7 @@ async function refreshPlanning() {
     if (snapshot.status === 'completed') {
       store.trip = await fetchTrip(tripId)
       store.setDay(0)
+      store.planningEvent = null
       await nextTick()
       centerCurrentStage('auto')
       return
@@ -121,10 +122,6 @@ async function submitClarification() {
   } catch (error) {
     planningError.value = error instanceof Error ? error.message : '提交补充信息失败'
   }
-}
-
-function demoProgress() {
-  if (store.trip) connect(store.trip.id)
 }
 
 function selectStageById(stageId: string) {
@@ -243,7 +240,7 @@ watch(
     <div v-if="loading" class="page-state">正在加载武汉—庐山行程…</div>
     <section v-else-if="planningSnapshot && !store.currentDay" class="planning-state glass-card">
       <span class="eyebrow">LANGGRAPH PLANNING</span>
-      <h2>{{ planningSnapshot.clarification_question || '正在生成您的真实路线与路书…' }}</h2>
+      <h2>{{ planningSnapshot.clarification_question || '正在生成您的真实路线与行程安排…' }}</h2>
       <div class="planning-meter">
         <i :style="{ width: `${store.planningEvent?.progress || planningSnapshot.progress.value || 3}%` }" />
       </div>
@@ -264,12 +261,6 @@ watch(
     </section>
     <template v-else-if="store.trip && store.currentDay">
       <div v-if="degraded" class="degraded-banner">后端暂不可用，正在加载本地行程数据。</div>
-      <div v-if="store.planningEvent" class="progress-banner">
-        <span>{{ store.planningEvent.label }}</span>
-        <div><i :style="{ width: `${store.planningEvent.progress}%` }" /></div>
-        <b>{{ store.planningEvent.progress }}%</b>
-      </div>
-
       <section class="plan-grid">
         <aside class="trip-sidebar glass-card">
           <select :value="store.currentDayIndex" @change="store.setDay(Number(($event.target as HTMLSelectElement).value))">
@@ -376,7 +367,6 @@ watch(
               @click="moveStage(1)"
             ><ChevronRight /></button>
           </div>
-          <button class="demo-sse" @click="demoProgress">查看规划进度</button>
         </section>
 
         <AgentPanel />
@@ -404,7 +394,7 @@ watch(
         </div>
       </details>
       <details v-if="planningSnapshot?.plan_markdown" class="roadbook-card glass-card">
-        <summary>查看 Markdown 路书</summary>
+        <summary>查看 Markdown 行程安排</summary>
         <pre>{{ planningSnapshot.plan_markdown }}</pre>
       </details>
     </template>

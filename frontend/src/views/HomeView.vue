@@ -1,11 +1,16 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   Bell, ChevronDown, CircleUserRound, CloudSun, Grid2X2, Paperclip,
   Mic, Route, Send, Settings, SlidersHorizontal, UserRound, CarFront,
 } from '@lucide/vue'
-import { createTrip, startPlanning as startPlanningRequest } from '../api/trips'
+import {
+  createTrip,
+  preflightTrip,
+  startPlanning as startPlanningRequest,
+  type PreflightResult,
+} from '../api/trips'
 
 const router = useRouter()
 const prompt = ref('周六早上从武汉出发，去庐山两天一夜，周日晚八点前回来，喜欢自然景观')
@@ -16,7 +21,13 @@ const modelLoaded = ref(false)
 const modelError = ref(false)
 const voiceReserved = ref(false)
 const planning = ref(false)
+const preflightChecking = ref(false)
 const planningError = ref('')
+const preflight = ref<PreflightResult | null>(null)
+const isFirefox = ref(false)
+const vehicleMotionAttributes = computed(() => (
+  isFirefox.value ? {} : { 'auto-rotate': '' }
+))
 
 const menus = [
   { label: '账户设置', icon: CircleUserRound },
@@ -32,19 +43,28 @@ const quickActions = [
   ['🌦️', '天气变化重规划'],
 ]
 
-onMounted(() => import('@google/model-viewer'))
+onMounted(() => {
+  isFirefox.value = /firefox/i.test(navigator.userAgent)
+  void import('@google/model-viewer').then(({ ModelViewerElement }) => {
+    ModelViewerElement.minimumRenderScale = 0.25
+  })
+})
 
 async function startPlanning() {
-  if (planning.value || !prompt.value.trim()) return
-  planning.value = true
+  if (planning.value || preflightChecking.value || !prompt.value.trim()) return
   planningError.value = ''
   try {
-    const trip = await createTrip(prompt.value.trim())
+    preflightChecking.value = true
+    preflight.value = await preflightTrip(prompt.value.trim())
+    if (!preflight.value.ready) return
+    planning.value = true
+    const trip = await createTrip(prompt.value.trim(), preflight.value.extracted)
     await startPlanningRequest(trip.id)
     await router.push(`/trips/${trip.id}/plan?planning=1`)
   } catch (error) {
     planningError.value = error instanceof Error ? error.message : '规划服务暂不可用'
   } finally {
+    preflightChecking.value = false
     planning.value = false
   }
 }
@@ -94,10 +114,10 @@ function activate(label: string) {
           :is="'model-viewer'"
           class="vehicle-model"
           :class="{ loaded: modelLoaded }"
-          src="/models/car-concept.glb"
+          src="/models/car-concept-optimized.glb"
           alt="可旋转的 RoadMan 3D 车辆模型"
           camera-controls
-          auto-rotate
+          v-bind="vehicleMotionAttributes"
           auto-rotate-delay="1200"
           rotation-per-second="12deg"
           camera-orbit="35deg 70deg 275%"
@@ -107,9 +127,9 @@ function activate(label: string) {
           min-field-of-view="26deg"
           max-field-of-view="38deg"
           variant-name="Pearly Swirly"
-          shadow-intensity="1.2"
-          shadow-softness=".8"
-          exposure="1.05"
+          :shadow-intensity="isFirefox ? 0.45 : 0.8"
+          shadow-softness="1"
+          :exposure="isFirefox ? 0.9 : 1"
           environment-image="neutral"
           interaction-prompt="none"
           @load="modelLoaded = true"
@@ -131,6 +151,19 @@ function activate(label: string) {
         <span>从一句话开始</span>
         <h1>我是您的自驾游规划 <em>Agent</em></h1>
       </div>
+      <section v-if="preflight && !preflight.ready" class="preflight-panel glass-card" aria-live="polite">
+        <strong>规划前还需要确认</strong>
+        <p>请直接在下方输入框补充或修正这些信息，确认无误后才会开始生成行程。</p>
+        <ul>
+          <li
+            v-for="issue in preflight.issues"
+            :key="`${issue.code}-${issue.message}`"
+            :class="{ error: issue.severity === 'error' }"
+          >
+            {{ issue.message }}
+          </li>
+        </ul>
+      </section>
       <div class="planner-box glass-card">
         <div class="agent-orb">AI</div>
         <div class="prompt-wrap">
@@ -156,8 +189,9 @@ function activate(label: string) {
               >
                 <Mic />
               </button>
-              <button class="primary-button" :disabled="planning" @click="startPlanning">
-                <Send :size="20" /> {{ planning ? '正在启动…' : '开始规划' }}
+              <button class="primary-button" :disabled="planning || preflightChecking" @click="startPlanning">
+                <Send :size="20" />
+                {{ planning ? '正在启动…' : preflightChecking ? '正在检查…' : preflight && !preflight.ready ? '重新检查' : '开始规划' }}
               </button>
             </div>
           </div>

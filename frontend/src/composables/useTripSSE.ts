@@ -10,6 +10,9 @@ export function useTripSSE(onEvent: (event: PlanningEvent) => void) {
     'tool_completed',
     'progress',
     'planning_completed',
+    'planning_failed',
+    'planning_paused',
+    'clarification_required',
   ]
 
   function connect(tripId: string) {

@@ -169,6 +169,23 @@ class TripRequest(BaseModel):
     defaults_applied: list[str] = Field(default_factory=list)
 
 
+class PreflightRequest(BaseModel):
+    raw_text: str = Field(min_length=2, max_length=4000)
+
+
+class PreflightIssue(BaseModel):
+    code: str
+    message: str
+    field: str | None = None
+    severity: Literal["question", "error"] = "question"
+
+
+class PreflightResponse(BaseModel):
+    ready: bool
+    issues: list[PreflightIssue] = Field(default_factory=list)
+    extracted: dict[str, Any] = Field(default_factory=dict)
+
+
 class RouteSegment(BaseModel):
     id: str = Field(default_factory=lambda: f"segment_{uuid4().hex[:10]}")
     coordinates: list[Coordinates] = Field(min_length=2)

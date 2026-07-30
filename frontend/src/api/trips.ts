@@ -15,6 +15,17 @@ export interface PlanningSnapshot {
   job_id?: string
 }
 
+export interface PreflightResult {
+  ready: boolean
+  issues: Array<{
+    code: string
+    message: string
+    field?: string
+    severity: 'question' | 'error'
+  }>
+  extracted: Record<string, unknown>
+}
+
 async function json<T>(response: Response): Promise<T> {
   if (!response.ok) {
     const payload = await response.json().catch(() => null)
@@ -23,14 +34,33 @@ async function json<T>(response: Response): Promise<T> {
   return response.json()
 }
 
-export async function createTrip(rawText: string): Promise<Trip> {
+export async function createTrip(
+  rawText: string,
+  extracted: Record<string, unknown> = {},
+): Promise<Trip> {
   return json(await fetch(`${API_BASE}/api/v1/trips`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       title: '正在理解您的旅行需求',
-      request: { raw_text: rawText },
+      request: {
+        raw_text: rawText,
+        origin: extracted.origin_name ? { name: extracted.origin_name } : undefined,
+        destination: extracted.destination_name ? { name: extracted.destination_name } : undefined,
+        start_date: extracted.start_date,
+        end_date: extracted.end_date,
+        travelers: extracted.travelers,
+        preferences: extracted.preferences,
+      },
     }),
+  }))
+}
+
+export async function preflightTrip(rawText: string): Promise<PreflightResult> {
+  return json(await fetch(`${API_BASE}/api/v1/trips/preflight`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ raw_text: rawText }),
   }))
 }
 

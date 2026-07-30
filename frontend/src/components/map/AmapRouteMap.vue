@@ -16,6 +16,7 @@ const routeOverlays = shallowRef<Array<{ stageId: string; polyline: any }>>([])
 const otherOverlays = shallowRef<any[]>([])
 type TravelMode = 'driving' | 'riding' | 'walking' | 'transit'
 type PlannedRoute = { path: any[]; mode: TravelMode | 'direct'; fallback: boolean }
+type MarkerKind = 'start' | 'end' | 'attraction' | 'charging' | 'fueling' | 'meal' | 'rest' | 'hotel' | 'parking' | 'service'
 const routePathCache = shallowRef(new Map<string, PlannedRoute>())
 const loading = shallowRef(true)
 const routeLoading = shallowRef(false)
@@ -25,6 +26,43 @@ const amapKey = (import.meta.env.VITE_AMAP_JSAPI_KEY || localAmapKey).trim()
 const securityCode = (import.meta.env.VITE_AMAP_SECURITY_JS_CODE || localSecurityCode).trim()
 const serviceHost = (import.meta.env.VITE_AMAP_SERVICE_HOST || '').trim()
 const hasCredentials = computed(() => Boolean(amapKey))
+
+function escapeHtml(value: string) {
+  return value.replace(/[&<>"']/g, (character) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#039;',
+  })[character] ?? character)
+}
+
+function activityMarkerKind(type: string): MarkerKind {
+  const normalized = type.toLowerCase()
+  if (normalized.includes('charg')) return 'charging'
+  if (normalized.includes('fuel') || normalized.includes('gas')) return 'fueling'
+  if (normalized.includes('meal') || normalized.includes('food') || normalized.includes('restaurant')) return 'meal'
+  if (normalized.includes('hotel') || normalized.includes('lodg')) return 'hotel'
+  if (normalized.includes('park')) return 'parking'
+  if (normalized.includes('rest') || normalized.includes('toilet')) return 'rest'
+  if (normalized.includes('attraction') || normalized.includes('scenic')) return 'attraction'
+  return 'service'
+}
+
+function markerIcon(kind: MarkerKind) {
+  return {
+    start: '起',
+    end: '终',
+    attraction: '景',
+    charging: '⚡',
+    fueling: '⛽',
+    meal: '餐',
+    rest: '休',
+    hotel: '宿',
+    parking: 'P',
+    service: '服',
+  }[kind]
+}
 
 function extractServicePath(mode: TravelMode, result: any): any[] {
   if (mode === 'transit') {
@@ -128,6 +166,18 @@ function stagePath(stage: NonNullable<typeof props.day>['stages'][number]): Prom
   const start = stage.origin.coordinates
   const end = stage.destination.coordinates
   if (!start || !end) return Promise.resolve({ path: [], mode: 'direct', fallback: true })
+  const persistedPath = stage.route_segments.flatMap((segment) =>
+    segment.coordinates.map((point) => [point.longitude, point.latitude]),
+  )
+  if (persistedPath.length > 2) {
+    return Promise.resolve({
+      path: persistedPath,
+      mode: (['driving', 'riding', 'walking', 'transit'].includes(stage.mode)
+        ? stage.mode
+        : 'driving') as TravelMode,
+      fallback: false,
+    })
+  }
   const sameCity = stage.origin.city && stage.origin.city === stage.destination.city
     ? stage.origin.city
     : undefined
@@ -228,9 +278,9 @@ async function renderRoutes() {
 
   const modeColor: Record<PlannedRoute['mode'], string> = {
     driving: '#1677ff',
-    riding: '#f08a18',
-    walking: '#22a66f',
-    transit: '#7758d8',
+    riding: '#f2a51a',
+    walking: '#f2a51a',
+    transit: '#18a66a',
     direct: '#9aa5b4',
   }
   for (const { stage, route } of plannedPaths) {
@@ -242,22 +292,21 @@ async function renderRoutes() {
       : route.path
     if (displayPath.length < 2) continue
     const active = stage.id === props.activeStageId
-    const risky = stage.risk_level === 'high' || stage.risk_level === 'moderate'
     const polyline = new AMap.value.Polyline({
       path: displayPath,
       isOutline: active && !unavailable,
-      outlineColor: risky ? '#ffe2b5' : '#c7e2ff',
+      outlineColor: '#dbe9ff',
       borderWeight: 3,
-      strokeColor: unavailable ? '#9aa5b4' : risky ? '#f08a18' : active ? modeColor[route.mode] : '#8d98a8',
-      strokeOpacity: unavailable ? 0.72 : active || risky ? 0.94 : 0.58,
-      strokeWeight: unavailable ? 3 : active || risky ? 6 : 4,
+      strokeColor: unavailable ? '#9aa5b4' : modeColor[route.mode],
+      strokeOpacity: unavailable ? 0.72 : active ? 0.95 : 0.56,
+      strokeWeight: unavailable ? 3 : active ? 6 : 4,
       strokeStyle: unavailable ? 'dashed' : 'solid',
       strokeDasharray: unavailable ? [8, 8] : undefined,
       lineJoin: 'round',
       lineCap: 'round',
       showDir: !unavailable,
-      zIndex: active ? 80 : risky ? 70 : 50,
-      extData: { stageId: stage.id, unavailable, mode: route.mode, riskLevel: stage.risk_level },
+      zIndex: active ? 80 : 50,
+      extData: { stageId: stage.id, unavailable, mode: route.mode },
     })
     polyline.on('click', () => emit('selectStage', stage.id))
     routeOverlays.value.push({ stageId: stage.id, polyline })
@@ -282,19 +331,38 @@ async function renderRoutes() {
     routeOverlays.value.push({ stageId: connector.id, polyline })
   }
 
-  const places = [
-    props.day.stages[0]?.origin,
-    ...props.day.stages.map((stage) => stage.destination),
-    ...props.day.activities.map((activity) => activity.place),
-  ].filter((place, index, items) =>
-    place?.coordinates && items.findIndex((item) => item?.name === place.name) === index,
-  )
-  for (const [index, place] of places.entries()) {
-    if (!place?.coordinates) continue
+  const places = new Map<string, {
+    place: NonNullable<typeof props.day>['stages'][number]['origin']
+    kind: MarkerKind
+  }>()
+  const firstStage = props.day.stages[0]
+  const lastStage = props.day.stages.at(-1)
+  if (firstStage?.origin.coordinates) {
+    places.set(firstStage.origin.name, { place: firstStage.origin, kind: 'start' })
+  }
+  for (const stage of props.day.stages.slice(0, -1)) {
+    if (stage.destination.coordinates && !places.has(stage.destination.name)) {
+      places.set(stage.destination.name, { place: stage.destination, kind: 'attraction' })
+    }
+  }
+  for (const activity of props.day.activities) {
+    if (activity.place.coordinates) {
+      places.set(activity.place.name, {
+        place: activity.place,
+        kind: activityMarkerKind(activity.type),
+      })
+    }
+  }
+  if (lastStage?.destination.coordinates) {
+    places.set(lastStage.destination.name, { place: lastStage.destination, kind: 'end' })
+  }
+  for (const [index, { place, kind }] of [...places.values()].entries()) {
+    if (!place.coordinates) continue
+    const terminal = kind === 'start' || kind === 'end'
     const marker = new AMap.value.Marker({
       position: [place.coordinates.longitude, place.coordinates.latitude],
       title: place.name,
-      content: `<div class="amap-number-marker"><b>${index + 1}</b><span>${place.name}</span></div>`,
+      content: `<div class="${terminal ? 'amap-terminal-marker' : 'amap-poi-marker'} amap-marker-${kind}"><b>${markerIcon(kind)}</b><span>${escapeHtml(place.name)}</span></div>`,
       offset: new AMap.value.Pixel(-16, -38),
       zIndex: 1000 + index,
     })
@@ -310,10 +378,10 @@ async function renderRoutes() {
   if (activeRoute) {
     const [fitZoom, fitCenter] = map.value.getFitZoomAndCenterByOverlays(
       [activeRoute],
-      [110, 110, 110, 110],
+      [140, 140, 140, 140],
       15,
     )
-    map.value.setZoomAndCenter(Math.max(3, fitZoom - 1.1), fitCenter, false, 1000)
+    map.value.setZoomAndCenter(Math.max(3, fitZoom - 1.8), fitCenter, false, 1500)
   } else if (overlays.length) {
     const [fitZoom, fitCenter] = map.value.getFitZoomAndCenterByOverlays(
       overlays,
@@ -399,11 +467,6 @@ onBeforeUnmount(() => {
     <div v-if="failed" class="map-fallback-badge">高德地图不可用 · 已切换 Mock 地图</div>
     <div v-else-if="!loading" class="map-live-badge" :class="{ warning: routeUnavailable }">
       {{ routeLoading ? '高德驾车路线计算中…' : routeUnavailable ? '部分路线不可用 · 灰色虚线直连' : '高德 JSAPI · 真实道路轨迹' }}
-    </div>
-    <div v-if="!failed && !loading" class="map-legend amap-live-legend">
-      <span><i class="active-route" />当前阶段</span>
-      <span><i class="day-route" />当日其他阶段</span>
-      <span><i class="risk-route" />风险</span>
     </div>
   </div>
 </template>

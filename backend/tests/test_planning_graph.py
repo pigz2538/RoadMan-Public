@@ -8,10 +8,23 @@ from app.api.trips import get_trip_risks, get_trip_services
 from app.db import SessionLocal, create_tables
 from app.domain.models import SkillResult, TripCreate, TripRequest, VehicleProfile
 from app.planning.graph import build_planning_graph
+from app.planning.llm import deterministic_extract
 from app.planning.runner import run_planning
 from app.repositories import TripRepository, VehicleRepository
+from app.services.sse import sse_manager
 from app.skills.base import SkillAdapter, SkillContext
 from app.skills.registry import SkillRegistry
+
+
+def test_requirement_extractor_handles_departure_and_later_arrival_time():
+    extracted = deterministic_extract(
+        "2026年8月2日下午3点从武汉出发，下午4点到北京，2026年8月3日返回",
+        date(2026, 7, 30),
+    )
+
+    assert extracted["origin_name"] == "武汉"
+    assert extracted["destination_name"] == "北京"
+    assert "travelers" not in extracted
 
 
 class FakeGeocodeAdapter(SkillAdapter):
@@ -39,7 +52,12 @@ class FakeRouteAdapter(SkillAdapter):
 
     async def execute(self, payload: dict[str, Any], _: SkillContext) -> SkillResult:
         mode = payload.get("preferred_mode", "driving")
-        duration = 210 if mode == "driving" else 25
+        local = (
+            abs(payload["origin"]["longitude"] - payload["destination"]["longitude"]) < 0.1
+            and abs(payload["origin"]["latitude"] - payload["destination"]["latitude"]) < 0.1
+        )
+        distance = 1.8 if local else 254.2
+        duration = 210 if mode == "driving" and not local else 25
         return SkillResult(
             success=True,
             provider="fake-amap",
@@ -47,7 +65,7 @@ class FakeRouteAdapter(SkillAdapter):
                 "requested_mode": mode,
                 "selected_mode": mode,
                 "fallback_used": False,
-                "distance_km": 254.2,
+                "distance_km": distance,
                 "duration_minutes": duration,
                 "tolls_cny": 95 if mode == "driving" else 0,
                 "geometry": [
@@ -156,7 +174,7 @@ async def test_graph_builds_two_day_markdown_plan():
     assert result["verification_result"]["passed"] is True
     assert len(result["day_plans"]) == 2
     stages = [stage for day in result["day_plans"] for stage in day["stages"]]
-    assert len(stages) == 4
+    assert len(stages) == 5
     assert {stage["mode"] for stage in stages} >= {"driving", "transit", "walking"}
     assert all(stage["weather_summary"].startswith("预计抵达") for stage in stages)
     driving = [stage for stage in stages if stage["mode"] == "driving"]
@@ -168,7 +186,7 @@ async def test_graph_builds_two_day_markdown_plan():
         for day in result["day_plans"]
         for activity in day["activities"]
     )
-    assert "武汉—庐山自驾路书" in result["plan_markdown"]
+    assert "武汉—庐山自驾行程安排" in result["plan_markdown"]
     assert "travelers=1" in result["trip_request"]["defaults_applied"]
 
 
@@ -191,13 +209,14 @@ async def test_graph_builds_five_days_and_multiple_transport_modes():
     )
     stages = [stage for day in result["day_plans"] for stage in day["stages"]]
     assert len(result["day_plans"]) == 5
-    assert len(stages) == 8
+    assert len(stages) == 11
     assert {"driving", "transit", "walking", "riding"} <= {
         stage["mode"] for stage in stages
     }
     assert all(stage["route_segments"][0]["coordinates"] for stage in stages)
     assert all(stage["weather_samples"] for stage in stages)
     assert result["verification_result"]["passed"] is True
+    assert stages[0]["origin"]["name"] == stages[-1]["destination"]["name"]
     assert {"rest", "charging", "fueling", "parking", "meal", "hospital", "toilet"} <= {
         category
         for stage_services in result["service_pois"].values()
@@ -239,6 +258,12 @@ async def test_runner_persists_state_markdown_and_trip_days():
         )
     result = await run_planning(trip.id, registry=fake_registry())
     assert result["status"] == "completed"
+    events = await sse_manager.after(trip.id)
+    progress_values = [item.payload.progress for item in events]
+    assert progress_values == sorted(progress_values)
+    assert events[-2].payload.progress == 96
+    assert events[-1].payload.event == "planning_completed"
+    assert events[-1].payload.progress == 100
     assert result["plan_markdown"].startswith("# 武汉—庐山")
     async with SessionLocal() as session:
         saved = await TripRepository(session).get(trip.id)

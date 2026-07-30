@@ -39,7 +39,7 @@ async def lifespan(_: FastAPI):
 app = FastAPI(
     title="RoadMan API",
     version="0.3.0",
-    description="RoadMan 阶段 D LangGraph 需求澄清、真实路线与路书规划 API",
+    description="RoadMan LangGraph 需求澄清、真实路线与行程安排 API",
     lifespan=lifespan,
 )
 app.add_exception_handler(AppError, app_error_handler)

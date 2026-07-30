@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test'
 
 test('首页包含核心规划入口', async ({ page }) => {
-  await page.route('**/models/car-concept.glb', async (route) => {
+  await page.route('**/models/car-concept-optimized.glb', async (route) => {
     await new Promise((resolve) => setTimeout(resolve, 500))
     await route.continue()
   })
@@ -101,7 +101,7 @@ test('规划页支持天、阶段和节点选择', async ({ page }) => {
 
   const map = page.locator('.amap-container')
   const mapBox = await map.boundingBox()
-  const markers = page.locator('.amap-number-marker')
+  const markers = page.locator('.amap-terminal-marker, .amap-poi-marker')
   expect(await markers.count()).toBeGreaterThan(0)
   const marker = markers.filter({ hasText: '黄石服务区' }).first()
   const before = await marker.boundingBox()

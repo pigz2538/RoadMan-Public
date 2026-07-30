@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from datetime import datetime, timedelta
 from math import ceil
 from typing import Any
@@ -177,8 +178,26 @@ def enrich_deep_drive_plan(
             if stage["risk_level"] != "low":
                 warnings.extend(stage["warnings"])
 
+        expanded_stages, break_activities = _split_long_driving_stages(
+            day.get("stages", []),
+            service_pois,
+            max_continuous_drive_minutes,
+            power_type,
+        )
+        day["stages"] = expanded_stages
+        if break_activities:
+            activities = [
+                item
+                for item in activities
+                if item.get("type") not in {"rest", "charging", "fueling"}
+            ]
+        activities = _dedupe_activities([*activities, *break_activities])
+        activities = _ensure_daily_meals(day, activities, service_pois)
         day["activities"] = activities
-        stage_refs = [DayItemRef(type="stage", id=item["id"]).model_dump() for item in day["stages"]]
+        stage_refs = [
+            DayItemRef(type="stage", id=item["id"]).model_dump()
+            for item in day.get("stages", [])
+        ]
         activity_refs = [
             DayItemRef(type="activity", id=item["id"]).model_dump() for item in activities
         ]
@@ -207,6 +226,46 @@ def verify_deep_drive_plan(
                 issues.append(_issue("CONTINUOUS_DRIVE", "blocker", f"{stage['title']} 缺少驾驶休息"))
             if not stage.get("weather_samples"):
                 issues.append(_issue("WEATHER_DEGRADED", "warning", f"{stage['title']} 无逐时天气"))
+            start = datetime.fromisoformat(stage["planned_start"])
+            end = datetime.fromisoformat(stage["planned_end"])
+            elapsed_minutes = int((end - start).total_seconds() / 60)
+            if end <= start or abs(elapsed_minutes - stage["duration_minutes"]) > 5:
+                issues.append(
+                    _issue(
+                        "STAGE_TIME_INCONSISTENT",
+                        "blocker",
+                        f"{stage['title']} 的起止时间与阶段时长不一致",
+                    )
+                )
+            if stage["mode"] == "walking" and (
+                stage["duration_minutes"] > 180 or stage["distance_km"] > 20
+            ):
+                issues.append(
+                    _issue(
+                        "WALKING_STAGE_TOO_LONG",
+                        "blocker",
+                        f"{stage['title']} 步行 {stage['duration_minutes']} 分钟，必须改用公共交通或拆段",
+                    )
+                )
+            if stage["mode"] == "riding" and (
+                stage["duration_minutes"] > 240 or stage["distance_km"] > 60
+            ):
+                issues.append(
+                    _issue(
+                        "RIDING_STAGE_TOO_LONG",
+                        "blocker",
+                        f"{stage['title']} 骑行距离或时长超出单阶段上限",
+                    )
+                )
+        meals = [item for item in day.get("activities", []) if item.get("type") == "meal"]
+        if len(meals) < 3:
+            issues.append(
+                _issue(
+                    "DAILY_MEALS_INCOMPLETE",
+                    "blocker",
+                    f"第 {day.get('day_index')} 天未完整安排早餐、午餐和晚餐",
+                )
+            )
     return _dedupe_issues(issues)
 
 
@@ -321,6 +380,225 @@ def _crosses_lunch(stage: dict[str, Any]) -> bool:
     start = datetime.fromisoformat(stage["planned_start"])
     end = datetime.fromisoformat(stage["planned_end"])
     return start.hour < 13 and (end.hour > 11 or (end.hour == 11 and end.minute >= 30))
+
+
+def _split_long_driving_stages(
+    stages: list[dict[str, Any]],
+    service_pois: dict[str, dict[str, list[dict[str, Any]]]],
+    max_minutes: int,
+    power_type: str,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    expanded: list[dict[str, Any]] = []
+    breaks: list[dict[str, Any]] = []
+    for stage in stages:
+        movement_duration = int(
+            stage.get("route_segments", [{}])[0].get(
+                "duration_minutes",
+                stage.get("duration_minutes", 0),
+            )
+        )
+        if stage.get("mode") != "driving" or movement_duration <= max_minutes:
+            expanded.append(stage)
+            continue
+        part_count = ceil(movement_duration / max_minutes)
+        services = service_pois.get(stage["id"], {})
+        candidates: list[tuple[str, dict[str, Any]]] = []
+        energy_kind = "charging" if power_type == "electric" else "fueling"
+        for kind in (energy_kind, "rest"):
+            for place in services.get(kind, []):
+                if place.get("coordinates"):
+                    candidates.append((kind, place))
+        selected = _select_break_places(stage, candidates, part_count - 1)
+        if len(selected) < part_count - 1:
+            expanded.append(stage)
+            continue
+
+        geometry = stage["route_segments"][0]["coordinates"]
+        split_indexes = [
+            _nearest_geometry_index(geometry, place["coordinates"])
+            for _, place in selected
+        ]
+        boundaries = [0, *split_indexes, len(geometry) - 1]
+        if any(second <= first for first, second in zip(boundaries, boundaries[1:])):
+            expanded.append(stage)
+            continue
+
+        cursor = datetime.fromisoformat(stage["planned_start"])
+        remaining_duration = movement_duration
+        remaining_distance = float(stage["distance_km"])
+        target_duration = ceil(movement_duration / part_count)
+        for index in range(part_count):
+            fraction = (boundaries[index + 1] - boundaries[index]) / (len(geometry) - 1)
+            if index == part_count - 1:
+                duration = remaining_duration
+                distance = remaining_distance
+            else:
+                duration = min(target_duration, remaining_duration - (part_count - index - 1))
+                distance = max(0.01, round(stage["distance_km"] * fraction, 2))
+                remaining_duration -= duration
+                remaining_distance -= distance
+            piece = deepcopy(stage)
+            piece["id"] = f"{stage['id']}_part_{index + 1}"
+            piece["title"] = f"{stage['title']} · 第 {index + 1}/{part_count} 段"
+            piece["origin"] = stage["origin"] if index == 0 else selected[index - 1][1]
+            piece["destination"] = (
+                stage["destination"] if index == part_count - 1 else selected[index][1]
+            )
+            piece["waypoints"] = []
+            piece["distance_km"] = round(distance, 2)
+            piece["duration_minutes"] = duration
+            piece["planned_start"] = cursor.isoformat()
+            piece_end = cursor + timedelta(minutes=duration)
+            piece["planned_end"] = piece_end.isoformat()
+            segment = deepcopy(stage["route_segments"][0])
+            segment["coordinates"] = geometry[
+                boundaries[index] : boundaries[index + 1] + 1
+            ]
+            segment["distance_km"] = round(distance, 2)
+            segment["duration_minutes"] = duration
+            piece["route_segments"] = [segment]
+            if piece.get("energy_estimate"):
+                piece["energy_estimate"]["amount"] = round(
+                    float(piece["energy_estimate"]["amount"]) / part_count,
+                    1,
+                )
+            expanded.append(piece)
+            if index < part_count - 1:
+                kind, place = selected[index]
+                break_minutes = 30 if kind == "charging" else 20
+                breaks.append(
+                    _activity(
+                        stage["day_id"],
+                        len(breaks),
+                        kind,
+                        place,
+                        piece_end,
+                        break_minutes,
+                        "长途驾驶分段休息与补能",
+                        required=True,
+                    )
+                )
+                cursor = piece_end + timedelta(minutes=break_minutes)
+    for sequence, piece in enumerate(expanded):
+        piece["sequence"] = sequence
+    return expanded, breaks
+
+
+def _select_break_places(
+    stage: dict[str, Any],
+    candidates: list[tuple[str, dict[str, Any]]],
+    count: int,
+) -> list[tuple[str, dict[str, Any]]]:
+    geometry = stage.get("route_segments", [{}])[0].get("coordinates", [])
+    if len(geometry) < 3:
+        return []
+    indexed = [
+        (_nearest_geometry_index(geometry, place["coordinates"]), kind, place)
+        for kind, place in candidates
+    ]
+    selected: list[tuple[int, str, dict[str, Any]]] = []
+    used: set[str] = set()
+    for number in range(1, count + 1):
+        target = round((len(geometry) - 1) * number / (count + 1))
+        choices = [
+            item
+            for item in indexed
+            if item[2].get("name") not in used and 0 < item[0] < len(geometry) - 1
+        ]
+        if not choices:
+            break
+        choice = min(choices, key=lambda item: abs(item[0] - target))
+        selected.append(choice)
+        used.add(choice[2].get("name", ""))
+    return [(kind, place) for _, kind, place in sorted(selected)]
+
+
+def _nearest_geometry_index(
+    geometry: list[dict[str, Any]],
+    coordinates: dict[str, Any],
+) -> int:
+    return min(
+        range(len(geometry)),
+        key=lambda index: (
+            (geometry[index]["longitude"] - coordinates["longitude"]) ** 2
+            + (geometry[index]["latitude"] - coordinates["latitude"]) ** 2
+        ),
+    )
+
+
+def _ensure_daily_meals(
+    day: dict[str, Any],
+    activities: list[dict[str, Any]],
+    service_pois: dict[str, dict[str, list[dict[str, Any]]]],
+) -> list[dict[str, Any]]:
+    stages = day.get("stages", [])
+    if not stages:
+        return activities
+    meal_places = [
+        place
+        for stage_services in service_pois.values()
+        for place in stage_services.get("meal", [])
+        if place.get("coordinates")
+    ]
+    base_place = stages[0]["origin"]
+    destination_place = stages[-1]["destination"]
+    day_date = datetime.fromisoformat(stages[0]["planned_start"])
+    meal_slots = [
+        ("早餐", 7, 30),
+        ("午餐", 12, 0),
+        ("晚餐", 18, 30),
+    ]
+    for slot_index, (label, hour, minute) in enumerate(meal_slots):
+        if any(
+            datetime.fromisoformat(item["planned_start"]).hour
+            in (
+                range(6, 10) if label == "早餐"
+                else range(11, 15) if label == "午餐"
+                else range(17, 22)
+            )
+            for item in activities
+            if item.get("type") == "meal"
+        ):
+            continue
+        if label == "早餐":
+            place = deepcopy(base_place)
+        elif label == "晚餐":
+            place = deepcopy(destination_place)
+        elif meal_places:
+            place = deepcopy(meal_places[slot_index % len(meal_places)])
+        else:
+            place = deepcopy(base_place)
+        if label != "午餐" or not meal_places:
+            place["name"] = f"{place['name']}附近{label}"
+        start = day_date.replace(hour=hour, minute=minute)
+        activities.append(
+            _activity(
+                day["id"],
+                len(activities),
+                "meal",
+                place,
+                start,
+                45,
+                f"每日{label}安排",
+                required=True,
+            )
+        )
+    return _dedupe_activities(activities)
+
+
+def _dedupe_activities(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    unique: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for item in items:
+        key = (
+            item["type"],
+            item["place"]["name"],
+            item["planned_start"][:16],
+        )
+        unique[key] = item
+    result = sorted(unique.values(), key=lambda item: item["planned_start"])
+    for sequence, item in enumerate(result):
+        item["sequence"] = sequence
+    return result
 
 
 def _first_place(items: list[dict[str, Any]] | None) -> dict[str, Any] | None:

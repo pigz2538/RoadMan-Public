@@ -297,6 +297,26 @@ def build_planning_graph(
                         }
                     )
                     anchor = target
+            if anchor is not destination:
+                route = await _route(
+                    registry,
+                    anchor,
+                    destination,
+                    state["trip_id"],
+                    preferred_mode="transit",
+                    fallback_modes=["walking", "riding", "driving"],
+                )
+                if route.get("success"):
+                    local_routes.append(
+                        {
+                            "day_index": day_index,
+                            "sequence": 2,
+                            "origin": anchor,
+                            "destination": destination,
+                            "route": route,
+                            "return_to_base": True,
+                        }
+                    )
         await emit(
             state,
             "build_local_routes",
@@ -362,7 +382,10 @@ def build_planning_graph(
                 stage = _movement_stage(
                     day_id=f"day_{index + 1}",
                     sequence=len(stages),
-                    title=_local_stage_title(local["route"]["data"].get("selected_mode")),
+                    title=_local_stage_title(
+                        local["route"]["data"].get("selected_mode"),
+                        return_to_base=local.get("return_to_base", False),
+                    ),
                     origin=local["origin"],
                     destination=local["destination"],
                     route=local["route"],
@@ -370,7 +393,11 @@ def build_planning_graph(
                 )
                 stages.append(stage)
                 local_start = stage.planned_end + timedelta(minutes=45)
-            if index == len(day_defs) - 1 and len(day_defs) > 1:
+            if index == len(day_defs) - 1:
+                return_start = max(
+                    local_start,
+                    datetime.combine(day_date, time(14, 30), tzinfo=SHANGHAI),
+                )
                 stages.append(
                     _movement_stage(
                         day_id=f"day_{index + 1}",
@@ -379,7 +406,7 @@ def build_planning_graph(
                         origin=request["destination"],
                         destination=request["origin"],
                         route=inbound,
-                        start_at=datetime.combine(day_date, time(14, 30), tzinfo=SHANGHAI),
+                        start_at=return_start,
                     )
                 )
             plan = DayPlan(
@@ -685,6 +712,7 @@ def build_planning_graph(
                 int(state["trip_request"].get("max_continuous_drive_minutes") or 120),
             )
         )
+        issues.extend(_verify_route_closure(state.get("day_plans", [])))
         return {
             "verification_result": {
                 "passed": not any(item["severity"] == "blocker" for item in issues),
@@ -708,10 +736,10 @@ def build_planning_graph(
         }
 
     async def render_markdown(state: RoadManState) -> dict[str, Any]:
-        await emit(state, "render_markdown", "正在生成 Markdown 路书", 94)
+        await emit(state, "render_markdown", "正在生成 Markdown 行程安排", 94)
         request = state["trip_request"]
         lines = [
-            f"# {request['origin']['name']}—{request['destination']['name']}自驾路书",
+            f"# {request['origin']['name']}—{request['destination']['name']}自驾行程安排",
             "",
             f"- 日期：{request['start_date']} 至 {request['end_date']}",
             f"- 出行人数：{request.get('travelers', 1)} 人",
@@ -753,8 +781,8 @@ def build_planning_graph(
         }
 
     async def persist_trip(state: RoadManState) -> dict[str, Any]:
-        await emit(state, "persist_trip", "路书生成完成", 100, event="planning_completed")
-        return {"progress": {"node": "persist_trip", "value": 100}}
+        await emit(state, "persist_trip", "正在保存并核对行程安排", 96, event="progress")
+        return {"progress": {"node": "persist_trip", "value": 96}}
 
     def after_validation(state: RoadManState) -> Literal["clarify", "route"]:
         return "clarify" if state.get("missing_fields") else "route"
@@ -851,6 +879,25 @@ async def _route(
         },
         SkillContext(trip_id=trip_id),
     )
+    if result.success and isinstance(result.data, dict) and not _route_mode_feasible(result.data):
+        retry_modes = [
+            mode
+            for mode in ["transit", "driving", "riding"]
+            if mode != result.data.get("selected_mode")
+        ]
+        result = await registry.execute(
+            "amap.route",
+            {
+                "origin": {**origin["coordinates"], "city": origin.get("city")},
+                "destination": {
+                    **destination["coordinates"],
+                    "city": destination.get("city"),
+                },
+                "preferred_mode": retry_modes[0],
+                "allowed_fallback_modes": retry_modes[1:],
+            },
+            SkillContext(trip_id=trip_id),
+        )
     return {
         "success": result.success,
         "data": result.data,
@@ -858,6 +905,19 @@ async def _route(
         "warnings": result.warnings,
         "sources": [item.model_dump(mode="json") for item in result.sources],
     }
+
+
+def _route_mode_feasible(data: dict[str, Any]) -> bool:
+    mode = data.get("selected_mode")
+    duration = int(data.get("duration_minutes") or 0)
+    distance = float(data.get("distance_km") or 0)
+    if mode == "walking":
+        return duration <= 180 and distance <= 20
+    if mode == "riding":
+        return duration <= 240 and distance <= 60
+    if mode == "transit":
+        return duration <= 360
+    return True
 
 
 def _movement_stage(
@@ -925,13 +985,64 @@ def _movement_stage(
     )
 
 
-def _local_stage_title(mode: str | None) -> str:
+def _local_stage_title(mode: str | None, *, return_to_base: bool = False) -> str:
+    if return_to_base:
+        return "返回住宿或目的地核心区"
     return {
         "transit": "公共交通前往景点",
         "walking": "步行游览接驳",
         "riding": "骑行游览接驳",
         "driving": "目的地短途接驳",
     }.get(mode, "目的地接驳")
+
+
+def _verify_route_closure(day_plans: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    stages = [
+        stage
+        for day in sorted(day_plans, key=lambda item: item.get("day_index", 0))
+        for stage in sorted(day.get("stages", []), key=lambda item: item.get("sequence", 0))
+    ]
+    if not stages:
+        return []
+
+    issues: list[dict[str, Any]] = []
+    for previous, current in zip(stages, stages[1:]):
+        if not _same_place(previous.get("destination"), current.get("origin")):
+            issues.append(
+                {
+                    "code": "ROUTE_DISCONTINUITY",
+                    "severity": "blocker",
+                    "description": (
+                        f"阶段“{previous.get('title', '')}”终点与"
+                        f"“{current.get('title', '')}”起点不连续"
+                    ),
+                }
+            )
+    if not _same_place(stages[0].get("origin"), stages[-1].get("destination")):
+        issues.append(
+            {
+                "code": "ROUTE_NOT_CLOSED",
+                "severity": "blocker",
+                "description": "行程终点未回到整体出发点，路线尚未形成闭环",
+            }
+        )
+    return issues
+
+
+def _same_place(first: dict[str, Any] | None, second: dict[str, Any] | None) -> bool:
+    if not first or not second:
+        return False
+    if first.get("name") and first.get("name") == second.get("name"):
+        return True
+    first_coordinates = first.get("coordinates")
+    second_coordinates = second.get("coordinates")
+    if not first_coordinates or not second_coordinates:
+        return False
+    longitude_delta = (
+        first_coordinates["longitude"] - second_coordinates["longitude"]
+    ) * 0.87
+    latitude_delta = first_coordinates["latitude"] - second_coordinates["latitude"]
+    return (longitude_delta**2 + latitude_delta**2) ** 0.5 <= 0.02
 
 
 def _poi_place(item: dict[str, Any]) -> dict[str, Any]:

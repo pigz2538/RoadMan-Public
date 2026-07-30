@@ -40,7 +40,10 @@ class OllamaRequirementExtractor:
                 )
                 response.raise_for_status()
                 parsed = _parse_json_object(response.json().get("response", ""))
-                return _merge_extraction(deterministic, parsed)
+                merged = _merge_extraction(deterministic, parsed)
+                if not re.search(r"[一二三四五六七八九十两\d]+\s*(?:人|位|口)", raw_text):
+                    merged.pop("travelers", None)
+                return merged
         except (httpx.HTTPError, ValueError, TypeError, json.JSONDecodeError):
             return deterministic
 
@@ -73,6 +76,37 @@ def _merge_extraction(base: dict[str, Any], llm: dict[str, Any]) -> dict[str, An
 
 def deterministic_extract(raw_text: str, today: date) -> dict[str, Any]:
     result: dict[str, Any] = {"preferences": []}
+    explicit_dates = [
+        date.fromisoformat(value).isoformat()
+        for value in re.findall(r"\b\d{4}-\d{2}-\d{2}\b", raw_text)
+    ]
+    if not explicit_dates:
+        for year, month, day_value in re.findall(
+            r"(?:(\d{4})年)?(\d{1,2})月(\d{1,2})日",
+            raw_text,
+        ):
+            try:
+                explicit_dates.append(
+                    date(
+                        int(year) if year else today.year,
+                        int(month),
+                        int(day_value),
+                    ).isoformat()
+                )
+            except ValueError:
+                continue
+    if explicit_dates:
+        result["start_date"] = explicit_dates[0]
+        if len(explicit_dates) > 1:
+            result["end_date"] = explicit_dates[1]
+    if "今天" in raw_text and not result.get("start_date"):
+        result["start_date"] = today.isoformat()
+    elif "明天" in raw_text and not result.get("start_date"):
+        result["start_date"] = (today + timedelta(days=1)).isoformat()
+    elif "后天" in raw_text and not result.get("start_date"):
+        result["start_date"] = (today + timedelta(days=2)).isoformat()
+    if "昨天" in raw_text and any(word in raw_text for word in ("回", "返", "抵达", "到达")):
+        result["end_date"] = (today - timedelta(days=1)).isoformat()
     route_match = re.search(
         r"从(?P<origin>[\u4e00-\u9fffA-Za-z0-9·]+?)(?:出发)?(?:去|到|前往)"
         r"(?P<destination>[\u4e00-\u9fffA-Za-z0-9·]+?)(?=，|,|。|；|;|两天|一日|周[一二三四五六日天]|$)",
@@ -81,6 +115,22 @@ def deterministic_extract(raw_text: str, today: date) -> dict[str, Any]:
     if route_match:
         result["origin_name"] = route_match.group("origin")
         result["destination_name"] = route_match.group("destination")
+    else:
+        origin_match = re.search(
+            r"从(?P<origin>[\u4e00-\u9fffA-Za-z0-9·]{2,20}?)(?=出发|启程|去|前往|到)",
+            raw_text,
+        )
+        destination_matches = re.findall(
+            r"(?:去|前往|抵达|到达|到)"
+            r"(?!今天|明天|后天|昨天|早上|上午|中午|下午|晚上|\d)"
+            r"(?P<destination>[\u4e00-\u9fffA-Za-z0-9·]{2,20}?)"
+            r"(?=，|,|。|；|;|两天|一日|周[一二三四五六日天]|$)",
+            raw_text,
+        )
+        if origin_match:
+            result["origin_name"] = origin_match.group("origin")
+        if destination_matches:
+            result["destination_name"] = destination_matches[-1]
 
     weekday_map = {"一": 0, "二": 1, "三": 2, "四": 3, "五": 4, "六": 5, "日": 6, "天": 6}
     weekday_match = re.search(r"周([一二三四五六日天])", raw_text)
@@ -99,7 +149,7 @@ def deterministic_extract(raw_text: str, today: date) -> dict[str, Any]:
             start = date.fromisoformat(result["start_date"])
             result["end_date"] = (start + timedelta(days=days - 1)).isoformat()
 
-    traveler_match = re.search(r"([一二三四五六七八九十两\d]+)人", raw_text)
+    traveler_match = re.search(r"([一二三四五六七八九十两\d]+)\s*(?:人|位|口)", raw_text)
     if traveler_match:
         result["travelers"] = _cn_number(traveler_match.group(1))
     for keyword in ("自然风景", "亲子", "轻松", "省钱", "不走夜路", "新能源"):
