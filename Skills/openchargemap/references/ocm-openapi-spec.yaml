@@ -1,0 +1,2129 @@
+openapi: 3.1.0
+info:
+  title: Open Charge Map API
+  version: '3.1'
+  termsOfService: 'https://openchargemap.org/site/about/terms'
+  contact:
+    name: Contact
+    url: 'https://openchargemap.org/site/about'
+  description: "The Open Charge Map API provides access to the worlds largest registry of charging locations as Open Data. You can integrate this API into your own apps or services and export charging location data into your own systems. \n\n**To obtain a free API key Sign In to https://openchargemap.org and choose 'my apps' from the `my profile` menu, then select `Register An Application` to get your API key.**\n\nTo retrieve site (POI) data, see the `/poi` endpoint. To fetch general lookup information such as connector types, network operators etc, use the `/referencedata` endpoint.\n\n**Use of the OCM API is subject to terms and conditions. By using the API you indicate acceptance of these terms.**\n\nIf you wish to export charging location data into your own systems or applications the most flexible way is to use our API, which provides an export in a variety of formats. If you wish to regularly refresh the entire dataset, please clone our data from GitHub. You can also opt to run your own private API mirror.\n\n### Fair Usage Policy\nThe basic API is provided as a free service with no warranty or service level agreement. Providing this API to you costs us actual money for server resources and data transfer fees.\n\nYou must provide your API key as an `X-API-Key header` (case sensitive) or set the `key=YourAPIKey` url parameter. You should also set your http user-agent to a custom value to help identify your app.\n\n\n\n*Do not repeatedly call the API with duplicate queries. Debounce/throttle your API requests to minimise the work our API has to do. The API administrator (Open Charge Map) reserves the right to ban API callers (including automated banning) if callers make excessive/indescriminate use of the API, at the discretion of the OCM administrator.*\n\nIf you need to make a high volume of queries against the API please host your own API mirror or import the data into your own API.\n\n### Example API Calls\nReturn charging location information for the US in JSON format, limited to the first 10 results: `https://api.openchargemap.io/v3/poi/?output=json&countrycode=US&maxresults=10?key=<your key>`\n\nThe default output contains a lot of information. Here is the same call as above, but with the most compact output (formatting removed, reference data as IDs instead of full objects, null fields skipped): \n`https://api.openchargemap.io/v3/poi/?output=json&countrycode=US&maxresults=100&compact=true&verbose=false&key=<your key>`\n\nReturn KML format results suitable for viewing in google earth/maps etc (UK, max 500 locations): `https://api.openchargemap.io/v3/poi/?output=kml&countrycode=GB&maxresults=500&key=<your key>`\n\nData returned by the API has mixed licensing and applicable copyright attribution (included in results as \"Data Provider\"). If you require Open licensed data you currently must filter by opendata=true to return data marked specifically with Open Data licenses.\n\n### Linking to OCM\nIn addition to using our  API you can link directly to specific Open Charge Map URLs in order to perform specific actions, with {OCM-ID} is the numeric ID of the POI to add work with.\n\n* Add a New POI:\t`https://openchargemap.org/site/poi/add`\n* View POI Details: `https://openchargemap.org/site/poi/details/{OCM-ID}`\n* Add a Comment/Check-In to an existing POI: \t`https://openchargemap.org/site/poi/addcomment/{OCM-ID}` \n* Add a Photo to an existing POI:\t`https://openchargemap.org/site/poi/addmediaitem/{OCM-ID}`"
+servers:
+  - url: 'https://api.openchargemap.io/v3'
+    description: API Base URL
+paths:
+  /poi:
+    get:
+      summary: Retrieve POI list (sites)
+      tags: []
+      responses:
+        '200':
+          $ref: '#/components/responses/POI'
+      operationId: get-poi
+      parameters:
+        - schema:
+            type: string
+            default: json
+          in: query
+          name: output
+          description: 'Optional output format `json`,`geojson`,`xml`,`csv`, JSON is the default and recommended as the highest fidelity.'
+        - schema:
+            type: string
+          in: query
+          name: client
+          description: String to identify your client application. Optional but recommended to distinguish your client from other bots/crawlers
+        - schema:
+            type: integer
+            default: 100
+          in: query
+          name: maxresults
+          description: Limit on max number of results returned
+        - schema:
+            type: string
+          in: query
+          name: countrycode
+          description: 2-character ISO Country code to filter to one specific country
+        - schema:
+            type: array
+            items:
+              type: string
+            example: 'US,GB'
+          in: query
+          name: countryid
+          description: Exact match on a given numeric country id (comma separated list)
+        - schema:
+            type: integer
+          in: query
+          name: latitude
+          description: Latitude for distance calculation and filtering
+        - schema:
+            type: number
+          in: query
+          name: longitude
+          description: Longitude for distance calculation and filtering
+        - schema:
+            type: number
+          in: query
+          name: distance
+          description: Optionally filter results by a max distance from the given latitude/longitude
+        - schema:
+            type: string
+            default: Miles
+          in: query
+          name: distanceunit
+          description: '`miles` or `km` distance unit'
+        - schema:
+            type: array
+            example: '1,2,3'
+          in: query
+          name: operatorid
+          description: Exact match on a given EVSE operator id (comma separated list)
+        - schema:
+            type: array
+            example: '1,2,3'
+          in: query
+          name: connectiontypeid
+          description: Exact match on a given connection type id (comma separated list)
+        - schema:
+            type: array
+            example: '1,2,3'
+          in: query
+          name: levelid
+          description: Exact match on a given charging level (1-3) id (comma separated list)
+          deprecated: true
+        - schema:
+            type: array
+            example: '1,2,3'
+          in: query
+          name: usagetypeid
+          description: Exact match on a given usage type id (comma separated list)
+        - schema:
+            type: array
+            example: '1,2,3'
+          in: query
+          name: statustypeid
+          description: Exact match on a given status type id (comma separated list)
+        - schema:
+            type: array
+          in: query
+          name: dataproviderid
+          description: 'Exact match on a given data provider id id (comma separated list). '
+        - schema:
+            type: boolean
+          in: query
+          name: opendata
+          description: Use opendata=true for only OCM provided ("Open") data.
+        - schema:
+            type: boolean
+            default: 'false'
+          in: query
+          name: includecomments
+          description: 'If true, user comments and media items will be include in result set'
+        - schema:
+            type: boolean
+            default: 'true'
+          in: query
+          name: verbose
+          description: Set to false to get a smaller result set with null items removed.
+        - schema:
+            type: boolean
+            default: 'false'
+          in: query
+          name: compact
+          description: Set to true to remove reference data objects from output (just returns IDs for common reference data such as DataProvider etc).
+        - schema:
+            type: boolean
+            default: false
+          in: query
+          name: camelcase
+          description: Set to true to get a property names in camelCase format.
+        - schema:
+            type: string
+          in: query
+          name: chargepointid
+          description: Exact match on a given OCM POI ID (comma separated list)
+        - schema:
+            type: array
+          in: query
+          name: boundingbox
+          description: 'Filter results to a given bounding box. specify top left and bottom right box corners as: (lat,lng),(lat2,lng2)'
+        - schema:
+            type: string
+          in: query
+          name: polygon
+          description: Filter results within a given Polygon. Specify an encoded polyline for the polygon shape. Polygon will be automatically closed from the last point to the first point.
+        - schema:
+            type: string
+          in: query
+          name: polyline
+          description: 'Filter results along an encoded polyline, use with distance param to increase search distance along line. Polyline is expanded into a polygon to cover the search distance.'
+        - schema:
+            type: string
+          in: query
+          name: sortby
+          description: 'Default sort order is based on spatial index but you can optionally sort by  `modified_asc` for results in order of modification (oldest to newest), or ` id_asc` for results in order of ID'
+        - schema:
+            type: string
+          in: query
+          name: modifiedsince
+          description: Filter to results modified after the given date
+        - schema:
+            type: string
+          in: query
+          name: greaterthanid
+          description: Filter to items with ID greater than given value
+      description: Used to fetch a list of POIs (sites) within a geographic boundary or near a specific latitude/longitude. This is the primary method for most applications and services to consume data from Open Charge Map.
+      x-internal: false
+    parameters: []
+  /referencedata:
+    get:
+      summary: Core Reference Data
+      tags: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CoreReferenceData'
+      operationId: get-referencedata
+      description: |-
+        Returns the core reference data used for looking up IDs such as Connection Types, Operators, Countries etc. 
+
+        This information is useful for UIs such as editing systems or for fetching results in the lighter non-verbose mode, then hydrating POI results back into complex objects.
+      parameters:
+        - schema:
+            type: array
+          in: query
+          description: 'Optional filter on countryid, exact match on a given numeric country id (comma separated list)'
+          name: countryid
+    parameters: []
+  /profile/authenticate:
+    post:
+      summary: Authenticate User
+      operationId: post-authenticate
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                description: ''
+                type: object
+                x-examples:
+                  example-1:
+                    Data:
+                      UserProfile:
+                        ID: 1000
+                        Username: Joe Bloggs
+                        Profile: "Example person who uses open charge map \U0001F918"
+                        Location: 'San Francisco, US'
+                        WebsiteURL: 'https://openchargemap.org'
+                        ReputationPoints: 2008
+                        Permissions: '{"Permissions":[{"Level":100},{"Level":1000}],"LegacyPermissions":"[CountryLevel_Editor=All];[Administrator=true];"}'
+                        DateCreated: '2011-09-28T15:11:00'
+                        DateLastLogin: '2021-11-09T07:49:00'
+                        IsProfilePublic: true
+                        Latitude: -31
+                        Longitude: 115
+                        EmailAddress: example@example.com
+                        EmailHash: null
+                        ProfileImageURL: 'https://www.gravatar.com/avatar/e3e76940eb5e85220db216603ee6b00f?s=80&d=robohash'
+                      access_token: eXampleJwt.AccessTOKEN
+                    Metadata:
+                      StatusCode: 200
+                properties:
+                  Data:
+                    type: object
+                    required:
+                      - UserProfile
+                      - access_token
+                    properties:
+                      UserProfile:
+                        $ref: '#/components/schemas/UserProfile'
+                      access_token:
+                        type: string
+                        minLength: 1
+                        description: JWT Bearer Token to use in subsequent authenticated requests
+                  Metadata:
+                    type: object
+                    required:
+                      - StatusCode
+                    properties:
+                      StatusCode:
+                        type: integer
+                required:
+                  - Data
+                  - Metadata
+      description: 'Perform user authentication, returning a model which includes the users profile and a JWT auth token to re-use in subsequent requests.'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                emailaddress:
+                  type: string
+                password:
+                  type: string
+            examples:
+              example-1:
+                value:
+                  emailaddress: string
+                  password: string
+        description: ''
+    parameters: []
+  /comment:
+    post:
+      summary: Submit Comment or Checkin
+      operationId: post-comment
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                description: ''
+                type: object
+                properties:
+                  status:
+                    type: string
+                    minLength: 1
+                  description:
+                    type: string
+                    minLength: 1
+                required:
+                  - status
+                  - description
+                x-examples:
+                  example-1:
+                    status: OK
+                    description: OK
+              examples:
+                example-response:
+                  value:
+                    status: OK
+                    description: OK
+        '400':
+          description: Bad Request
+      description: Submit a user comment or checkin for a specific charging location
+      security:
+        - UserAuthentication: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              description: ''
+              type: object
+              x-examples:
+                example-1:
+                  ChargePointID: 12345
+                  CommentTypeID: 10
+                  UserName: A. Nickname
+                  Comment: 'This place is awesome, free cake for EV owners!'
+                  Rating: 5
+                  RelatedURL: 'http://awesomevplace.com'
+                  CheckinStatusTypeID: 0
+              properties:
+                chargePointID:
+                  type: integer
+                  description: This must be a valid POI ID
+                commentTypeID:
+                  type: integer
+                  description: This must be a valid Comment Type ID as per UserCommentTypes found in Core Reference Data. If left as null then General Comment will be used.
+                userName:
+                  type: string
+                  minLength: 1
+                  description: 'This is an optional name to associate with the submission, for authenticated users their profile username is used.'
+                  maxLength: 100
+                comment:
+                  type: string
+                  minLength: 1
+                  maxLength: 4000
+                  description: 'This is an optional comment to describe the charging experience, may include guidance for future users.'
+                rating:
+                  type: integer
+                  example: 3
+                  description: 'Optional integer rating between 1 = Worst, 5 = Best.'
+                relatedURL:
+                  type: string
+                  minLength: 1
+                  description: Optional website URL for related information
+                  maxLength: 500
+                checkinStatusTypeID:
+                  type: integer
+                  description: Optional valid CheckStatusTypeID to indicate overall catgeory and success/failure to use equipment e.g. 10 = Charged Successfully.
+              required:
+                - chargePointID
+            examples:
+              example-1:
+                value:
+                  chargePointID: 0
+                  commentTypeID: 0
+                  userName: string
+                  comment: string
+                  rating: 3
+                  relatedURL: string
+                  checkinStatusTypeID: 0
+  /mediaitem:
+    post:
+      summary: Add Media Item (Photo)
+      operationId: post-mediaitem
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                description: ''
+                type: object
+                x-examples:
+                  example-1:
+                    chargePointID: 156185
+                    comment: Test
+                    imageDataBase64: 'data:image/jpeg;base64,EXAMPLEBASE64ENCODEDJPEGORPNG'
+                properties:
+                  status:
+                    type: string
+                    description: status code OK
+                  description:
+                    type: string
+                required:
+                  - status
+              examples:
+                example-response:
+                  value:
+                    status: OK
+                    description: OK
+      description: Submit a photo for a specific charging location
+      security:
+        - UserAuthentication: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              description: ''
+              type: object
+              x-examples:
+                example-1:
+                  chargePointID: 0
+                  comment: string
+                  imageDataBase64: string
+              properties:
+                chargePointID:
+                  type: integer
+                  description: ID value for the OCM site (POI) this image relates to.
+                comment:
+                  type: string
+                  minLength: 1
+                  description: Optional description of image or context
+                imageDataBase64:
+                  type: string
+                  minLength: 1
+                  description: BASE64 encoded data
+              required:
+                - chargePointID
+                - imageDataBase64
+            examples:
+              example-media-upload:
+                value:
+                  chargePointID: 1234
+                  comment: An example comment
+                  imageDataBase64: 'data:image/jpeg;base64,<BASE64_ENCODED_DATA>'
+  /openapi:
+    get:
+      summary: Retrieve OpenAPI definition
+      tags: []
+      operationId: get-openapi
+      description: 'Retrieve the current OpenAPI format (YAML) definition for this API. This is useful for documentation tools, mocking, testing and client generation.'
+      responses:
+        '200':
+          description: OK
+          content:
+            text/plain:
+              schema:
+                type: object
+                properties: {}
+              examples:
+                example-response:
+                  value:
+                    openapi: 3.0.3
+                    info:
+                      title: Open Charge Map API
+                      version: '3.0'
+components:
+  schemas:
+    POI:
+      title: POI
+      type: object
+      description: |-
+        A POI (Point of Interest), also referred to as a `Site` or `ChargePoint`, is the top-level set of information regarding a geographic site with one or more electric vehicle charging equipment present. The term `ChargePointID` is used to reference the unique ID for each POI, as called OCM ID. This reference appears in various UI elements in the format `OCM-12345` to distinguish the ID number as being a reference for a specific POI/site.
+
+        Note: If the API is called in verbose mode properties expanded properties are included in the results (e.g. UsageType, StatusType, DataProvider, OperatorInfo, SubmissionStatus).  With the exception of the AddressInfo property, other object properties will not be populated in a compact result set and instead only the associated reference IDs will be set (e.g. UsageTypeID, DataProviderID etc)
+      x-examples:
+        Example POI Results:
+          ID: 148527
+          UUID: 4C524AA1-3413-4D56-804C-480304FEB0FB
+          UserComments:
+            - ID: string
+              ChargePointID: 0
+              CommentTypeID: 0
+              CommentType: {}
+              UserName: string
+              Comment: string
+              RelatedURL: string
+              DateCreated: '2019-08-24T14:15:22Z'
+              User:
+                ID: 0
+                Username: string
+                ReputationPoints: 0
+                ProfileImageURL: string
+              CheckinStatusTypeID: 0
+              CheckinStatusType: {}
+              '': string
+          MediaItems:
+            - ID: string
+              ChargePointID: string
+              ItemURL: string
+              ItemThumbnailURL: string
+              Comment: string
+              IsEnabled: true
+              IsVideo: true
+              IsFeaturedItem: true
+              IsExternalResource: true
+              User:
+                ID: 0
+                Username: string
+                ReputationPoints: 0
+                ProfileImageURL: string
+              DateCreated: string
+          IsRecentlyVerified: false
+          DateLastVerified: '2020-02-04T06:33:00Z'
+          ParentChargePointID: 0
+          DataProviderID: 1
+          DataProvidersReference: string
+          OperatorID: 0
+          OperatorsReference: PG-84306
+          UsageTypeID: 0
+          UsageCost: See network operators app for current charges
+          AddressInfo:
+            ID: 148879
+            description: Coneygear Centre
+            AddressLine1: Buttsgrove Way
+            AddressLine2: null
+            Town: Huntingdon
+            StateOrProvince: string
+            Postcode: PE29 1PE
+            CountryID: 1
+            Country:
+              ISOCode: GB
+              ContinentCode: EU
+              ID: 1
+              description: United Kingdom
+            Latitude: 52.343197
+            Longitude: -0.170632
+            ContactTelephone1: null
+            ContactTelephone2: null
+            ContactEmail: string
+            AccessComments: string
+            RelatedURL: null
+            Distance: null
+            DistanceUnit: 1
+          Connections:
+            - ID: 206241
+              ConnectionTypeID: 25
+              ConnectionType:
+                FormalName: IEC 62196-2 Type 2
+                IsDiscontinued: false
+                IsObsolete: false
+                ID: 25
+                description: Type 2 (Socket Only)
+              Reference: null
+              StatusTypeID: 50
+              StatusType:
+                IsOperational: true
+                IsUserSelectable: true
+                ID: 50
+                description: Operational
+              LevelID: 2
+              Level:
+                ID: 2
+                description: 'Level 2 : Medium (Over 2kW)'
+                Comments: 'Over 2 kW, usually non-domestic socket type'
+                IsFastChargeCapable: false
+              Amps: 32
+              Voltage: 230
+              PowerKW: 7.4
+              CurrentTypeID: 10
+              CurrentType:
+                Description: Alternating Current - Single Phase
+                ID: 10
+                description: AC (Single-Phase)
+              Quantity: 2
+              Comments: string
+          NumberOfPoints: 0
+          GeneralComments: ''
+          DatePlanned: '2020-02-04T06:33:00Z'
+          DateLastConfirmed: '2020-02-04T06:33:00Z'
+          StatusTypeID: 0
+          DateLastStatusUpdate: '2020-02-04T06:33:00Z'
+          MetadataValues:
+            - null
+          DataQualityLevel: 5
+          DateCreated: '2020-02-04T06:33:00Z'
+          SubmissionStatusTypeID: 0
+          DataProvider:
+            WebsiteURL: 'https://openchargemap.org'
+            Comments: string
+            DataProviderStatusType:
+              IsProviderEnabled: true
+              ID:
+                - 1
+              description:
+                - Manual Data Entry
+            IsRestrictedEdit: false
+            IsOpenDataLicensed: null - true
+            IsApprovedImport: null - true
+            License: Licensed under Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0)
+            DateLastImported: 'null - ''2020-02-04T23:09:00Z'''
+            ID: 1
+            description: Open Charge Map Contributors
+          OperatorInfo:
+            WebsiteURL: 'http://www.pod-point.com/'
+            Comments: null
+            PhonePrimaryContact: null
+            PhoneSecondaryContact: null
+            IsPrivateIndividual: false
+            AddressInfo:
+              ID: 148879
+              description: Coneygear Centre
+              AddressLine1: Buttsgrove Way
+              AddressLine2: null
+              Town: Huntingdon
+              StateOrProvince: string
+              Postcode: PE29 1PE
+              CountryID: 1
+              Country:
+                ISOCode: GB
+                ContinentCode: EU
+                ID: 1
+                description: United Kingdom
+              Latitude: 52.343197
+              Longitude: -0.170632
+              ContactTelephone1: null
+              ContactTelephone2: null
+              ContactEmail: string
+              AccessComments: string
+              RelatedURL: null
+              Distance: null
+              DistanceUnit: 1
+            BookingURL: string
+            ContactEmail: enquiries@pod-point.com
+            FaultReportEmail: enquiries@pod-point.com
+            IsRestrictedEdit: true
+            ID: 0
+            description: POD Point (UK)
+          UsageType:
+            IsPayAtLocation: true
+            IsMembershipRequired: true
+            IsAccessKeyRequired: true
+            ID: 0
+            description: Public - Membership Required
+          StatusType:
+            IsOperational: true
+            IsUserSelectable: true
+            ID: 50
+            description: Operational
+          SubmissionStatus:
+            IsLive: true
+            ID: 200
+            description: Submission Published
+      properties:
+        ID:
+          type: integer
+          description: The OCM reference ID for this POI (Point of Interest).
+          example: 148527
+        UUID:
+          type: string
+          description: 'A universally unique identifier used as surrogate key. ID and UUID must be preserved when submitting POI update information. '
+          example: 4C524AA1-3413-4D56-804C-480304FEB0FB
+          format: uuid
+        UserComments:
+          description: A list of user comments or check-ins for this site
+          type: array
+          items:
+            $ref: '#/components/schemas/UserComment'
+        MediaItems:
+          type: array
+          description: A list of user submitted photos for this site
+          items:
+            $ref: '#/components/schemas/MediaItem'
+        IsRecentlyVerified:
+          type: boolean
+          description: A dynamically computed value indicating of any recently confirmation activity has taken place for this site (positive check-ins etc)
+          default: false
+          example: true
+        DateLastVerified:
+          format: date-time
+          description: 'A dynamically computed value, the date and time (UTC, ISO 8601) this POI was last confirmed by a user edit or related user comment'
+          example: '2020-02-04T06:33:00Z'
+          type: string
+        ParentChargePointID:
+          type: integer
+          description: 'If present, this data in this POI supercedes information in another POI. Generally not relevant to consumers.'
+        DataProviderID:
+          type: integer
+          description: The reference ID for the Data Provider of this POI
+          example: 1
+        DataProvidersReference:
+          type: string
+          description: 'If present, this is the Data Providers own key for this POI within their source data set'
+        OperatorID:
+          type: integer
+          description: The reference ID of the equipment network operator or owner
+          default: 0
+          example: 3
+        OperatorsReference:
+          type: string
+          description: The network operators own reference for this site (may be a site reference or a single equipment reference)
+          example: PG-84306
+        UsageTypeID:
+          type: integer
+          description: 'The reference ID for the site Usage Type, 0 == Unknown'
+          default: 0
+          example: 4
+        UsageCost:
+          type: string
+          description: Free text description of likely usage costs associated with this site. Generally relates to parking charges whether network operates this site as Free
+          example: See network operators app for current charges
+        AddressInfo:
+          $ref: '#/components/schemas/AddressInfo'
+        Connections:
+          type: array
+          description: List of equipment summary information for this site
+          items:
+            $ref: '#/components/schemas/ConnectionInfo'
+        NumberOfPoints:
+          type: integer
+          description: The number of bays or discreet stations available overall at this site. This indicates the limiting for number of simultaneous site users.
+          default: 0
+          example: 2
+        GeneralComments:
+          type: string
+          description: General additional factual information for the POI. Users are discouraged from using this field for opinions on site quality etc.
+          example: 'This is an open charge unit installed at the Coneygear Centre at Buttsgrove Way, Huntingdon'
+        DatePlanned:
+          type: string
+          format: date-time
+          description: 'The date and time (UTC, ISO 8601) this POI is or was planned for commissioning. In general planned POIs should not be presented to end users until confirmed operational.'
+          example: '2020-02-04T06:33:00Z'
+        DateLastConfirmed:
+          type: string
+          format: date-time
+          description: 'The date and time (UTC, ISO 8601) this POI was last confirmed according to the data provider or a user. See DateLastVerified for a dynamically computed date based on multiple signals.'
+          example: '2020-02-04T06:33:00Z'
+        StatusTypeID:
+          type: integer
+          description: The overall operational status type reference ID for this POI (i.e. Operational etc). 0 == Unknown
+          default: 0
+          example: 50
+        DateLastStatusUpdate:
+          type: string
+          format: date-time
+          description: 'The date and time (UTC, ISO 8601) this POI or directly related child properties were updated.'
+          example: '2020-02-04T06:33:00Z'
+        MetadataValues:
+          type: array
+          description: 'Optional array of metadata values. Generally used to indicate data attribution but is also intended for future use to indicate surrounding amenties, links or foreign key values into other data sets.'
+          items: {}
+        DataQualityLevel:
+          type: integer
+          description: A metric applied during imports to indicate a quality level based on available information detail (5 == best). Largely unused currently.
+          example: 5
+        DateCreated:
+          type: string
+          format: date-time
+          description: 'The date and time (UTC, ISO 8601) this POI was added to the Open Charge Map database'
+          example: '2020-02-04T06:33:00Z'
+        SubmissionStatusTypeID:
+          type: integer
+          description: The reference ID for the submission status type which applied to this POI.
+          default: 0
+          example: 200
+        DataProvider:
+          $ref: '#/components/schemas/DataProvider'
+        OperatorInfo:
+          $ref: '#/components/schemas/OperatorInfo'
+        UsageType:
+          $ref: '#/components/schemas/UsageType'
+        StatusType:
+          $ref: '#/components/schemas/StatusType'
+        SubmissionStatus:
+          $ref: '#/components/schemas/SubmissionStatusType'
+      examples:
+        - ID: 148527
+          UUID: 4C524AA1-3413-4D56-804C-480304FEB0FB
+          UserComments:
+            - ID: string
+              ChargePointID: 0
+              CommentTypeID: 0
+              CommentType:
+                ID: 0
+                Title: string
+              UserName: string
+              Comment: string
+              RelatedURL: string
+              DateCreated: '2019-08-24T14:15:22Z'
+              User:
+                ID: 0
+                Username: string
+                ReputationPoints: 0
+                ProfileImageURL: string
+              CheckinStatusTypeID: 0
+              CheckinStatusType:
+                ID: 0
+                Title: string
+                IsAutomatedCheckin: true
+                IsPositive: true
+          MediaItems:
+            - ID: string
+              ChargePointID: string
+              ItemURL: string
+              ItemThumbnailURL: string
+              Comment: string
+              IsEnabled: true
+              IsVideo: true
+              IsFeaturedItem: true
+              IsExternalResource: true
+              User:
+                ID: 0
+                Username: string
+                ReputationPoints: 0
+                ProfileImageURL: string
+              DateCreated: string
+          IsRecentlyVerified: true
+          DateLastVerified: '2020-02-04T06:33:00Z'
+          ParentChargePointID: 0
+          DataProviderID: 1
+          DataProvidersReference: string
+          OperatorID: 3
+          OperatorsReference: PG-84306
+          UsageTypeID: 4
+          UsageCost: See network operators app for current charges
+          AddressInfo:
+            ID: 148879
+            AddressLine1: Buttsgrove Way
+            AddressLine2: null
+            Town: Huntingdon
+            StateOrProvince: string
+            Postcode: PE29 1PE
+            CountryID: 1
+            Country:
+              ID: 1
+              ISOCode: GB
+              ContinentCode: EU
+              Title: United Kingdom
+            Latitude: 52.343197
+            Longitude: -0.170632
+            ContactTelephone1: null
+            ContactTelephone2: null
+            ContactEmail: string
+            AccessComments: string
+            RelatedURL: null
+            Distance: null
+            DistanceUnit: 1
+            Title: string
+          Connections:
+            - ID: 206241
+              ConnectionTypeID: 25
+              ConnectionType:
+                FormalName: IEC 62196-2 Type 2
+                IsDiscontinued: false
+                IsObsolete: false
+                ID: 25
+                Title: Type 2 (Socket Only)
+              Reference: null
+              StatusTypeID: 50
+              StatusType:
+                IsOperational: true
+                IsUserSelectable: true
+                ID: 50
+                Title: Operational
+              LevelID: 2
+              Level:
+                ID: 2
+                Title: 'Level 2 : Medium (Over 2kW)'
+                Comments: 'Over 2 kW, usually non-domestic socket type'
+                IsFastChargeCapable: true
+              Amps: 32
+              Voltage: 230
+              PowerKW: 7.4
+              CurrentTypeID: 10
+              CurrentType:
+                ID: 10
+                Title: AC (Single-Phase)
+              Quantity: 2
+              Comments: string
+          NumberOfPoints: 2
+          GeneralComments: 'This is an open charge unit installed at the Coneygear Centre at Buttsgrove Way, Huntingdon'
+          DatePlanned: '2020-02-04T06:33:00Z'
+          DateLastConfirmed: '2020-02-04T06:33:00Z'
+          StatusTypeID: 50
+          DateLastStatusUpdate: '2020-02-04T06:33:00Z'
+          MetadataValues:
+            - null
+          DataQualityLevel: 5
+          DateCreated: '2020-02-04T06:33:00Z'
+          SubmissionStatusTypeID: 200
+          DataProvider:
+            WebsiteURL: 'https://openchargemap.org'
+            Comments: string
+            DataProviderStatusType:
+              IsProviderEnabled: true
+              ID:
+                - 1
+              description:
+                - Manual Data Entry
+            IsRestrictedEdit: false
+            IsOpenDataLicensed: true
+            IsApprovedImport: true
+            License: Licensed under Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0)
+            DateLastImported: '2020-02-04T23:09:00Z'
+            ID: 1
+            Title: Open Charge Map Contributors
+          OperatorInfo:
+            WebsiteURL: 'http://www.pod-point.com/'
+            Comments: null
+            PhonePrimaryContact: null
+            PhoneSecondaryContact: null
+            IsPrivateIndividual: false
+            AddressInfo:
+              ID: 148879
+              AddressLine1: Buttsgrove Way
+              AddressLine2: null
+              Town: Huntingdon
+              StateOrProvince: string
+              Postcode: PE29 1PE
+              CountryID: 1
+              Country:
+                ID: 1
+                ISOCode: GB
+                ContinentCode: EU
+                Title: United Kingdom
+              Latitude: 52.343197
+              Longitude: -0.170632
+              ContactTelephone1: null
+              ContactTelephone2: null
+              ContactEmail: string
+              AccessComments: string
+              RelatedURL: null
+              Distance: null
+              DistanceUnit: 1
+              Title: string
+            BookingURL: string
+            ContactEmail: enquiries@pod-point.com
+            FaultReportEmail: enquiries@pod-point.com
+            IsRestrictedEdit: true
+            ID: 0
+            Title: POD Point (UK)
+          UsageType:
+            IsPayAtLocation: true
+            IsMembershipRequired: true
+            IsAccessKeyRequired: true
+            ID: 0
+            Title: Public - Membership Required
+          StatusType:
+            IsOperational: true
+            IsUserSelectable: true
+            ID: 50
+            Title: Operational
+          SubmissionStatus:
+            ID: 200
+            Title: string
+            IsLive: false
+    DataProvider:
+      type: object
+      description: A Data Provider is the controller of the source data set used to construct the details for this POI. Data has been transformed and interpreted from it's original form. Each Data Provider provides data either by an explicit license or agreement.
+      properties:
+        WebsiteURL:
+          type: string
+          description: Website URL for this data provider
+          example: 'https://openchargemap.org'
+          pattern: ^(.*)$
+        Comments:
+          type: string
+          description: General public comments with information about this Data Provider.
+        DataProviderStatusType:
+          type: object
+          description: 'Status object describing whether this data provider is currently enabled and the type of source (manual entry, imported etc)'
+          properties:
+            IsProviderEnabled:
+              type: boolean
+              description: 'If false, results from this data provider are not currently enabled'
+              default: false
+              example: true
+            ID:
+              type: integer
+              description: The reference ID for this provider status type
+              default: 0
+              example:
+                - 1
+            description:
+              type: string
+              description: The Title of this status type
+              example:
+                - Manual Data Entry
+              pattern: ^(.*)$
+          required:
+            - IsProviderEnabled
+            - ID
+        IsRestrictedEdit:
+          type: boolean
+          description: Currently not implemented. Indicates a potential editing restriction.
+          default: false
+          example: false
+        IsOpenDataLicensed:
+          type: boolean
+          description: 'If true, data provider uses an Open Data license'
+          example: true
+        IsApprovedImport:
+          type: boolean
+          description: 'If false, data may not be imported for this provider.'
+          example: true
+        License:
+          type: string
+          description: Summary of the licensing which applies for this Data Provider. Each Data Provider has one specific license or agreement. Usage of the data requires acceptance of the given license.
+          example: Licensed under Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0)
+          pattern: ^(.*)$
+        DateLastImported:
+          type: string
+          format: date-time
+          description: Date and time (UTC) the last import was performed for this data provider (if an import).
+          example: '2020-02-04T23:09:00Z'
+        ID:
+          type: integer
+          description: The reference ID for this Data Provider
+          example: 1
+        Title:
+          type: string
+          description: The Title for this Data Provider
+          example: Open Charge Map Contributors
+          pattern: ^(.*)$
+      required:
+        - IsRestrictedEdit
+        - ID
+    OperatorInfo:
+      type: object
+      description: An Operator is the public organisation which controls a network of charging points.
+      properties:
+        WebsiteURL:
+          type: string
+          description: Website for more information about this network
+          example: 'http://www.pod-point.com/'
+          pattern: ^(.*)$
+        Comments:
+          type: string
+          example: null
+        PhonePrimaryContact:
+          type: string
+          description: Primary contact number for network users
+          default: null
+        PhoneSecondaryContact:
+          type: string
+          description: Secondary contact number
+          default: null
+          pattern: ^(.*)$
+        IsPrivateIndividual:
+          type: boolean
+          description: 'If true, this operator represents a private individual'
+          deprecated: true
+          default: false
+          example: false
+        AddressInfo:
+          $ref: '#/components/schemas/AddressInfo'
+        BookingURL:
+          type: string
+        ContactEmail:
+          type: string
+          default: ''
+          example: enquiries@pod-point.com
+          pattern: ^(.*)$
+        FaultReportEmail:
+          type: string
+          description: Used to send automated notification to network operator if a user submits a fault report comment/check-in
+          example: enquiries@pod-point.com
+          pattern: ^(.*)$
+        IsRestrictedEdit:
+          type: boolean
+          description: 'If true, this network restricts community edits for OCM data'
+        ID:
+          type: integer
+          description: Id
+        Title:
+          type: string
+          description: Title
+          example: POD Point (UK)
+          pattern: ^(.*)$
+      required:
+        - ID
+    UsageType:
+      type: object
+      description: The Usage Type of a site indicates the general restrictions on usage.
+      properties:
+        IsPayAtLocation:
+          type: boolean
+          description: 'If true, usage requires paying at location'
+        IsMembershipRequired:
+          type: boolean
+          description: 'If true, this usage type requires registration or membership with a service.'
+        IsAccessKeyRequired:
+          type: boolean
+          description: If true this usage required a physical access key
+          deprecated: true
+        ID:
+          type: integer
+        Title:
+          type: string
+          example: Public - Membership Required
+          pattern: ^(.*)$
+      required:
+        - IsPayAtLocation
+        - IsMembershipRequired
+        - IsAccessKeyRequired
+        - ID
+    StatusType:
+      type: object
+      description: The Status Type of a site or equipment item indicates whether it is generally operational.
+      properties:
+        IsOperational:
+          type: boolean
+          default: false
+          example: true
+        IsUserSelectable:
+          type: boolean
+          default: false
+          example: true
+        ID:
+          type: integer
+          example: 50
+        Title:
+          type: string
+          example: Operational
+      required:
+        - IsOperational
+        - IsUserSelectable
+        - ID
+    SubmissionStatusType:
+      type: object
+      description: 'Submission Status object, detailing the POI listing status'
+      properties:
+        ID:
+          type: integer
+          description: Submission Status Type reference ID
+          default: 0
+          example: 200
+        Title:
+          type: string
+        IsLive:
+          type: boolean
+          description: 'If true, POI listing is live (not draft or de-listed)'
+          default: false
+      required:
+        - ID
+        - IsLive
+    Country:
+      type: object
+      description: Country details
+      properties:
+        ID:
+          type: integer
+          description: The Id Schema
+          default: 0
+          example: 1
+        ISOCode:
+          type: string
+          description: The Isocode Schema
+          default: ''
+          example: GB
+          pattern: ^(.*)$
+        ContinentCode:
+          type: string
+          description: The Continentcode Schema
+          default: ''
+          example: EU
+          pattern: ^(.*)$
+        Title:
+          type: string
+          description: The Title Schema
+          default: ''
+          example: United Kingdom
+          pattern: ^(.*)$
+      required:
+        - ID
+        - ISOCode
+        - ContinentCode
+    AddressInfo:
+      type: object
+      description: Geographic position for site and (nearest) address component information.
+      properties:
+        ID:
+          type: integer
+          description: ID
+          default: 0
+          example: 148879
+        AddressLine1:
+          type: string
+          description: First line of nearby street address
+          default: ''
+          example: Buttsgrove Way
+          pattern: ^(.*)$
+        AddressLine2:
+          type: string
+          description: Second line of nearby street address
+          default: null
+        Town:
+          type: string
+          description: Town or City
+          example: Huntingdon
+          pattern: ^(.*)$
+        StateOrProvince:
+          type: string
+          description: State or Province
+        Postcode:
+          type: string
+          description: Postal code or Zipcode
+          example: PE29 1PE
+          pattern: ^(.*)$
+        CountryID:
+          type: integer
+          description: The reference ID for the Country
+          example: 1
+        Country:
+          $ref: '#/components/schemas/Country'
+        Latitude:
+          type: number
+          description: Site latitude coordinate in decimal degrees
+          default: 0
+          example: 52.343197
+        Longitude:
+          type: number
+          description: Site longitude coordinate in decimal degrees
+          default: 0
+          example: -0.170632
+        ContactTelephone1:
+          type: string
+          description: Primary contact number
+          default: null
+        ContactTelephone2:
+          type: string
+          description: Secondary contact number
+          default: null
+        ContactEmail:
+          type: string
+          description: Primary contact email
+        AccessComments:
+          type: string
+          description: Guidance for users to use or find the equipment
+        RelatedURL:
+          type: string
+          description: Optional website for more information
+          default: null
+        Distance:
+          type: number
+          description: 'Distance from search location, if search is around a point'
+          default: null
+        DistanceUnit:
+          type: integer
+          description: 'Unit used for distance, 1= Miles, 2 = KM'
+          default: 1
+        Title:
+          type: string
+          description: General title for this location to aid user
+      required:
+        - ID
+        - CountryID
+        - Latitude
+        - Longitude
+    UserComment:
+      type: object
+      description: A user comment or check-in for a specific charging point (POI/Site)
+      properties:
+        ID:
+          type: string
+        ChargePointID:
+          type: integer
+        CommentTypeID:
+          type: integer
+        CommentType:
+          $ref: '#/components/schemas/UserCommentType'
+        UserName:
+          type: string
+        Comment:
+          type: string
+        RelatedURL:
+          type: string
+        DateCreated:
+          type: string
+          format: date-time
+        User:
+          $ref: '#/components/schemas/UserInfo'
+        CheckinStatusTypeID:
+          type: integer
+        CheckinStatusType:
+          $ref: '#/components/schemas/CheckinStatusType'
+    MediaItem:
+      type: object
+      description: A user submitted media item related to a specific charge point or site. Currently always an image.
+      properties:
+        ID:
+          type: string
+        ChargePointID:
+          type: string
+        ItemURL:
+          type: string
+        ItemThumbnailURL:
+          type: string
+        Comment:
+          type: string
+        IsEnabled:
+          type: boolean
+        IsVideo:
+          type: boolean
+        IsFeaturedItem:
+          type: boolean
+        IsExternalResource:
+          type: boolean
+        User:
+          $ref: '#/components/schemas/UserInfo'
+        DateCreated:
+          type: string
+    ConnectionInfo:
+      type: object
+      description: |-
+        Details on the equipment type and power capability.
+
+        If calling the API in verbose mode related models are also included in the result (e.g. ConnectionType, Level, StatusType, CurrentType)
+      properties:
+        ID:
+          type: integer
+          example: 206241
+        ConnectionTypeID:
+          type: integer
+          default: null
+          example: 25
+        ConnectionType:
+          $ref: '#/components/schemas/ConnectionType'
+        Reference:
+          type: string
+          description: Optional operators reference for this connection/port
+          default: null
+        StatusTypeID:
+          type: integer
+          description: Status Type reference ID. 0 = Unknown
+          default: 0
+          example: 50
+        StatusType:
+          $ref: '#/components/schemas/StatusType'
+        LevelID:
+          type: integer
+          example: 2
+          description: A general category for power capability. Depreceated in favour of documenting specific equipment power in kW.
+          deprecated: true
+        Level:
+          $ref: '#/components/schemas/LevelType'
+        Amps:
+          type: integer
+          description: EVSE supply max current in Amps
+          default: null
+          example: 32
+        Voltage:
+          type: number
+          description: EVSE supply voltage
+          default: null
+          example: 230
+        PowerKW:
+          type: number
+          description: Peak available power in kW
+          default: null
+          example: 7.4
+        CurrentTypeID:
+          description: The supply type reference ID (e.g. DC etc)
+          default: null
+          example: 10
+          type: integer
+        CurrentType:
+          $ref: '#/components/schemas/SupplyType'
+        Quantity:
+          type: integer
+          description: Optional summary number of equipment items available with this specification
+          default: null
+          example: 2
+        Comments:
+          type: string
+    ConnectionType:
+      type: object
+      description: The type of end-user connection an EVSE supports.
+      properties:
+        FormalName:
+          type: string
+          description: Formal (standard) name for this connection type
+          default: ''
+          example: IEC 62196-2 Type 2
+          pattern: ^(.*)$
+        IsDiscontinued:
+          type: boolean
+          description: 'If true, this is an discontinued but used connection type'
+          default: false
+          example: false
+        IsObsolete:
+          type: boolean
+          description: 'If true, this is an obsolete connection type and is unlikely top be present in modern infrastructure'
+          default: false
+          example: false
+        ID:
+          type: integer
+          example: 25
+        Title:
+          type: string
+          example: Type 2 (Socket Only)
+    LevelType:
+      type: object
+      description: A general category for equipment power capability. Deprecated for general use. Currently computed automatically based on equipment power.
+      properties:
+        ID:
+          type: integer
+          example: 2
+        Title:
+          type: string
+          example: 'Level 2 : Medium (Over 2kW)'
+        Comments:
+          type: string
+          example: 'Over 2 kW, usually non-domestic socket type'
+        IsFastChargeCapable:
+          type: boolean
+          description: 'If true, this level is considered ''fast'' charging, relative to other levels.'
+      required:
+        - ID
+        - Comments
+        - IsFastChargeCapable
+    SupplyType:
+      type: object
+      description: 'Indicates the EVSE power supply type e.g. DC (Direct Current), AC (Single Phase), AC (3 Phase).'
+      properties:
+        ID:
+          type: integer
+          example: 10
+        Title:
+          type: string
+          example: AC (Single-Phase)
+      required:
+        - ID
+    UserInfo:
+      type: object
+      description: Short public summary profile for a specific Open Charge Map user
+      properties:
+        ID:
+          type: integer
+        Username:
+          type: string
+        ReputationPoints:
+          type: integer
+        ProfileImageURL:
+          type: string
+    CheckinStatusType:
+      type: object
+      description: Classification for the users comment or experience using a specific charging location.
+      properties:
+        ID:
+          type: integer
+        Title:
+          type: string
+        IsAutomatedCheckin:
+          type: boolean
+          description: 'If true, checkin or comment was provided by an automated system.'
+        IsPositive:
+          type: boolean
+          description: 'If true, this type of checkin/comment is considered positive.'
+      required:
+        - ID
+        - IsAutomatedCheckin
+    CoreReferenceData:
+      type: object
+      description: Set of core reference data used for other API results and UI
+      properties:
+        ChargerTypes:
+          type: array
+          items:
+            $ref: '#/components/schemas/LevelType'
+        ConnectionTypes:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConnectionType'
+        CheckinStatusTypes:
+          type: array
+          items:
+            $ref: '#/components/schemas/CheckinStatusType'
+        Countries:
+          type: array
+          items:
+            $ref: '#/components/schemas/Country'
+        CurrentTypes:
+          type: array
+          items:
+            $ref: '#/components/schemas/SupplyType'
+        DataProviders:
+          type: array
+          items:
+            $ref: '#/components/schemas/DataProvider'
+        DataTypes: {}
+        MetadataGroups:
+          type: string
+        Operators:
+          type: array
+          items:
+            $ref: '#/components/schemas/OperatorInfo'
+        StatusTypes:
+          type: array
+          items:
+            $ref: '#/components/schemas/StatusType'
+        SubmissionStatusTypes:
+          type: array
+          items:
+            $ref: '#/components/schemas/SubmissionStatusType'
+        UsageTypes:
+          type: array
+          items:
+            $ref: '#/components/schemas/UsageType'
+        UserCommentTypes:
+          type: array
+          items:
+            $ref: '#/components/schemas/UserCommentType'
+      x-examples:
+        example-1:
+          ChargerTypes:
+            - ID: 2
+              description: 'Level 2 : Medium (Over 2kW)'
+              Comments: 'Over 2 kW, usually non-domestic socket type'
+              IsFastChargeCapable: false
+          ConnectionTypes:
+            - FormalName: IEC 62196-2 Type 2
+              IsDiscontinued: false
+              IsObsolete: false
+              ID: 25
+              description: Type 2 (Socket Only)
+          CheckinStatusTypes:
+            - ID: 0
+              description: string
+              IsAutomatedCheckin: true
+              IsPositive: true
+          Countries:
+            - ISOCode: GB
+              ContinentCode: EU
+              ID: 1
+              description: United Kingdom
+          CurrentTypes:
+            - Description: Alternating Current - Single Phase
+              ID: 10
+              description: AC (Single-Phase)
+          DataProviders:
+            - WebsiteURL: 'https://openchargemap.org'
+              Comments: string
+              DataProviderStatusType:
+                IsProviderEnabled: true
+                ID:
+                  - 1
+                description:
+                  - Manual Data Entry
+              IsRestrictedEdit: false
+              IsOpenDataLicensed: null - true
+              IsApprovedImport: null - true
+              License: Licensed under Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0)
+              DateLastImported: 'null - ''2020-02-04T23:09:00Z'''
+              ID: 1
+              description: Open Charge Map Contributors
+          DataTypes: null
+          MetadataGroups: string
+          Operators:
+            - WebsiteURL: 'http://www.pod-point.com/'
+              Comments: null
+              PhonePrimaryContact: null
+              PhoneSecondaryContact: null
+              IsPrivateIndividual: false
+              AddressInfo:
+                ID: 148879
+                description: Coneygear Centre
+                AddressLine1: Buttsgrove Way
+                AddressLine2: null
+                Town: Huntingdon
+                StateOrProvince: string
+                Postcode: PE29 1PE
+                CountryID: 1
+                Country:
+                  ISOCode: GB
+                  ContinentCode: EU
+                  ID: 1
+                  description: United Kingdom
+                Latitude: 52.343197
+                Longitude: -0.170632
+                ContactTelephone1: null
+                ContactTelephone2: null
+                ContactEmail: string
+                AccessComments: string
+                RelatedURL: null
+                Distance: null
+                DistanceUnit: 1
+              BookingURL: string
+              ContactEmail: enquiries@pod-point.com
+              FaultReportEmail: enquiries@pod-point.com
+              IsRestrictedEdit: true
+              ID: 0
+              description: POD Point (UK)
+          StatusTypes:
+            - IsOperational: true
+              IsUserSelectable: true
+              ID: 50
+              description: Operational
+          SubmissionStatusTypes:
+            - IsLive: true
+              ID: 200
+              description: Submission Published
+          UsageTypes:
+            - IsPayAtLocation: true
+              IsMembershipRequired: true
+              IsAccessKeyRequired: true
+              ID: 0
+              description: Public - Membership Required
+          UserCommentTypes:
+            - ID: 0
+              Title: string
+    UserCommentType:
+      title: UserCommentType
+      type: object
+      properties:
+        ID:
+          type: integer
+        Title:
+          type: string
+      description: 'Category for a user comment, e.g. General Comment, Fault Report (Notice To Users And Operator)'
+    AuthenticationResult:
+      description: ''
+      type: object
+      x-examples:
+        example-1:
+          Data:
+            UserProfile:
+              ID: 1000
+              Username: Joe Bloggs
+              Profile: "Example person who uses open charge map \U0001F918"
+              Location: 'San Francisco, US'
+              WebsiteURL: 'https://openchargemap.org'
+              ReputationPoints: 2008
+              Permissions: '{"Permissions":[{"Level":100},{"Level":1000}],"LegacyPermissions":"[CountryLevel_Editor=All];[Administrator=true];"}'
+              DateCreated: '2011-09-28T15:11:00'
+              DateLastLogin: '2021-11-09T07:49:00'
+              IsProfilePublic: true
+              Latitude: -31
+              Longitude: 115
+              EmailAddress: example@example.com
+              EmailHash: null
+              ProfileImageURL: 'https://www.gravatar.com/avatar/e3e76940eb5e85220db216603ee6b00f?s=80&d=robohash'
+            access_token: eXampleJwt.AccessTOKEN
+          Metadata:
+            StatusCode: 200
+      properties:
+        Data:
+          type: object
+          required:
+            - UserProfile
+            - access_token
+          properties:
+            UserProfile:
+              type: object
+              required:
+                - ID
+                - Username
+                - Profile
+                - Location
+                - WebsiteURL
+                - ReputationPoints
+                - Permissions
+                - DateCreated
+                - DateLastLogin
+                - IsProfilePublic
+                - Latitude
+                - Longitude
+                - EmailAddress
+                - ProfileImageURL
+              properties:
+                ID:
+                  type: number
+                Username:
+                  type: string
+                  minLength: 1
+                Profile:
+                  type: string
+                  minLength: 1
+                Location:
+                  type: string
+                  minLength: 1
+                WebsiteURL:
+                  type: string
+                  minLength: 1
+                ReputationPoints:
+                  type: number
+                Permissions:
+                  type: string
+                  minLength: 1
+                DateCreated:
+                  type: string
+                  minLength: 1
+                DateLastLogin:
+                  type: string
+                  minLength: 1
+                IsProfilePublic:
+                  type: boolean
+                Latitude:
+                  type: number
+                Longitude:
+                  type: number
+                EmailAddress:
+                  type: string
+                  minLength: 1
+                EmailHash: {}
+                ProfileImageURL:
+                  type: string
+                  minLength: 1
+            access_token:
+              type: string
+              minLength: 1
+        Metadata:
+          type: object
+          required:
+            - StatusCode
+          properties:
+            StatusCode:
+              type: number
+      required:
+        - Data
+        - Metadata
+    UserProfile:
+      description: 'Full user profile, including non-public fields such as Email Address'
+      type: object
+      x-examples:
+        example-userprofile:
+          ID: 1000
+          Username: Joe Bloggs
+          Profile: "Example Open Charge Map user. \U0001F918"
+          Location: 'San Francisco, US'
+          WebsiteURL: 'https://openchargemap.org'
+          ReputationPoints: 2008
+          Permissions: '{"Permissions":[{"Level":100},{"Level":1000}],"LegacyPermissions":"[CountryLevel_Editor=All];[Administrator=true];"}'
+          DateCreated: '2011-09-28T15:11:00'
+          DateLastLogin: '2021-11-09T07:49:00'
+          IsProfilePublic: true
+          Latitude: -31
+          Longitude: 115
+          EmailAddress: example@example.com
+          ProfileImageURL: 'https://www.gravatar.com/avatar/examplef?s=80&d=robohash'
+      properties:
+        ID:
+          type: number
+        Username:
+          type: string
+          minLength: 1
+        Profile:
+          type: string
+          minLength: 1
+        Location:
+          type: string
+          minLength: 1
+        WebsiteURL:
+          type: string
+          minLength: 1
+        ReputationPoints:
+          type: number
+        Permissions:
+          type: string
+          minLength: 1
+        DateCreated:
+          type: string
+          minLength: 1
+        DateLastLogin:
+          type: string
+          minLength: 1
+        IsProfilePublic:
+          type: boolean
+        Latitude:
+          type: number
+        Longitude:
+          type: number
+        EmailAddress:
+          type: string
+          minLength: 1
+        ProfileImageURL:
+          type: string
+          minLength: 1
+      required:
+        - ID
+        - Username
+        - DateCreated
+        - IsProfilePublic
+  securitySchemes:
+    APIKeyQueryString:
+      name: key
+      type: apiKey
+      in: query
+      description: API Key supplied as query string parameter
+    APIKeyHeader:
+      name: X-API-Key
+      type: apiKey
+      in: header
+    UserAuthentication:
+      type: http
+      scheme: bearer
+  responses:
+    POI:
+      description: List of POIs (sites) with associated equipment summary information.
+      content:
+        application/json:
+          schema:
+            type: array
+            items:
+              $ref: '#/components/schemas/POI'
+          example:
+            Example Results:
+              - DataProvider:
+                  WebsiteURL: 'http://openchargemap.org'
+                  Comments: null
+                  DataProviderStatusType:
+                    IsProviderEnabled: true
+                    ID: 1
+                    description: Manual Data Entry
+                  IsRestrictedEdit: false
+                  IsOpenDataLicensed: true
+                  IsApprovedImport: true
+                  License: Licensed under Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0)
+                  DateLastImported: null
+                  ID: 1
+                  description: Open Charge Map Contributors
+                OperatorInfo:
+                  WebsiteURL: 'https://www.afconev.co.il/'
+                  Comments: null
+                  PhonePrimaryContact: null
+                  PhoneSecondaryContact: null
+                  IsPrivateIndividual: false
+                  AddressInfo: null
+                  BookingURL: null
+                  ContactEmail: null
+                  FaultReportEmail: null
+                  IsRestrictedEdit: false
+                  ID: 3435
+                  description: Afcon (Israel)
+                UsageType:
+                  IsPayAtLocation: false
+                  IsMembershipRequired: true
+                  IsAccessKeyRequired: true
+                  ID: 4
+                  description: Public - Membership Required
+                StatusType:
+                  IsOperational: true
+                  IsUserSelectable: true
+                  ID: 50
+                  description: Operational
+                SubmissionStatus:
+                  IsLive: true
+                  ID: 200
+                  description: Submission Published
+                UserComments: null
+                PercentageSimilarity: null
+                MediaItems: null
+                IsRecentlyVerified: true
+                DateLastVerified: '2021-11-07T16:36:00Z'
+                ID: 189853
+                UUID: 1686CE5C-95E8-450B-93C3-95D1B1AF98D4
+                ParentChargePointID: null
+                DataProviderID: 1
+                DataProvidersReference: null
+                OperatorID: 3435
+                OperatorsReference: null
+                UsageTypeID: 4
+                UsageCost: null
+                AddressInfo:
+                  ID: 190212
+                  description: בית משה
+                  AddressLine1: כצנלסון 10
+                  AddressLine2: null
+                  Town: Ashkelon
+                  StateOrProvince: South District
+                  Postcode: '78100'
+                  CountryID: 111
+                  Country:
+                    ISOCode: IL
+                    ContinentCode: AS
+                    ID: 111
+                    description: Israel
+                  Latitude: 31.66148706692408
+                  Longitude: 34.587748089749425
+                  ContactTelephone1: null
+                  ContactTelephone2: null
+                  ContactEmail: null
+                  AccessComments: null
+                  RelatedURL: 'https://account.afconev.co.il/findCharger?31.6615343,34.5873913,20z,%D7%9B%D7%A6%D7%A0%D7%9C%D7%A1%D7%95%D7%9F%2010%20%D7%90%D7%A9%D7%A7%D7%9C%D7%95%D7%9F,494si'
+                  Distance: null
+                  DistanceUnit: 0
+                Connections:
+                  - ID: 307235
+                    ConnectionTypeID: 25
+                    ConnectionType:
+                      FormalName: IEC 62196-2 Type 2
+                      IsDiscontinued: false
+                      IsObsolete: false
+                      ID: 25
+                      description: Type 2 (Socket Only)
+                    Reference: null
+                    StatusTypeID: 50
+                    StatusType:
+                      IsOperational: true
+                      IsUserSelectable: true
+                      ID: 50
+                      description: Operational
+                    LevelID: 2
+                    Level:
+                      Comments: 'Over 2 kW, usually non-domestic socket type'
+                      IsFastChargeCapable: false
+                      ID: 2
+                      description: 'Level 2 : Medium (Over 2kW)'
+                    Amps: null
+                    Voltage: null
+                    PowerKW: 22
+                    CurrentTypeID: 20
+                    CurrentType:
+                      Description: Alternating Current - Three Phase
+                      ID: 20
+                      description: AC (Three-Phase)
+                    Quantity: 3
+                    Comments: null
+                  - ID: 307236
+                    ConnectionTypeID: 33
+                    ConnectionType:
+                      FormalName: IEC 62196-3 Configuration FF
+                      IsDiscontinued: false
+                      IsObsolete: false
+                      ID: 33
+                      description: CCS (Type 2)
+                    Reference: null
+                    StatusTypeID: 50
+                    StatusType:
+                      IsOperational: true
+                      IsUserSelectable: true
+                      ID: 50
+                      description: Operational
+                    LevelID: 3
+                    Level:
+                      Comments: 40KW and Higher
+                      IsFastChargeCapable: true
+                      ID: 3
+                      description: 'Level 3:  High (Over 40kW)'
+                    Amps: null
+                    Voltage: null
+                    PowerKW: 50
+                    CurrentTypeID: 30
+                    CurrentType:
+                      Description: Direct Current
+                      ID: 30
+                      description: DC
+                    Quantity: 1
+                    Comments: null
+                NumberOfPoints: 4
+                GeneralComments: null
+                DatePlanned: null
+                DateLastConfirmed: null
+                StatusTypeID: 50
+                DateLastStatusUpdate: '2021-11-07T16:36:00Z'
+                MetadataValues: null
+                DataQualityLevel: 1
+                DateCreated: '2021-11-07T16:36:00Z'
+                SubmissionStatusTypeID: 200
+              - ID: 148527
+                UUID: 4C524AA1-3413-4D56-804C-480304FEB0FB
+                UserComments:
+                  - ID: string
+                    ChargePointID: 0
+                    CommentTypeID: 0
+                    CommentType:
+                      ID: 0
+                      Title: string
+                    UserName: string
+                    Comment: string
+                    RelatedURL: string
+                    DateCreated: '2019-08-24T14:15:22Z'
+                    User:
+                      ID: 0
+                      Username: string
+                      ReputationPoints: 0
+                      ProfileImageURL: string
+                    CheckinStatusTypeID: 0
+                    CheckinStatusType:
+                      ID: 0
+                      Title: string
+                      IsAutomatedCheckin: true
+                      IsPositive: true
+                MediaItems:
+                  - ID: string
+                    ChargePointID: string
+                    ItemURL: string
+                    ItemThumbnailURL: string
+                    Comment: string
+                    IsEnabled: true
+                    IsVideo: true
+                    IsFeaturedItem: true
+                    IsExternalResource: true
+                    User:
+                      ID: 0
+                      Username: string
+                      ReputationPoints: 0
+                      ProfileImageURL: string
+                    DateCreated: string
+                IsRecentlyVerified: true
+                DateLastVerified: '2020-02-04T06:33:00Z'
+                ParentChargePointID: 0
+                DataProviderID: 1
+                DataProvidersReference: string
+                OperatorID: 3
+                OperatorsReference: PG-84306
+                UsageTypeID: 4
+                UsageCost: See network operators app for current charges
+                AddressInfo:
+                  ID: 148879
+                  AddressLine1: Buttsgrove Way
+                  AddressLine2: null
+                  Town: Huntingdon
+                  StateOrProvince: string
+                  Postcode: PE29 1PE
+                  CountryID: 1
+                  Country:
+                    ID: 1
+                    ISOCode: GB
+                    ContinentCode: EU
+                    Title: United Kingdom
+                  Latitude: 52.343197
+                  Longitude: -0.170632
+                  ContactTelephone1: null
+                  ContactTelephone2: null
+                  ContactEmail: string
+                  AccessComments: string
+                  RelatedURL: null
+                  Distance: null
+                  DistanceUnit: 1
+                  Title: string
+                Connections:
+                  - ID: 206241
+                    ConnectionTypeID: 25
+                    ConnectionType:
+                      FormalName: IEC 62196-2 Type 2
+                      IsDiscontinued: false
+                      IsObsolete: false
+                      ID: 25
+                      Title: Type 2 (Socket Only)
+                    Reference: null
+                    StatusTypeID: 50
+                    StatusType:
+                      IsOperational: true
+                      IsUserSelectable: true
+                      ID: 50
+                      Title: Operational
+                    LevelID: 2
+                    Level:
+                      ID: 2
+                      Title: 'Level 2 : Medium (Over 2kW)'
+                      Comments: 'Over 2 kW, usually non-domestic socket type'
+                      IsFastChargeCapable: true
+                    Amps: 32
+                    Voltage: 230
+                    PowerKW: 7.4
+                    CurrentTypeID: 10
+                    CurrentType:
+                      ID: 10
+                      Title: AC (Single-Phase)
+                    Quantity: 2
+                    Comments: string
+                NumberOfPoints: 2
+                GeneralComments: 'This is an open charge unit installed at the Coneygear Centre at Buttsgrove Way, Huntingdon'
+                DatePlanned: '2020-02-04T06:33:00Z'
+                DateLastConfirmed: '2020-02-04T06:33:00Z'
+                StatusTypeID: 50
+                DateLastStatusUpdate: '2020-02-04T06:33:00Z'
+                MetadataValues:
+                  - null
+                DataQualityLevel: 5
+                DateCreated: '2020-02-04T06:33:00Z'
+                SubmissionStatusTypeID: 200
+                DataProvider:
+                  WebsiteURL: 'https://openchargemap.org'
+                  Comments: string
+                  DataProviderStatusType:
+                    IsProviderEnabled: true
+                    ID:
+                      - 1
+                    description:
+                      - Manual Data Entry
+                  IsRestrictedEdit: false
+                  IsOpenDataLicensed: null - true
+                  IsApprovedImport: null - true
+                  License: Licensed under Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0)
+                  DateLastImported: 'null - ''2020-02-04T23:09:00Z'''
+                  ID: 1
+                  Title: Open Charge Map Contributors
+                OperatorInfo:
+                  WebsiteURL: 'http://www.pod-point.com/'
+                  Comments: null
+                  PhonePrimaryContact: null
+                  PhoneSecondaryContact: null
+                  IsPrivateIndividual: false
+                  AddressInfo:
+                    ID: 148879
+                    AddressLine1: Buttsgrove Way
+                    AddressLine2: null
+                    Town: Huntingdon
+                    StateOrProvince: string
+                    Postcode: PE29 1PE
+                    CountryID: 1
+                    Country:
+                      ID: 1
+                      ISOCode: GB
+                      ContinentCode: EU
+                      Title: United Kingdom
+                    Latitude: 52.343197
+                    Longitude: -0.170632
+                    ContactTelephone1: null
+                    ContactTelephone2: null
+                    ContactEmail: string
+                    AccessComments: string
+                    RelatedURL: null
+                    Distance: null
+                    DistanceUnit: 1
+                    Title: string
+                  BookingURL: string
+                  ContactEmail: enquiries@pod-point.com
+                  FaultReportEmail: enquiries@pod-point.com
+                  IsRestrictedEdit: true
+                  ID: 0
+                  Title: POD Point (UK)
+                UsageType:
+                  IsPayAtLocation: true
+                  IsMembershipRequired: true
+                  IsAccessKeyRequired: true
+                  ID: 0
+                  Title: Public - Membership Required
+                StatusType:
+                  IsOperational: true
+                  IsUserSelectable: true
+                  ID: 50
+                  Title: Operational
+                SubmissionStatus:
+                  ID: 200
+                  Title: string
+                  IsLive: false
+      headers: {}
+security:
+  - APIKeyQueryString: []
+  - APIKeyHeader: []
