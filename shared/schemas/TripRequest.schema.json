@@ -1,0 +1,251 @@
+{
+  "$defs": {
+    "Coordinates": {
+      "properties": {
+        "longitude": {
+          "maximum": 180,
+          "minimum": -180,
+          "title": "Longitude",
+          "type": "number"
+        },
+        "latitude": {
+          "maximum": 90,
+          "minimum": -90,
+          "title": "Latitude",
+          "type": "number"
+        }
+      },
+      "required": [
+        "longitude",
+        "latitude"
+      ],
+      "title": "Coordinates",
+      "type": "object"
+    },
+    "MoneyRange": {
+      "properties": {
+        "currency": {
+          "default": "CNY",
+          "title": "Currency",
+          "type": "string"
+        },
+        "minimum": {
+          "minimum": 0,
+          "title": "Minimum",
+          "type": "number"
+        },
+        "maximum": {
+          "minimum": 0,
+          "title": "Maximum",
+          "type": "number"
+        },
+        "estimated": {
+          "default": true,
+          "title": "Estimated",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "minimum",
+        "maximum"
+      ],
+      "title": "MoneyRange",
+      "type": "object"
+    },
+    "PlaceRef": {
+      "properties": {
+        "id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "address": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Address"
+        },
+        "city": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "City"
+        },
+        "coordinates": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Coordinates"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "source_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Id"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "PlaceRef",
+      "type": "object"
+    }
+  },
+  "properties": {
+    "raw_text": {
+      "title": "Raw Text",
+      "type": "string"
+    },
+    "origin": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PlaceRef"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "destination": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PlaceRef"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "start_date": {
+      "anyOf": [
+        {
+          "format": "date",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Start Date"
+    },
+    "end_date": {
+      "anyOf": [
+        {
+          "format": "date",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "End Date"
+    },
+    "return_before": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Return Before"
+    },
+    "travelers": {
+      "anyOf": [
+        {
+          "minimum": 1,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Travelers"
+    },
+    "preferences": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Preferences",
+      "type": "array"
+    },
+    "must_visit": {
+      "items": {
+        "$ref": "#/$defs/PlaceRef"
+      },
+      "title": "Must Visit",
+      "type": "array"
+    },
+    "budget": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/MoneyRange"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "max_continuous_drive_minutes": {
+      "default": 120,
+      "minimum": 30,
+      "title": "Max Continuous Drive Minutes",
+      "type": "integer"
+    },
+    "defaults_applied": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Defaults Applied",
+      "type": "array"
+    }
+  },
+  "required": [
+    "raw_text"
+  ],
+  "title": "TripRequest",
+  "type": "object"
+}

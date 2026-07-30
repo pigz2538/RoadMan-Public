@@ -1,0 +1,127 @@
+{
+  "$defs": {
+    "MoneyRange": {
+      "properties": {
+        "currency": {
+          "default": "CNY",
+          "title": "Currency",
+          "type": "string"
+        },
+        "minimum": {
+          "minimum": 0,
+          "title": "Minimum",
+          "type": "number"
+        },
+        "maximum": {
+          "minimum": 0,
+          "title": "Maximum",
+          "type": "number"
+        },
+        "estimated": {
+          "default": true,
+          "title": "Estimated",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "minimum",
+        "maximum"
+      ],
+      "title": "MoneyRange",
+      "type": "object"
+    }
+  },
+  "properties": {
+    "id": {
+      "title": "Id",
+      "type": "string"
+    },
+    "trip_id": {
+      "title": "Trip Id",
+      "type": "string"
+    },
+    "target_type": {
+      "title": "Target Type",
+      "type": "string"
+    },
+    "target_id": {
+      "title": "Target Id",
+      "type": "string"
+    },
+    "operation": {
+      "title": "Operation",
+      "type": "string"
+    },
+    "original_value": {
+      "additionalProperties": true,
+      "title": "Original Value",
+      "type": "object"
+    },
+    "proposed_value": {
+      "additionalProperties": true,
+      "title": "Proposed Value",
+      "type": "object"
+    },
+    "impact_scope": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Impact Scope",
+      "type": "array"
+    },
+    "time_delta_minutes": {
+      "default": 0,
+      "title": "Time Delta Minutes",
+      "type": "integer"
+    },
+    "cost_delta": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/MoneyRange"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "risk_delta": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Risk Delta"
+    },
+    "requires_replan": {
+      "default": false,
+      "title": "Requires Replan",
+      "type": "boolean"
+    },
+    "status": {
+      "default": "preview",
+      "enum": [
+        "preview",
+        "accepted",
+        "rejected",
+        "applied"
+      ],
+      "title": "Status",
+      "type": "string"
+    }
+  },
+  "required": [
+    "trip_id",
+    "target_type",
+    "target_id",
+    "operation",
+    "original_value",
+    "proposed_value"
+  ],
+  "title": "PlanPatch",
+  "type": "object"
+}

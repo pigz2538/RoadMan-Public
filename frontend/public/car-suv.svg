@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 430">
+  <defs>
+    <linearGradient id="body" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fff"/>
+      <stop offset=".48" stop-color="#e9f1fa"/>
+      <stop offset="1" stop-color="#a9bbcf"/>
+    </linearGradient>
+    <linearGradient id="glass" x1="0" x2="1">
+      <stop stop-color="#20364d"/><stop offset=".55" stop-color="#7f9eb6"/><stop offset="1" stop-color="#182c42"/>
+    </linearGradient>
+    <filter id="shadow"><feGaussianBlur stdDeviation="13"/></filter>
+  </defs>
+  <ellipse cx="460" cy="372" rx="330" ry="27" fill="#5a7595" opacity=".25" filter="url(#shadow)"/>
+  <path d="M110 285L150 222 281 193 356 105 592 98 707 181 812 218 840 302 788 335H159L90 312Z" fill="url(#body)" stroke="#7890aa" stroke-width="6"/>
+  <path d="M333 190l54-66h188l92 68z" fill="url(#glass)" stroke="#d9e4ee" stroke-width="7"/>
+  <path d="M498 119v77M666 191l42 20" stroke="#d8e4ee" stroke-width="6"/>
+  <path d="M115 271h90l22 30H102M743 230l79 29-6 34h-62" fill="#dffcff" stroke="#55cfea" stroke-width="5"/>
+  <path d="M244 212h420" stroke="#bdcbd9" stroke-width="5"/>
+  <path d="M174 320h588" stroke="#43576c" stroke-width="17"/>
+  <circle cx="247" cy="326" r="66" fill="#172538"/><circle cx="247" cy="326" r="37" fill="#d5e0eb" stroke="#70869d" stroke-width="9"/>
+  <circle cx="696" cy="326" r="66" fill="#172538"/><circle cx="696" cy="326" r="37" fill="#d5e0eb" stroke="#70869d" stroke-width="9"/>
+  <rect x="413" y="286" width="113" height="35" rx="6" fill="#d7fff6" stroke="#29bda2" stroke-width="4"/>
+  <text x="469" y="310" text-anchor="middle" font-family="Arial" font-size="18" font-weight="700" fill="#173148">ROADMAN</text>
+</svg>

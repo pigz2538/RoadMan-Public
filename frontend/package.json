@@ -1,0 +1,33 @@
+{
+  "name": "roadman-frontend",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "vue-tsc -b && vite build",
+    "test": "vitest run",
+    "test:e2e": "playwright test"
+  },
+  "dependencies": {
+    "@amap/amap-jsapi-loader": "^1.0.1",
+    "@google/model-viewer": "^4.3.1",
+    "@tanstack/vue-query": "^5.66.0",
+    "@lucide/vue": "^1.27.0",
+    "pinia": "^3.0.0",
+    "vue": "^3.5.0",
+    "vue-router": "^4.5.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.62.0",
+    "@types/node": "^24.0.0",
+    "@types/three": "^0.181.0",
+    "@types/webxr": "^0.5.23",
+    "@vitejs/plugin-vue": "^6.0.8",
+    "jsdom": "^26.0.0",
+    "typescript": "~5.9.3",
+    "vite": "^8.1.5",
+    "vitest": "^4.1.10",
+    "vue-tsc": "^3.3.8"
+  }
+}

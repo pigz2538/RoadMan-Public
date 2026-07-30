@@ -1,0 +1,262 @@
+{
+  "id": "trip_wuhan_lushan_demo",
+  "user_id": "demo_user",
+  "title": "武汉—庐山两天一夜自然之旅",
+  "status": "completed",
+  "start_date": "2026-08-01",
+  "end_date": "2026-08-02",
+  "origin": {
+    "id": "place_whu",
+    "name": "武汉大学",
+    "address": "湖北省武汉市武昌区八一路299号",
+    "city": "武汉",
+    "coordinates": {"longitude": 114.365248, "latitude": 30.536325},
+    "source_id": "amap_mock_whu"
+  },
+  "destination": {
+    "id": "place_lushan",
+    "name": "庐山风景名胜区",
+    "address": "江西省九江市庐山市",
+    "city": "九江",
+    "coordinates": {"longitude": 115.982811, "latitude": 29.556769},
+    "source_id": "amap_mock_lushan"
+  },
+  "selected_vehicle_id": "vehicle_demo_ev",
+  "request": {
+    "raw_text": "周六早上从武汉出发，去庐山两天一夜，周日晚八点前回来，喜欢自然景观。",
+    "origin": {"name": "武汉大学", "city": "武汉"},
+    "destination": {"name": "庐山", "city": "九江"},
+    "start_date": "2026-08-01",
+    "end_date": "2026-08-02",
+    "return_before": "2026-08-02T20:00:00+08:00",
+    "travelers": 3,
+    "preferences": ["自然景观", "少排队", "自驾"],
+    "must_visit": [],
+    "budget": {"currency": "CNY", "minimum": 1600, "maximum": 2200, "estimated": true},
+    "max_continuous_drive_minutes": 120,
+    "defaults_applied": ["预算", "最大连续驾驶时间"]
+  },
+  "days": [
+    {
+      "id": "day_1",
+      "day_index": 1,
+      "date": "2026-08-01",
+      "title": "武汉出发 · 抵达庐山",
+      "items": [
+        {"type": "stage", "id": "stage_1"},
+        {"type": "activity", "id": "activity_rest"},
+        {"type": "stage", "id": "stage_2"},
+        {"type": "activity", "id": "activity_ruqin"},
+        {"type": "activity", "id": "activity_hotel"}
+      ],
+      "stages": [
+        {
+          "id": "stage_1",
+          "day_id": "day_1",
+          "sequence": 1,
+          "title": "城市出发",
+          "mode": "driving",
+          "origin": {"name": "武汉大学", "city": "武汉", "coordinates": {"longitude": 114.365248, "latitude": 30.536325}},
+          "destination": {"name": "黄石服务区", "city": "黄石", "coordinates": {"longitude": 115.146, "latitude": 30.203}},
+          "waypoints": [],
+          "route_segments": [
+            {
+              "id": "segment_1",
+              "coordinates": [
+                {"longitude": 114.365248, "latitude": 30.536325},
+                {"longitude": 114.72, "latitude": 30.42},
+                {"longitude": 115.146, "latitude": 30.203}
+              ],
+              "distance_km": 96,
+              "duration_minutes": 85,
+              "road_name": "沪渝高速",
+              "toll": true,
+              "estimated": true
+            }
+          ],
+          "planned_start": "2026-08-01T08:00:00+08:00",
+          "planned_end": "2026-08-01T09:25:00+08:00",
+          "distance_km": 96,
+          "duration_minutes": 85,
+          "toll_fee": {"currency": "CNY", "minimum": 35, "maximum": 45, "estimated": true},
+          "energy_estimate": {"amount": 17.3, "unit": "kWh", "remaining_percent": 58, "estimated": true},
+          "weather_samples": [],
+          "status": "completed",
+          "warnings": [],
+          "source_records": [{"provider": "RoadMan Mock", "title": "武汉—庐山固定演示路线", "retrieved_at": "2026-07-30T08:00:00+08:00"}]
+        },
+        {
+          "id": "stage_2",
+          "day_id": "day_1",
+          "sequence": 3,
+          "title": "高速转盘山公路",
+          "mode": "driving",
+          "origin": {"name": "黄石服务区", "city": "黄石", "coordinates": {"longitude": 115.146, "latitude": 30.203}},
+          "destination": {"name": "牯岭镇", "city": "九江", "coordinates": {"longitude": 115.978, "latitude": 29.573}},
+          "waypoints": [{"name": "九江南收费站", "city": "九江", "coordinates": {"longitude": 115.94, "latitude": 29.66}}],
+          "route_segments": [
+            {
+              "id": "segment_2",
+              "coordinates": [
+                {"longitude": 115.146, "latitude": 30.203},
+                {"longitude": 115.54, "latitude": 29.96},
+                {"longitude": 115.84, "latitude": 29.72},
+                {"longitude": 115.978, "latitude": 29.573}
+              ],
+              "distance_km": 151,
+              "duration_minutes": 145,
+              "road_name": "福银高速 / 庐山大道",
+              "toll": true,
+              "estimated": true
+            }
+          ],
+          "planned_start": "2026-08-01T09:45:00+08:00",
+          "planned_end": "2026-08-01T12:10:00+08:00",
+          "distance_km": 151,
+          "duration_minutes": 145,
+          "toll_fee": {"currency": "CNY", "minimum": 65, "maximum": 80, "estimated": true},
+          "energy_estimate": {"amount": 30.2, "unit": "kWh", "remaining_percent": 18, "estimated": true},
+          "weather_samples": [],
+          "status": "active",
+          "warnings": [{"code": "MOUNTAIN_ROAD", "message": "末段为连续山路，请控制车速。", "severity": "warning", "estimated": false}],
+          "source_records": [{"provider": "RoadMan Mock", "title": "武汉—庐山固定演示路线", "retrieved_at": "2026-07-30T08:00:00+08:00"}]
+        }
+      ],
+      "activities": [
+        {
+          "id": "activity_rest",
+          "day_id": "day_1",
+          "sequence": 2,
+          "type": "rest",
+          "place": {"name": "黄石服务区", "city": "黄石"},
+          "planned_start": "2026-08-01T09:25:00+08:00",
+          "planned_end": "2026-08-01T09:45:00+08:00",
+          "duration_minutes": 20,
+          "locked": false,
+          "required": true,
+          "backup": false,
+          "user_note": "休息并补水",
+          "source_records": [],
+          "warnings": []
+        },
+        {
+          "id": "activity_ruqin",
+          "day_id": "day_1",
+          "sequence": 4,
+          "type": "attraction",
+          "place": {"name": "如琴湖", "city": "九江", "coordinates": {"longitude": 115.967, "latitude": 29.572}},
+          "planned_start": "2026-08-01T14:00:00+08:00",
+          "planned_end": "2026-08-01T16:00:00+08:00",
+          "duration_minutes": 120,
+          "locked": false,
+          "required": false,
+          "backup": false,
+          "user_note": "轻松环湖",
+          "opening_hours": {"text": "全天开放，现场为准", "confirmed": false},
+          "source_records": [{"provider": "RoadMan Mock", "title": "庐山景点演示数据", "retrieved_at": "2026-07-30T08:00:00+08:00"}],
+          "warnings": []
+        },
+        {
+          "id": "activity_hotel",
+          "day_id": "day_1",
+          "sequence": 5,
+          "type": "hotel",
+          "place": {"name": "牯岭镇山景酒店（待确认）", "city": "九江"},
+          "planned_start": "2026-08-01T18:00:00+08:00",
+          "planned_end": "2026-08-02T08:00:00+08:00",
+          "duration_minutes": 840,
+          "locked": false,
+          "required": true,
+          "backup": false,
+          "user_note": "Mock 酒店，不代表真实库存",
+          "ticket_or_price": {"currency": "CNY", "minimum": 420, "maximum": 580, "estimated": true},
+          "source_records": [],
+          "warnings": [{"code": "HOTEL_UNCONFIRMED", "message": "住宿仅为演示候选，请自行确认库存与价格。", "severity": "info", "estimated": true}]
+        }
+      ],
+      "total_distance_km": 247,
+      "total_drive_minutes": 230,
+      "total_walk_minutes": 45,
+      "estimated_cost": {"currency": "CNY", "minimum": 750, "maximum": 980, "estimated": true},
+      "weather_summary": "22–29°C，午后有短时阵雨可能",
+      "warnings": ["盘山路段谨慎驾驶"]
+    },
+    {
+      "id": "day_2",
+      "day_index": 2,
+      "date": "2026-08-02",
+      "title": "山景漫游 · 返回武汉",
+      "items": [
+        {"type": "activity", "id": "activity_sandiequan"},
+        {"type": "stage", "id": "stage_3"}
+      ],
+      "stages": [
+        {
+          "id": "stage_3",
+          "day_id": "day_2",
+          "sequence": 2,
+          "title": "庐山返回武汉",
+          "mode": "driving",
+          "origin": {"name": "庐山风景名胜区", "city": "九江", "coordinates": {"longitude": 115.982811, "latitude": 29.556769}},
+          "destination": {"name": "武汉大学", "city": "武汉", "coordinates": {"longitude": 114.365248, "latitude": 30.536325}},
+          "waypoints": [{"name": "黄梅服务区", "city": "黄冈"}],
+          "route_segments": [
+            {
+              "id": "segment_3",
+              "coordinates": [
+                {"longitude": 115.982811, "latitude": 29.556769},
+                {"longitude": 115.60, "latitude": 29.89},
+                {"longitude": 115.12, "latitude": 30.20},
+                {"longitude": 114.365248, "latitude": 30.536325}
+              ],
+              "distance_km": 250,
+              "duration_minutes": 235,
+              "road_name": "福银高速 / 沪渝高速",
+              "toll": true,
+              "estimated": true
+            }
+          ],
+          "planned_start": "2026-08-02T14:30:00+08:00",
+          "planned_end": "2026-08-02T18:25:00+08:00",
+          "distance_km": 250,
+          "duration_minutes": 235,
+          "toll_fee": {"currency": "CNY", "minimum": 100, "maximum": 125, "estimated": true},
+          "energy_estimate": {"amount": 45, "unit": "kWh", "remaining_percent": 12, "estimated": true},
+          "weather_samples": [],
+          "status": "pending",
+          "warnings": [{"code": "REST_REQUIRED", "message": "建议在黄梅服务区休息 20 分钟。", "severity": "info", "estimated": true}],
+          "source_records": [{"provider": "RoadMan Mock", "title": "武汉—庐山固定演示路线", "retrieved_at": "2026-07-30T08:00:00+08:00"}]
+        }
+      ],
+      "activities": [
+        {
+          "id": "activity_sandiequan",
+          "day_id": "day_2",
+          "sequence": 1,
+          "type": "attraction",
+          "place": {"name": "三叠泉", "city": "九江", "coordinates": {"longitude": 116.03, "latitude": 29.55}},
+          "planned_start": "2026-08-02T08:30:00+08:00",
+          "planned_end": "2026-08-02T12:00:00+08:00",
+          "duration_minutes": 210,
+          "locked": false,
+          "required": false,
+          "backup": false,
+          "user_note": "台阶较多，按体力调整",
+          "opening_hours": {"text": "开放时间待出发前确认", "confirmed": false},
+          "source_records": [{"provider": "RoadMan Mock", "title": "庐山景点演示数据", "retrieved_at": "2026-07-30T08:00:00+08:00"}],
+          "warnings": [{"code": "HIGH_WALK_LOAD", "message": "步行强度较高。", "severity": "warning", "estimated": false}]
+        }
+      ],
+      "total_distance_km": 250,
+      "total_drive_minutes": 235,
+      "total_walk_minutes": 150,
+      "estimated_cost": {"currency": "CNY", "minimum": 520, "maximum": 700, "estimated": true},
+      "weather_summary": "20–27°C，多云",
+      "warnings": ["返程前确认车辆电量"]
+    }
+  ],
+  "warnings": [{"code": "MOCK_DATA", "message": "本行程用于前端与接口演示，路线、价格和开放时间均需出发前复核。", "severity": "info", "estimated": true}],
+  "sources": [{"provider": "RoadMan Mock", "title": "武汉—庐山固定验收数据", "retrieved_at": "2026-07-30T08:00:00+08:00"}],
+  "created_at": "2026-07-30T08:00:00+08:00",
+  "updated_at": "2026-07-30T08:00:00+08:00"
+}

@@ -1,0 +1,74 @@
+{
+  "properties": {
+    "event": {
+      "enum": [
+        "planning_started",
+        "node_started",
+        "tool_started",
+        "tool_completed",
+        "node_completed",
+        "clarification_required",
+        "progress",
+        "warning",
+        "patch_preview_ready",
+        "planning_paused",
+        "planning_resumed",
+        "planning_completed",
+        "planning_failed"
+      ],
+      "title": "Event",
+      "type": "string"
+    },
+    "trip_id": {
+      "title": "Trip Id",
+      "type": "string"
+    },
+    "node": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Node"
+    },
+    "tool": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Tool"
+    },
+    "label": {
+      "title": "Label",
+      "type": "string"
+    },
+    "progress": {
+      "maximum": 100,
+      "minimum": 0,
+      "title": "Progress",
+      "type": "integer"
+    },
+    "timestamp": {
+      "format": "date-time",
+      "title": "Timestamp",
+      "type": "string"
+    }
+  },
+  "required": [
+    "event",
+    "trip_id",
+    "label",
+    "progress"
+  ],
+  "title": "SSEEvent",
+  "type": "object"
+}

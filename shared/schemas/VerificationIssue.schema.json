@@ -1,0 +1,56 @@
+{
+  "properties": {
+    "code": {
+      "title": "Code",
+      "type": "string"
+    },
+    "severity": {
+      "enum": [
+        "info",
+        "warning",
+        "error",
+        "blocker"
+      ],
+      "title": "Severity",
+      "type": "string"
+    },
+    "title": {
+      "title": "Title",
+      "type": "string"
+    },
+    "description": {
+      "title": "Description",
+      "type": "string"
+    },
+    "affected_ids": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Affected Ids",
+      "type": "array"
+    },
+    "source": {
+      "title": "Source",
+      "type": "string"
+    },
+    "user_confirmation_required": {
+      "default": false,
+      "title": "User Confirmation Required",
+      "type": "boolean"
+    },
+    "auto_fix_available": {
+      "default": false,
+      "title": "Auto Fix Available",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "code",
+    "severity",
+    "title",
+    "description",
+    "source"
+  ],
+  "title": "VerificationIssue",
+  "type": "object"
+}

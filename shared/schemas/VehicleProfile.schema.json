@@ -1,0 +1,177 @@
+{
+  "properties": {
+    "id": {
+      "title": "Id",
+      "type": "string"
+    },
+    "brand": {
+      "title": "Brand",
+      "type": "string"
+    },
+    "series": {
+      "title": "Series",
+      "type": "string"
+    },
+    "model": {
+      "title": "Model",
+      "type": "string"
+    },
+    "year": {
+      "anyOf": [
+        {
+          "maximum": 2100,
+          "minimum": 1980,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Year"
+    },
+    "power_type": {
+      "enum": [
+        "electric",
+        "hybrid",
+        "fuel"
+      ],
+      "title": "Power Type",
+      "type": "string"
+    },
+    "rated_range_km": {
+      "anyOf": [
+        {
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Rated Range Km"
+    },
+    "current_energy_percent": {
+      "anyOf": [
+        {
+          "maximum": 100,
+          "minimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Current Energy Percent"
+    },
+    "battery_kwh": {
+      "anyOf": [
+        {
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Battery Kwh"
+    },
+    "consumption_per_100km": {
+      "anyOf": [
+        {
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Consumption Per 100Km"
+    },
+    "max_charge_kw": {
+      "anyOf": [
+        {
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Max Charge Kw"
+    },
+    "height_m": {
+      "anyOf": [
+        {
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Height M"
+    },
+    "width_m": {
+      "anyOf": [
+        {
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Width M"
+    },
+    "seats": {
+      "default": 5,
+      "maximum": 20,
+      "minimum": 1,
+      "title": "Seats",
+      "type": "integer"
+    },
+    "plate_region": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Plate Region"
+    },
+    "has_etc": {
+      "default": false,
+      "title": "Has Etc",
+      "type": "boolean"
+    },
+    "mountain_ready": {
+      "default": true,
+      "title": "Mountain Ready",
+      "type": "boolean"
+    },
+    "unpaved_ready": {
+      "default": false,
+      "title": "Unpaved Ready",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "brand",
+    "series",
+    "model",
+    "power_type"
+  ],
+  "title": "VehicleProfile",
+  "type": "object"
+}
