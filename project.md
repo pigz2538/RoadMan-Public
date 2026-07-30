@@ -2,7 +2,7 @@
 
 更新日期：2026-07-30
 
-当前版本：`0.3.0`
+当前版本：`0.3.1`
 
 当前里程碑：总规划阶段 D 已完成，下一步进入阶段 E 自驾深度能力
 
@@ -29,6 +29,12 @@
 - PostgreSQL 生产数据库，SQLite 本地/测试兼容。
 - LangGraph 初次规划图：需求抽取、默认值、追问、真实路线、拆天、阶段、校验、
   一次自动修复、Markdown 和持久化。
+- 多日行程会在目的地周边生成真实公交/地铁、步行和骑行接驳；无法使用首选方式时
+  按统一降级顺序切换，并保存实际采用的方式。
+- 天气按每个阶段的预计到达坐标与时刻匹配 Open-Meteo 小时预报；超出 16 天预报
+  范围时明确提示临近出发复核。
+- 驾车阶段解析高德道路 `tmcs` 分段实时路况；未来计划只标记为当前路况参考，
+  不伪装成未来拥堵预测。
 - Ollama Cloud Requirement Agent；严格 JSON 解析失败时使用确定性中文解析回退。
 - 追问 State/Agent 消息持久化，澄清接口恢复；Job 取消后 Trip 进入短期暂停。
 
@@ -57,6 +63,8 @@
 | `DATABASE_URL` | SQLAlchemy 异步数据库 |
 | `REDIS_URL` | Skill 缓存和 ARQ 队列 |
 | `AMAP_WEBSERVICE_KEY` | 后端高德 WebService |
+| `OLLAMA_API_KEY` | Ollama Cloud Requirement Agent |
+| `OLLAMA_MODEL` | Ollama Cloud 模型，默认 `deepseek-v4-flash:cloud` |
 | `VITE_AMAP_JSAPI_KEY` | 前端高德 JSAPI |
 | `VITE_AMAP_SECURITY_JS_CODE` | 前端高德安全码 |
 | `UPLOAD_DIR` | 上传内容目录 |
@@ -95,22 +103,25 @@ npm run dev
 
 ## 已验证
 
-- 后端 pytest：19 项通过。
+- 后端 pytest：23 项通过，1 个真实接口集成用例默认跳过。
 - Alembic：Docker PostgreSQL 迁移到 `20260730_0002 (head)`。
 - 共享 Schema：18 个成功导出。
 - Docker：PostgreSQL、Redis、Backend、Worker、Frontend 全部健康。
 - 高德真实驾车/步行/骑行/公交、POI 与 Open-Meteo 实际请求通过。
 - Redis 跨请求缓存、ARQ Job 完成、SSE 断点续传和 SkillCall 审计通过。
 - 前端 TypeScript/Vite 构建与现有浏览器测试通过。
-- 真实 Agent 输入“周六从武汉去庐山，两天一夜”完成 2 天路线和 Markdown；
-  缺失出发地时一次追问后恢复完成。
+- 真实 Agent 输入“下周六从武汉去庐山，五天四夜”完成 5 天、8 阶段路线，
+  最终采用驾车、公交、步行和骑行四种交通方式；8 个阶段均包含天气与路况摘要。
+- 容器 API 与 Playwright 页面验收通过，真实验收行程为
+  `trip_5a45692d7085`；缺失出发地时一次追问后恢复完成。
 
 阶段 D 的详细验收证据见
 [`docs/backend-phase-d-plan.md`](docs/backend-phase-d-plan.md)。
 
 ## 当前边界与后续
 
-- 阶段 D 只做基础自驾路线与拆天，不做景点复杂排程和局部编辑。
+- 阶段 D 已覆盖基础多日移动阶段与目的地接驳；景点复杂排程、开放时间、酒店库存
+  和局部编辑仍留在后续阶段。
 - 语音识别、真实酒店价格/库存、充电动态和完整导出将在后续阶段实现。
 - 总规划只定义到阶段 J；本轮把“阶段 K”解释为 D–J 完成后的全链路验收、
   文档冻结和发布检查，不虚构额外产品范围。

@@ -11,6 +11,7 @@ class RoadManState(TypedDict, total=False):
     clarification_question: str | None
     clarification_answers: list[dict[str, Any]]
     route_candidates: list[dict[str, Any]]
+    local_routes: list[dict[str, Any]]
     selected_route: dict[str, Any] | None
     weather_results: list[dict[str, Any]]
     day_plans: list[dict[str, Any]]

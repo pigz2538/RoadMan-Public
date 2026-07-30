@@ -344,6 +344,32 @@ class AmapRouteAdapter(SkillAdapter):
     @staticmethod
     def _normal_path(path: dict[str, Any], endpoint: str) -> dict[str, Any]:
         steps = path.get("steps", [])
+        traffic_segments = [
+            {
+                "status": traffic.get("status") or "未知",
+                "distance_m": int(float(traffic.get("distance") or 0)),
+                "geometry": _polyline_points(traffic.get("polyline", "")),
+            }
+            for step in steps
+            for traffic in step.get("tmcs", [])
+        ]
+        traffic_distance: dict[str, int] = {}
+        for segment in traffic_segments:
+            status = segment["status"]
+            traffic_distance[status] = traffic_distance.get(status, 0) + segment["distance_m"]
+        known_distance = sum(traffic_distance.values())
+        congested_distance = sum(
+            distance
+            for status, distance in traffic_distance.items()
+            if status in {"缓行", "拥堵", "严重拥堵"}
+        )
+        if not traffic_segments:
+            traffic_summary = "高德未返回分段实时路况"
+        elif congested_distance == 0:
+            traffic_summary = "高德当前路况整体畅通"
+        else:
+            ratio = round(congested_distance / max(known_distance, 1) * 100)
+            traffic_summary = f"高德当前缓行或拥堵路段约占 {ratio}%"
         geometry = [
             point
             for step in steps
@@ -363,6 +389,10 @@ class AmapRouteAdapter(SkillAdapter):
                 }
                 for step in steps
             ],
+            "traffic_summary": traffic_summary,
+            "traffic_segments": traffic_segments,
+            "traffic_lights": int(float(path.get("traffic_lights") or 0)),
+            "restriction": str(path.get("restriction") or "0"),
             "transfers": [],
             "fare_cny": None,
             "endpoint": endpoint,
@@ -457,7 +487,7 @@ class AmapPoiAdapter(SkillAdapter):
                     {
                         "id": poi.get("id"),
                         "name": poi.get("name"),
-                        "address": poi.get("address"),
+                        "address": _text_value(poi.get("address")),
                         "type": poi.get("type"),
                         "location": poi.get("location"),
                         "city": poi.get("cityname"),
@@ -472,3 +502,12 @@ class AmapPoiAdapter(SkillAdapter):
 
     async def health_check(self) -> dict[str, Any]:
         return {"status": "ready" if self.api_key else "degraded", "configured": bool(self.api_key)}
+
+
+def _text_value(value: Any) -> str | None:
+    if isinstance(value, str):
+        return value or None
+    if isinstance(value, list):
+        text = "、".join(str(item) for item in value if item)
+        return text or None
+    return str(value) if value is not None else None

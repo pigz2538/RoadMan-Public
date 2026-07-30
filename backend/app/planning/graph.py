@@ -202,8 +202,120 @@ def build_planning_graph(
             "progress": {"node": "split_into_days", "value": 64},
         }
 
+    async def build_local_routes(state: RoadManState) -> dict[str, Any]:
+        await emit(
+            state,
+            "build_local_routes",
+            "正在补充目的地公共交通、步行和骑行接驳",
+            68,
+            event="tool_started",
+            tool="amap.poi/amap.route",
+        )
+        request = state["trip_request"]
+        destination = request["destination"]
+        coordinates = destination.get("coordinates")
+        if not coordinates:
+            return {"local_routes": []}
+        poi_result = await registry.execute(
+            "amap.poi",
+            {
+                "keywords": "景点",
+                "city": destination.get("city"),
+                "location": f"{coordinates['longitude']},{coordinates['latitude']}",
+                "radius": 20000,
+                "page_size": 12,
+            },
+            SkillContext(trip_id=state["trip_id"]),
+        )
+        if not poi_result.success or not isinstance(poi_result.data, dict):
+            return {
+                "local_routes": [],
+                "warnings": [
+                    *state.get("warnings", []),
+                    {
+                        "code": "LOCAL_MOBILITY_UNAVAILABLE",
+                        "message": "目的地周边 POI 暂不可用，未生成本地接驳阶段",
+                        "severity": "warning",
+                    },
+                ],
+            }
+        places = []
+        for item in poi_result.data.get("items", []):
+            if not item.get("name") or not item.get("location"):
+                continue
+            longitude, latitude = item["location"].split(",", 1)
+            places.append(
+                {
+                    "id": item.get("id"),
+                    "name": item["name"],
+                    "address": item.get("address"),
+                    "city": item.get("city") or destination.get("city"),
+                    "coordinates": {
+                        "longitude": float(longitude),
+                        "latitude": float(latitude),
+                    },
+                    "source_id": item.get("id"),
+                }
+            )
+        if not places:
+            return {"local_routes": []}
+
+        day_count = len(state["day_plans"])
+        local_day_indexes = list(range(1, day_count - 1))
+        if not local_day_indexes:
+            local_day_indexes = [0]
+        modes = ["transit", "walking", "riding"]
+        local_routes: list[dict[str, Any]] = []
+        cursor = 0
+        for day_index in local_day_indexes:
+            anchor = destination
+            for sequence in range(2):
+                target = places[cursor % len(places)]
+                cursor += 1
+                mode = modes[(day_index * 2 + sequence) % len(modes)]
+                route = await _route(
+                    registry,
+                    anchor,
+                    target,
+                    state["trip_id"],
+                    preferred_mode=mode,
+                    fallback_modes=["walking", "riding", "transit", "driving"],
+                )
+                if route.get("success"):
+                    local_routes.append(
+                        {
+                            "day_index": day_index,
+                            "sequence": sequence,
+                            "origin": anchor,
+                            "destination": target,
+                            "route": route,
+                        }
+                    )
+                    anchor = target
+        await emit(
+            state,
+            "build_local_routes",
+            f"已生成 {len(local_routes)} 个目的地接驳阶段",
+            72,
+            event="tool_completed",
+            tool="amap.poi/amap.route",
+        )
+        return {
+            "local_routes": local_routes,
+            "sources": [
+                *state.get("sources", []),
+                *[item.model_dump(mode="json") for item in poi_result.sources],
+                *[
+                    source
+                    for item in local_routes
+                    for source in item["route"].get("sources", [])
+                ],
+            ],
+            "progress": {"node": "build_local_routes", "value": 72},
+        }
+
     async def build_stages(state: RoadManState) -> dict[str, Any]:
-        await emit(state, "build_stages", "正在生成每天的移动阶段", 74)
+        await emit(state, "build_stages", "正在生成每天的多方式移动阶段", 76)
         if not state.get("selected_route"):
             return {"day_plans": state.get("day_plans", [])}
         request = state["trip_request"]
@@ -215,56 +327,154 @@ def build_planning_graph(
         day_defs = state["day_plans"]
         plans: list[dict[str, Any]] = []
         for index, day_def in enumerate(day_defs):
-            is_return = index == len(day_defs) - 1 and len(day_defs) > 1
-            route = inbound if is_return else outbound
-            origin = PlaceRef.model_validate(request["destination"] if is_return else request["origin"])
-            destination = PlaceRef.model_validate(request["origin"] if is_return else request["destination"])
-            start_at = datetime.combine(
-                date.fromisoformat(day_def["date"]),
-                time(14, 30) if is_return else time(8, 0),
-                tzinfo=SHANGHAI,
+            stages: list[MovementStage] = []
+            day_date = date.fromisoformat(day_def["date"])
+            if index == 0:
+                stages.append(
+                    _movement_stage(
+                        day_id=f"day_{index + 1}",
+                        sequence=len(stages),
+                        title="城市出发",
+                        origin=request["origin"],
+                        destination=request["destination"],
+                        route=outbound,
+                        start_at=datetime.combine(day_date, time(8, 0), tzinfo=SHANGHAI),
+                    )
+                )
+            local_start = (
+                stages[-1].planned_end + timedelta(minutes=60)
+                if stages
+                else datetime.combine(day_date, time(9, 30), tzinfo=SHANGHAI)
             )
-            duration = int(route["data"]["duration_minutes"])
-            segment = RouteSegment(
-                coordinates=[Coordinates.model_validate(point) for point in route["data"]["geometry"]],
-                distance_km=route["data"]["distance_km"],
-                duration_minutes=duration,
-                toll=bool(route["data"].get("tolls_cny")),
-            )
-            stage = MovementStage(
-                day_id=f"day_{index + 1}",
-                sequence=0,
-                title="返程" if is_return else "城市出发",
-                mode=route["data"].get("selected_mode", "driving"),
-                origin=origin,
-                destination=destination,
-                route_segments=[segment],
-                planned_start=start_at,
-                planned_end=start_at + timedelta(minutes=duration),
-                distance_km=route["data"]["distance_km"],
-                duration_minutes=duration,
-                toll_fee={
-                    "minimum": route["data"].get("tolls_cny", 0),
-                    "maximum": route["data"].get("tolls_cny", 0),
-                    "estimated": False,
-                },
-                source_records=[SourceRecord.model_validate(item) for item in route.get("sources", [])],
-            )
+            for local in sorted(
+                (
+                    item
+                    for item in state.get("local_routes", [])
+                    if item["day_index"] == index
+                ),
+                key=lambda item: item["sequence"],
+            ):
+                stage = _movement_stage(
+                    day_id=f"day_{index + 1}",
+                    sequence=len(stages),
+                    title=_local_stage_title(local["route"]["data"].get("selected_mode")),
+                    origin=local["origin"],
+                    destination=local["destination"],
+                    route=local["route"],
+                    start_at=local_start,
+                )
+                stages.append(stage)
+                local_start = stage.planned_end + timedelta(minutes=45)
+            if index == len(day_defs) - 1 and len(day_defs) > 1:
+                stages.append(
+                    _movement_stage(
+                        day_id=f"day_{index + 1}",
+                        sequence=len(stages),
+                        title="返程",
+                        origin=request["destination"],
+                        destination=request["origin"],
+                        route=inbound,
+                        start_at=datetime.combine(day_date, time(14, 30), tzinfo=SHANGHAI),
+                    )
+                )
             plan = DayPlan(
                 id=f"day_{index + 1}",
                 day_index=index + 1,
-                date=date.fromisoformat(day_def["date"]),
+                date=day_date,
                 title=f"第 {index + 1} 天",
-                items=[DayItemRef(type="stage", id=stage.id)],
-                stages=[stage],
-                total_distance_km=stage.distance_km,
-                total_drive_minutes=stage.duration_minutes,
+                items=[DayItemRef(type="stage", id=stage.id) for stage in stages],
+                stages=stages,
+                total_distance_km=round(sum(stage.distance_km for stage in stages), 2),
+                total_drive_minutes=sum(
+                    stage.duration_minutes for stage in stages if stage.mode == "driving"
+                ),
+                total_walk_minutes=sum(
+                    stage.duration_minutes for stage in stages if stage.mode == "walking"
+                ),
             )
             plans.append(plan.model_dump(mode="json"))
-        return {"day_plans": plans, "progress": {"node": "build_stages", "value": 74}}
+        return {"day_plans": plans, "progress": {"node": "build_stages", "value": 78}}
+
+    async def sample_weather(state: RoadManState) -> dict[str, Any]:
+        await emit(
+            state,
+            "sample_weather",
+            "正在按各阶段预计抵达时间匹配小时天气",
+            82,
+            event="tool_started",
+            tool="open_meteo.forecast",
+        )
+        plans = state.get("day_plans", [])
+        weather_cache: dict[tuple[float, float], dict[str, Any] | None] = {}
+        weather_sources: list[dict[str, Any]] = []
+        for day in plans:
+            for stage in day.get("stages", []):
+                coordinates = stage["destination"].get("coordinates")
+                if not coordinates:
+                    continue
+                key = (coordinates["longitude"], coordinates["latitude"])
+                if key not in weather_cache:
+                    planned = datetime.fromisoformat(stage["planned_end"])
+                    horizon = (planned.date() - date.today()).days + 1
+                    if horizon < 1 or horizon > 16:
+                        weather_cache[key] = None
+                    else:
+                        result = await registry.execute(
+                            "open_meteo.forecast",
+                            {
+                                "latitude": coordinates["latitude"],
+                                "longitude": coordinates["longitude"],
+                                "forecast_days": max(1, horizon),
+                                "timezone": "Asia/Shanghai",
+                            },
+                            SkillContext(trip_id=state["trip_id"]),
+                        )
+                        weather_cache[key] = (
+                            result.data
+                            if result.success and isinstance(result.data, dict)
+                            else None
+                        )
+                        weather_sources.extend(
+                            item.model_dump(mode="json") for item in result.sources
+                        )
+                sample = _closest_weather_sample(
+                    weather_cache[key],
+                    datetime.fromisoformat(stage["planned_end"]),
+                )
+                if sample:
+                    temperature = sample.get("temperature_c")
+                    precipitation = sample.get("precipitation_probability")
+                    stage["weather_summary"] = (
+                        f"预计抵达 {temperature}°C，降水概率 {precipitation}%"
+                    )
+                    stage["weather_samples"] = [
+                        {
+                            "place": stage["destination"],
+                            "sampled_at": sample["sampled_at"],
+                            "temperature_c": temperature,
+                            "precipitation_probability": precipitation,
+                            "estimated": False,
+                        }
+                    ]
+                else:
+                    stage["weather_summary"] = "计划时间超出逐小时预报范围，请临近出发复核"
+        await emit(
+            state,
+            "sample_weather",
+            "阶段天气匹配完成",
+            86,
+            event="tool_completed",
+            tool="open_meteo.forecast",
+        )
+        return {
+            "day_plans": plans,
+            "weather_results": list(weather_cache.values()),
+            "sources": [*state.get("sources", []), *weather_sources],
+            "progress": {"node": "sample_weather", "value": 86},
+        }
 
     async def verify_plan(state: RoadManState) -> dict[str, Any]:
-        await emit(state, "verify_plan", "正在校验路线与时间约束", 84)
+        await emit(state, "verify_plan", "正在校验路线、交通方式、天气与时间约束", 89)
         issues: list[dict[str, Any]] = []
         if state.get("error"):
             issues.append(
@@ -287,7 +497,7 @@ def build_planning_graph(
                 "passed": not any(item["severity"] == "blocker" for item in issues),
                 "issues": issues,
             },
-            "progress": {"node": "verify_plan", "value": 84},
+            "progress": {"node": "verify_plan", "value": 89},
         }
 
     async def repair_plan(state: RoadManState) -> dict[str, Any]:
@@ -325,6 +535,8 @@ def build_planning_graph(
                         f"- 时间：{stage['planned_start'][11:16]}–{stage['planned_end'][11:16]}",
                         f"- 里程：{stage['distance_km']} km",
                         f"- 预计耗时：{stage['duration_minutes']} 分钟",
+                        f"- 路况：{stage.get('traffic_summary') or '不适用'}",
+                        f"- 天气：{stage.get('weather_summary') or '待更新'}",
                         "",
                     ]
                 )
@@ -358,7 +570,9 @@ def build_planning_graph(
     builder.add_node("generate_clarification", generate_clarification)
     builder.add_node("build_base_route", build_base_route)
     builder.add_node("split_into_days", split_into_days)
+    builder.add_node("build_local_routes", build_local_routes)
     builder.add_node("build_stages", build_stages)
+    builder.add_node("sample_weather", sample_weather)
     builder.add_node("verify_plan", verify_plan)
     builder.add_node("repair_plan", repair_plan)
     builder.add_node("render_markdown", render_markdown)
@@ -374,8 +588,10 @@ def build_planning_graph(
     )
     builder.add_edge("generate_clarification", END)
     builder.add_edge("build_base_route", "split_into_days")
-    builder.add_edge("split_into_days", "build_stages")
-    builder.add_edge("build_stages", "verify_plan")
+    builder.add_edge("split_into_days", "build_local_routes")
+    builder.add_edge("build_local_routes", "build_stages")
+    builder.add_edge("build_stages", "sample_weather")
+    builder.add_edge("sample_weather", "verify_plan")
     builder.add_conditional_edges(
         "verify_plan",
         after_verification,
@@ -415,14 +631,16 @@ async def _route(
     origin: dict[str, Any],
     destination: dict[str, Any],
     trip_id: str,
+    preferred_mode: str = "driving",
+    fallback_modes: list[str] | None = None,
 ) -> dict[str, Any]:
     result = await registry.execute(
         "amap.route",
         {
             "origin": {**origin["coordinates"], "city": origin.get("city")},
             "destination": {**destination["coordinates"], "city": destination.get("city")},
-            "preferred_mode": "driving",
-            "allowed_fallback_modes": ["riding", "walking", "transit"],
+            "preferred_mode": preferred_mode,
+            "allowed_fallback_modes": fallback_modes or ["riding", "walking", "transit"],
         },
         SkillContext(trip_id=trip_id),
     )
@@ -433,3 +651,99 @@ async def _route(
         "warnings": result.warnings,
         "sources": [item.model_dump(mode="json") for item in result.sources],
     }
+
+
+def _movement_stage(
+    *,
+    day_id: str,
+    sequence: int,
+    title: str,
+    origin: dict[str, Any],
+    destination: dict[str, Any],
+    route: dict[str, Any],
+    start_at: datetime,
+) -> MovementStage:
+    data = route["data"]
+    duration = int(data["duration_minutes"])
+    road_names = list(
+        dict.fromkeys(
+            step.get("road")
+            for step in data.get("steps", [])
+            if step.get("road")
+        )
+    )
+    segment = RouteSegment(
+        coordinates=[
+            Coordinates.model_validate(point)
+            for point in data["geometry"]
+        ],
+        distance_km=data["distance_km"],
+        duration_minutes=duration,
+        road_name=" / ".join(road_names[:3]) or None,
+        toll=bool(data.get("tolls_cny")),
+    )
+    traffic_summary = data.get("traffic_summary")
+    if data.get("selected_mode") == "driving" and traffic_summary:
+        if start_at.date() != date.today():
+            traffic_summary = f"当前路况参考（非未来预测）：{traffic_summary}"
+    elif data.get("selected_mode") != "driving":
+        traffic_summary = {
+            "transit": "公共交通按高德当前班次规划",
+            "walking": "步行路段不适用机动车实时路况",
+            "riding": "骑行路段不适用机动车实时路况",
+        }.get(data.get("selected_mode"), "按高德路线规划")
+    return MovementStage(
+        day_id=day_id,
+        sequence=sequence,
+        title=title,
+        mode=data.get("selected_mode", "driving"),
+        transit_type="bus" if data.get("selected_mode") == "transit" else None,
+        origin=PlaceRef.model_validate(origin),
+        destination=PlaceRef.model_validate(destination),
+        route_segments=[segment],
+        planned_start=start_at,
+        planned_end=start_at + timedelta(minutes=duration),
+        distance_km=data["distance_km"],
+        duration_minutes=duration,
+        traffic_summary=traffic_summary,
+        toll_fee={
+            "minimum": data.get("tolls_cny", 0),
+            "maximum": data.get("tolls_cny", 0),
+            "estimated": False,
+        },
+        source_records=[
+            SourceRecord.model_validate(item)
+            for item in route.get("sources", [])
+        ],
+    )
+
+
+def _local_stage_title(mode: str | None) -> str:
+    return {
+        "transit": "公共交通前往景点",
+        "walking": "步行游览接驳",
+        "riding": "骑行游览接驳",
+        "driving": "目的地短途接驳",
+    }.get(mode, "目的地接驳")
+
+
+def _closest_weather_sample(
+    weather: dict[str, Any] | None,
+    planned_at: datetime,
+) -> dict[str, Any] | None:
+    if not weather:
+        return None
+    best: tuple[float, dict[str, Any]] | None = None
+    for sample in weather.get("hourly_samples", []):
+        try:
+            sampled_at = datetime.fromisoformat(sample["sampled_at"])
+            if sampled_at.tzinfo is None:
+                sampled_at = sampled_at.replace(tzinfo=SHANGHAI)
+            delta = abs((sampled_at - planned_at).total_seconds())
+        except (KeyError, TypeError, ValueError):
+            continue
+        if best is None or delta < best[0]:
+            best = (delta, sample)
+    if not best or best[0] > 2 * 60 * 60:
+        return None
+    return best[1]
