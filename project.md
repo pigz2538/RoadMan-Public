@@ -6,6 +6,9 @@
 
 当前阶段：总规划第 27 节首批工程骨架与武汉—庐山演示已完成
 
+下一阶段：严格补齐总规划阶段 C 后端能力；实施顺序与验收门槛见
+[`docs/backend-phase-c-plan.md`](docs/backend-phase-c-plan.md)。阶段 C 未通过前不启动 LangGraph。
+
 ## 1. 项目定位
 
 RoadMan 是面向周末自驾和中短途旅行的智能路书工作台。当前版本已经打通：
