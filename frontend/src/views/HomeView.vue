@@ -5,6 +5,7 @@ import {
   Bell, ChevronDown, CircleUserRound, CloudSun, Grid2X2, Paperclip,
   Mic, Route, Send, Settings, SlidersHorizontal, UserRound, CarFront,
 } from '@lucide/vue'
+import { createTrip, startPlanning as startPlanningRequest } from '../api/trips'
 
 const router = useRouter()
 const prompt = ref('周六早上从武汉出发，去庐山两天一夜，周日晚八点前回来，喜欢自然景观')
@@ -14,6 +15,8 @@ const accountMenuOpen = ref(false)
 const modelLoaded = ref(false)
 const modelError = ref(false)
 const voiceReserved = ref(false)
+const planning = ref(false)
+const planningError = ref('')
 
 const menus = [
   { label: '账户设置', icon: CircleUserRound },
@@ -31,8 +34,19 @@ const quickActions = [
 
 onMounted(() => import('@google/model-viewer'))
 
-function startPlanning() {
-  router.push('/trips/trip_wuhan_lushan_demo/plan')
+async function startPlanning() {
+  if (planning.value || !prompt.value.trim()) return
+  planning.value = true
+  planningError.value = ''
+  try {
+    const trip = await createTrip(prompt.value.trim())
+    await startPlanningRequest(trip.id)
+    await router.push(`/trips/${trip.id}/plan?planning=1`)
+  } catch (error) {
+    planningError.value = error instanceof Error ? error.message : '规划服务暂不可用'
+  } finally {
+    planning.value = false
+  }
 }
 
 function activate(label: string) {
@@ -142,13 +156,14 @@ function activate(label: string) {
               >
                 <Mic />
               </button>
-              <button class="primary-button" @click="startPlanning">
-                <Send :size="20" /> 开始规划
+              <button class="primary-button" :disabled="planning" @click="startPlanning">
+                <Send :size="20" /> {{ planning ? '正在启动…' : '开始规划' }}
               </button>
             </div>
           </div>
         </div>
       </div>
+      <p v-if="planningError" class="planning-error">{{ planningError }}</p>
 
       <div class="quick-grid">
         <button v-for="[icon, label] in quickActions" :key="label" @click="prompt = String(label)">

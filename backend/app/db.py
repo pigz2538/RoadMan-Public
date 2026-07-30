@@ -23,6 +23,9 @@ class TripRow(TimestampColumns, Base):
     title: Mapped[str] = mapped_column(String(255), index=True)
     status: Mapped[str] = mapped_column(String(32), index=True)
     document: Mapped[str] = mapped_column(Text)
+    state_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    plan_markdown: Mapped[str | None] = mapped_column(Text, nullable=True)
+    messages_json: Mapped[str] = mapped_column(Text, default="[]")
 
 
 class VehicleRow(TimestampColumns, Base):

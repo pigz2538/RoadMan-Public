@@ -18,6 +18,13 @@ class Settings(BaseSettings):
     max_upload_bytes: int = 20 * 1024 * 1024
     allowed_upload_extensions: str = ".png,.jpg,.jpeg,.webp,.pdf"
     allowed_upload_mime_types: str = "image/png,image/jpeg,image/webp,application/pdf"
+    ollama_api_url: str = "https://ollama.com/api/generate"
+    ollama_api_key: str = ""
+    ollama_model: str = "deepseek-v4-flash:cloud"
+    ollama_timeout_seconds: float = 90
+    enable_llm_requirement_extraction: bool = True
+    max_clarification_rounds: int = 3
+    planning_state_ttl_seconds: int = 24 * 60 * 60
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

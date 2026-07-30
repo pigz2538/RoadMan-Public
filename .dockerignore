@@ -1,0 +1,12 @@
+.git
+.pytest_cache
+**/__pycache__
+**/.pytest_cache
+**/node_modules
+**/dist
+**/test-results
+**/*.pyc
+**/*.pyo
+backend/roadman.db
+backend/data
+frontend/playwright-report

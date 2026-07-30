@@ -1,0 +1,24 @@
+from typing import Any, TypedDict
+
+
+class RoadManState(TypedDict, total=False):
+    trip_id: str
+    raw_input: str
+    selected_vehicle_id: str | None
+    trip_request: dict[str, Any]
+    missing_fields: list[str]
+    clarification_round: int
+    clarification_question: str | None
+    clarification_answers: list[dict[str, Any]]
+    route_candidates: list[dict[str, Any]]
+    selected_route: dict[str, Any] | None
+    weather_results: list[dict[str, Any]]
+    day_plans: list[dict[str, Any]]
+    warnings: list[dict[str, Any]]
+    verification_result: dict[str, Any] | None
+    repair_attempted: bool
+    progress: dict[str, Any]
+    sources: list[dict[str, Any]]
+    plan_markdown: str | None
+    error: dict[str, Any] | None
+    messages: list[dict[str, Any]]

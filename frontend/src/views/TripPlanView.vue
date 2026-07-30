@@ -1,8 +1,14 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ArrowLeft, ChevronLeft, ChevronRight, Download, Share2 } from '@lucide/vue'
-import { fetchMockTrip } from '../api/trips'
+import {
+  answerClarification,
+  fetchMockTrip,
+  fetchPlanning,
+  fetchTrip,
+  type PlanningSnapshot,
+} from '../api/trips'
 import { useTripStore } from '../stores/trip'
 import { useTripSSE } from '../composables/useTripSSE'
 import AmapRouteMap from '../components/map/AmapRouteMap.vue'
@@ -11,13 +17,23 @@ import AgentPanel from '../components/agent/AgentPanel.vue'
 import mockTrip from '../../../shared/examples/wuhan-lushan-trip.json'
 
 const router = useRouter()
+const route = useRoute()
 const store = useTripStore()
 const loading = ref(true)
 const degraded = ref(false)
 const stageTrack = ref<HTMLElement | null>(null)
+const planningSnapshot = ref<PlanningSnapshot | null>(null)
+const clarificationAnswer = ref('')
+const planningError = ref('')
+let pollingTimer: number | undefined
 const stageDrag = { active: false, moved: false, startX: 0, startScrollLeft: 0, pointerId: -1 }
 const categories = ['景点', '住宿', '餐饮', '服务'] as const
-const { connect } = useTripSSE((event) => (store.planningEvent = event))
+const { connect } = useTripSSE((event) => {
+  store.planningEvent = event
+  if (event.event === 'planning_completed' || event.event === 'clarification_required') {
+    void refreshPlanning()
+  }
+})
 
 const filteredActivities = computed(() => {
   const typeMap: Record<string, string[]> = {
@@ -38,15 +54,65 @@ const currentGlobalStageIndex = computed(() =>
 )
 
 async function load() {
+  const tripId = String(route.params.tripId)
   try {
-    store.trip = await fetchMockTrip()
+    if (tripId === 'trip_wuhan_lushan_demo') {
+      store.trip = await fetchMockTrip()
+    } else {
+      store.trip = await fetchTrip(tripId)
+      connect(tripId)
+      await refreshPlanning()
+    }
   } catch {
-    store.trip = mockTrip as unknown as typeof store.trip
-    degraded.value = true
+    if (tripId === 'trip_wuhan_lushan_demo') {
+      store.trip = mockTrip as unknown as typeof store.trip
+      degraded.value = true
+    } else {
+      planningError.value = '行程加载失败，请返回首页重试。'
+    }
   } finally {
     loading.value = false
     await nextTick()
     centerCurrentStage('auto')
+  }
+}
+
+async function refreshPlanning() {
+  const tripId = String(route.params.tripId)
+  if (tripId === 'trip_wuhan_lushan_demo') return
+  if (pollingTimer) window.clearTimeout(pollingTimer)
+  try {
+    const snapshot = await fetchPlanning(tripId)
+    planningSnapshot.value = snapshot
+    if (snapshot.status === 'completed') {
+      store.trip = await fetchTrip(tripId)
+      store.setDay(0)
+      await nextTick()
+      centerCurrentStage('auto')
+      return
+    }
+    if (snapshot.status === 'failed') {
+      planningError.value = snapshot.verification_result?.issues?.[0]?.description || '规划失败，请修改需求后重试。'
+      return
+    }
+    if (snapshot.status !== 'clarification_required') {
+      pollingTimer = window.setTimeout(() => void refreshPlanning(), 900)
+    }
+  } catch (error) {
+    planningError.value = error instanceof Error ? error.message : '无法读取规划进度'
+  }
+}
+
+async function submitClarification() {
+  const answer = clarificationAnswer.value.trim()
+  if (!answer) return
+  planningError.value = ''
+  try {
+    planningSnapshot.value = await answerClarification(String(route.params.tripId), answer)
+    clarificationAnswer.value = ''
+    pollingTimer = window.setTimeout(() => void refreshPlanning(), 500)
+  } catch (error) {
+    planningError.value = error instanceof Error ? error.message : '提交补充信息失败'
   }
 }
 
@@ -144,6 +210,9 @@ function selectStageFromCard(item: (typeof allStages.value)[number]) {
 }
 
 onMounted(load)
+onUnmounted(() => {
+  if (pollingTimer) window.clearTimeout(pollingTimer)
+})
 watch(
   () => store.currentStageId,
   () => nextTick(() => centerCurrentStage()),
@@ -165,6 +234,27 @@ watch(
     </header>
 
     <div v-if="loading" class="page-state">正在加载武汉—庐山行程…</div>
+    <section v-else-if="planningSnapshot && !store.currentDay" class="planning-state glass-card">
+      <span class="eyebrow">LANGGRAPH PLANNING</span>
+      <h2>{{ planningSnapshot.clarification_question || '正在生成您的真实路线与路书…' }}</h2>
+      <div class="planning-meter">
+        <i :style="{ width: `${store.planningEvent?.progress || planningSnapshot.progress.value || 3}%` }" />
+      </div>
+      <p>{{ store.planningEvent?.label || planningSnapshot.progress.label || '规划任务已进入队列' }}</p>
+      <div v-if="planningSnapshot.defaults_applied.length" class="visible-defaults">
+        <strong>已采用的可见默认值</strong>
+        <span v-for="item in planningSnapshot.defaults_applied" :key="item">{{ item }}</span>
+      </div>
+      <form
+        v-if="planningSnapshot.status === 'clarification_required'"
+        class="clarification-form"
+        @submit.prevent="submitClarification"
+      >
+        <input v-model="clarificationAnswer" autofocus placeholder="输入补充信息…" />
+        <button class="primary-button">继续规划</button>
+      </form>
+      <p v-if="planningError" class="planning-error">{{ planningError }}</p>
+    </section>
     <template v-else-if="store.trip && store.currentDay">
       <div v-if="degraded" class="degraded-banner">后端暂不可用，正在加载本地行程数据。</div>
       <div v-if="store.planningEvent" class="progress-banner">
@@ -278,7 +368,11 @@ watch(
 
         <AgentPanel />
       </section>
+      <details v-if="planningSnapshot?.plan_markdown" class="roadbook-card glass-card">
+        <summary>查看 Markdown 路书</summary>
+        <pre>{{ planningSnapshot.plan_markdown }}</pre>
+      </details>
     </template>
-    <div v-else class="page-state error">行程加载失败，请稍后重试。</div>
+    <div v-else class="page-state error">{{ planningError || '行程加载失败，请稍后重试。' }}</div>
   </main>
 </template>

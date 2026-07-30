@@ -3,12 +3,14 @@ from pathlib import Path
 
 from app.domain.models import (
     Activity,
+    ClarificationAnswer,
     DayPlan,
     FileRecord,
     JobCreate,
     JobRecord,
     MovementStage,
     PlanPatch,
+    PlanningSnapshot,
     PlaceRef,
     SSEEvent,
     SkillResult,
@@ -22,6 +24,8 @@ from app.domain.models import (
 
 MODELS = [
     TripRequest,
+    ClarificationAnswer,
+    PlanningSnapshot,
     VehicleProfile,
     PlaceRef,
     DayPlan,

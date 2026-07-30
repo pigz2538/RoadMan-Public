@@ -21,34 +21,11 @@ from .core.errors import (
     validation_error_handler,
 )
 from .db import create_tables
-from .repositories.skill_calls import record_skill_call
-from .skills.amap import (
-    AmapDrivingAdapter,
-    AmapGeocodeAdapter,
-    AmapPoiAdapter,
-    AmapRouteAdapter,
-)
-from .skills.cache import RedisFallbackSkillCache
-from .skills.carinfo import CarInfoDemoAdapter
-from .skills.registry import SkillRegistry
-from .skills.weather import OpenMeteoForecastAdapter
+from .services.registry_factory import build_skill_registry
 
 settings = get_settings()
 logger = structlog.get_logger()
-registry = SkillRegistry(
-    cache=RedisFallbackSkillCache(
-        settings.redis_url,
-        settings.skill_cache_prefix,
-        settings.redis_connect_timeout_seconds,
-    ),
-    audit_sink=record_skill_call,
-)
-registry.register(AmapGeocodeAdapter(settings.amap_webservice_key))
-registry.register(AmapDrivingAdapter(settings.amap_webservice_key))
-registry.register(AmapRouteAdapter(settings.amap_webservice_key))
-registry.register(AmapPoiAdapter(settings.amap_webservice_key))
-registry.register(OpenMeteoForecastAdapter())
-registry.register(CarInfoDemoAdapter())
+registry = build_skill_registry(settings)
 
 
 @asynccontextmanager
@@ -61,8 +38,8 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(
     title="RoadMan API",
-    version="0.2.0",
-    description="RoadMan 阶段 C 后端平台、真实数据适配器与异步任务 API",
+    version="0.3.0",
+    description="RoadMan 阶段 D LangGraph 需求澄清、真实路线与路书规划 API",
     lifespan=lifespan,
 )
 app.add_exception_handler(AppError, app_error_handler)

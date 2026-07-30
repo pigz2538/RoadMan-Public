@@ -296,6 +296,23 @@ class TripUpdate(BaseModel):
     selected_vehicle_id: str | None = None
 
 
+class ClarificationAnswer(BaseModel):
+    answer: str = Field(min_length=1, max_length=2000)
+
+
+class PlanningSnapshot(BaseModel):
+    trip_id: str
+    status: TripStatus
+    missing_fields: list[str] = Field(default_factory=list)
+    clarification_round: int = 0
+    clarification_question: str | None = None
+    defaults_applied: list[str] = Field(default_factory=list)
+    progress: dict[str, Any] = Field(default_factory=dict)
+    verification_result: dict[str, Any] | None = None
+    plan_markdown: str | None = None
+    job_id: str | None = None
+
+
 class PlanPatch(BaseModel):
     id: str = Field(default_factory=lambda: f"patch_{uuid4().hex[:12]}")
     trip_id: str

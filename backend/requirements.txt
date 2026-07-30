@@ -11,6 +11,7 @@ arq>=0.26,<1
 httpx>=0.28,<1
 structlog>=24.4,<26
 jsonschema>=4.23,<5
+langgraph>=1.0,<2
 python-multipart>=0.0.20,<1
 pytest>=8.3,<9
 pytest-asyncio>=0.25,<1

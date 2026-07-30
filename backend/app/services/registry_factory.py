@@ -1,0 +1,31 @@
+from ..core.config import Settings, get_settings
+from ..repositories.skill_calls import record_skill_call
+from ..skills.amap import (
+    AmapDrivingAdapter,
+    AmapGeocodeAdapter,
+    AmapPoiAdapter,
+    AmapRouteAdapter,
+)
+from ..skills.cache import RedisFallbackSkillCache
+from ..skills.carinfo import CarInfoDemoAdapter
+from ..skills.registry import SkillRegistry
+from ..skills.weather import OpenMeteoForecastAdapter
+
+
+def build_skill_registry(settings: Settings | None = None) -> SkillRegistry:
+    config = settings or get_settings()
+    registry = SkillRegistry(
+        cache=RedisFallbackSkillCache(
+            config.redis_url,
+            config.skill_cache_prefix,
+            config.redis_connect_timeout_seconds,
+        ),
+        audit_sink=record_skill_call,
+    )
+    registry.register(AmapGeocodeAdapter(config.amap_webservice_key))
+    registry.register(AmapDrivingAdapter(config.amap_webservice_key))
+    registry.register(AmapRouteAdapter(config.amap_webservice_key))
+    registry.register(AmapPoiAdapter(config.amap_webservice_key))
+    registry.register(OpenMeteoForecastAdapter())
+    registry.register(CarInfoDemoAdapter())
+    return registry

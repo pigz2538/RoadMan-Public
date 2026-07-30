@@ -209,3 +209,28 @@ async def test_worker_completes_persisted_job(client):
     fetched = await client.get(f"/api/v1/jobs/{job_id}")
     assert fetched.json()["status"] == "completed"
     assert fetched.json()["progress"] == 100
+
+
+@pytest.mark.asyncio
+async def test_cancelled_planning_job_pauses_trip(client):
+    from app.workers.main import execute_job
+
+    trip_response = await client.post(
+        "/api/v1/trips",
+        json={
+            "title": "待取消规划",
+            "request": {"raw_text": "周六从武汉去庐山，两天一夜"},
+        },
+    )
+    trip_id = trip_response.json()["id"]
+    job_response = await client.post(
+        "/api/v1/jobs",
+        json={"kind": "planning", "trip_id": trip_id, "payload": {"trip_id": trip_id}},
+    )
+    job_id = job_response.json()["id"]
+    await client.post(f"/api/v1/jobs/{job_id}/cancel")
+
+    result = await execute_job({}, job_id)
+    assert result["cancelled"] is True
+    trip = await client.get(f"/api/v1/trips/{trip_id}")
+    assert trip.json()["status"] == "paused"

@@ -1,4 +1,4 @@
-# RoadMan API 契约 v0.2
+# RoadMan API 契约 v0.3
 
 开发地址：`http://localhost:8000`，交互式文档：`/docs`。Docker 统一入口为
 `http://localhost:8080`。
@@ -35,14 +35,17 @@
 | GET | `/api/v1/jobs/{job_id}` | 查询任务状态与进度 |
 | POST | `/api/v1/jobs/{job_id}/cancel` | 取消排队中或执行中的任务 |
 
-## 规划与 SSE
+## LangGraph 规划与 SSE
 
-- `POST /api/v1/trips/{trip_id}/planning/start`
-- `GET /api/v1/trips/{trip_id}/planning/events`
+- `POST /api/v1/trips/{trip_id}/planning/start`：投递 Planning Job，返回 202。
+- `GET /api/v1/trips/{trip_id}/planning`：需求、默认值、追问、校验和 Markdown 快照。
+- `POST /api/v1/trips/{trip_id}/planning/clarifications`：补充答案并恢复规划。
+- `GET /api/v1/trips/{trip_id}/planning/events`：跨进程 SSE 进度。
+- `GET /api/v1/trips/{trip_id}/roadbook`：`text/markdown` 路书。
 
 SSE 使用命名事件，每条事件包含单调递增的 `id:`。客户端断线重连时传
-`Last-Event-ID`，服务只续发其后的保留事件。当前事件内容仍是阶段 D 工作流接入前的
-可展示演示进度，不包含模型私有推理。
+`Last-Event-ID`，服务只续发其后的保留事件。真实 Planning Worker 在每个 LangGraph
+节点写入可展示进度；事件不包含模型私有推理。
 
 ## Skill Registry
 

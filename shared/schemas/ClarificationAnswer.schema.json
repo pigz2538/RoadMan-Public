@@ -1,0 +1,15 @@
+{
+  "properties": {
+    "answer": {
+      "maxLength": 2000,
+      "minLength": 1,
+      "title": "Answer",
+      "type": "string"
+    }
+  },
+  "required": [
+    "answer"
+  ],
+  "title": "ClarificationAnswer",
+  "type": "object"
+}

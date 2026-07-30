@@ -3,13 +3,22 @@ import json
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, Header, Response, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import PlainTextResponse, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.errors import AppError
 from ..db import get_session
-from ..domain.models import Trip, TripCreate, TripStatus, TripUpdate
-from ..repositories import TripRepository
+from ..domain.models import (
+    ClarificationAnswer,
+    JobCreate,
+    PlanningSnapshot,
+    Trip,
+    TripCreate,
+    TripStatus,
+    TripUpdate,
+)
+from ..repositories import JobRepository, TripRepository
+from ..services.job_queue import enqueue_job
 from ..services.sse import sse_manager
 
 router = APIRouter(prefix="/api/v1/trips", tags=["trips"])
@@ -62,16 +71,104 @@ async def delete_trip(trip_id: str, repo: TripRepository = Depends(get_repo)) ->
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.post("/{trip_id}/planning/start", response_model=Trip)
-async def start_mock_planning(
+@router.post(
+    "/{trip_id}/planning/start",
+    response_model=PlanningSnapshot,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def start_planning(
     trip_id: str,
-    repo: TripRepository = Depends(get_repo),
-) -> Trip:
+    session: AsyncSession = Depends(get_session),
+) -> PlanningSnapshot:
+    repo = TripRepository(session)
     trip = await repo.get(trip_id)
     if not trip:
         raise AppError("TRIP_NOT_FOUND", "行程不存在", 404, {"trip_id": trip_id})
     trip.status = TripStatus.planning
-    return await repo.save(trip)
+    await repo.save(trip)
+    job = await JobRepository(session).create(
+        JobCreate(kind="planning", trip_id=trip_id, payload={"trip_id": trip_id})
+    )
+    if not await enqueue_job(job):
+        raise AppError("JOB_QUEUE_UNAVAILABLE", "规划任务队列不可用", 503)
+    return PlanningSnapshot(
+        trip_id=trip_id,
+        status=trip.status,
+        progress={"node": "queued", "value": 0},
+        job_id=job.id,
+    )
+
+
+@router.get("/{trip_id}/planning", response_model=PlanningSnapshot)
+async def get_planning_snapshot(
+    trip_id: str,
+    repo: TripRepository = Depends(get_repo),
+) -> PlanningSnapshot:
+    trip = await repo.get(trip_id)
+    if not trip:
+        raise AppError("TRIP_NOT_FOUND", "行程不存在", 404, {"trip_id": trip_id})
+    state, markdown = await repo.get_planning_snapshot(trip_id)
+    state = state or {}
+    return PlanningSnapshot(
+        trip_id=trip_id,
+        status=trip.status,
+        missing_fields=state.get("missing_fields", []),
+        clarification_round=state.get("clarification_round", 0),
+        clarification_question=state.get("clarification_question"),
+        defaults_applied=state.get("trip_request", {}).get("defaults_applied", []),
+        progress=state.get("progress", {}),
+        verification_result=state.get("verification_result"),
+        plan_markdown=markdown,
+    )
+
+
+@router.post(
+    "/{trip_id}/planning/clarifications",
+    response_model=PlanningSnapshot,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def answer_clarification(
+    trip_id: str,
+    payload: ClarificationAnswer,
+    session: AsyncSession = Depends(get_session),
+) -> PlanningSnapshot:
+    repo = TripRepository(session)
+    trip = await repo.get(trip_id)
+    if not trip:
+        raise AppError("TRIP_NOT_FOUND", "行程不存在", 404, {"trip_id": trip_id})
+    if trip.status != TripStatus.clarification_required:
+        raise AppError("CLARIFICATION_NOT_REQUIRED", "当前行程不需要补充信息", 409)
+    job = await JobRepository(session).create(
+        JobCreate(
+            kind="planning",
+            trip_id=trip_id,
+            payload={"trip_id": trip_id, "clarification_answer": payload.answer},
+        )
+    )
+    if not await enqueue_job(job):
+        raise AppError("JOB_QUEUE_UNAVAILABLE", "规划任务队列不可用", 503)
+    trip.status = TripStatus.planning
+    await repo.save(trip)
+    return PlanningSnapshot(
+        trip_id=trip_id,
+        status=trip.status,
+        progress={"node": "queued", "value": 0},
+        job_id=job.id,
+    )
+
+
+@router.get("/{trip_id}/roadbook", response_class=PlainTextResponse)
+async def get_roadbook(
+    trip_id: str,
+    repo: TripRepository = Depends(get_repo),
+) -> PlainTextResponse:
+    trip = await repo.get(trip_id)
+    if not trip:
+        raise AppError("TRIP_NOT_FOUND", "行程不存在", 404, {"trip_id": trip_id})
+    _, markdown = await repo.get_planning_snapshot(trip_id)
+    if not markdown:
+        raise AppError("ROADBOOK_NOT_READY", "路书尚未生成", 409)
+    return PlainTextResponse(markdown, media_type="text/markdown; charset=utf-8")
 
 
 @router.get("/{trip_id}/planning/events")
@@ -96,7 +193,7 @@ async def planning_events(
                 f"event: {payload.event}\n"
                 f"data: {json.dumps(payload.model_dump(mode='json'), ensure_ascii=False)}\n\n"
             )
-            await asyncio.sleep(0.15)
+            await asyncio.sleep(0.05)
 
     return StreamingResponse(
         event_stream(),

@@ -61,6 +61,10 @@ export interface Trip {
   status: string
   days: DayPlan[]
   warnings: Array<{ code: string; message: string }>
+  request?: {
+    raw_text: string
+    defaults_applied: string[]
+  }
 }
 
 export interface PlanningEvent {

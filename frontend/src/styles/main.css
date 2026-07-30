@@ -373,6 +373,101 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .progress-banner > div { width: 120px; height: 5px; border-radius: 5px; background: #51698c; overflow: hidden; }.progress-banner i { display: block; height: 100%; background: #45d5c3; transition: width .25s; }
 .page-state { min-height: 70vh; display: grid; place-items: center; color: var(--muted); }.page-state.error { color: #bd3c43; }
 
+.primary-button:disabled {
+  cursor: wait;
+  opacity: .72;
+}
+
+.planning-error {
+  margin: 10px 0 0;
+  color: #c43f47;
+  font-size: 14px;
+  text-align: center;
+}
+
+.planning-state {
+  width: min(760px, calc(100% - 40px));
+  margin: 12vh auto;
+  padding: 36px;
+  text-align: center;
+}
+
+.planning-state h2 {
+  margin: 10px 0 20px;
+  color: var(--ink);
+}
+
+.planning-meter {
+  height: 10px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e5edf9;
+}
+
+.planning-meter i {
+  display: block;
+  height: 100%;
+  min-width: 3%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #1eb7e8, #7656f5);
+  transition: width .45s ease;
+}
+
+.visible-defaults {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 22px 0;
+}
+
+.visible-defaults strong {
+  width: 100%;
+}
+
+.visible-defaults span {
+  padding: 6px 10px;
+  border-radius: 9px;
+  background: #edf4ff;
+  color: #35618d;
+}
+
+.clarification-form {
+  display: flex;
+  gap: 10px;
+  margin-top: 22px;
+}
+
+.clarification-form input {
+  flex: 1;
+  min-width: 0;
+  padding: 13px 16px;
+  border: 1px solid #bfd4f3;
+  border-radius: 12px;
+  font: inherit;
+}
+
+.roadbook-card {
+  margin: 14px 22px 24px;
+  padding: 18px 22px;
+}
+
+.roadbook-card summary {
+  cursor: pointer;
+  color: #1555a2;
+  font-weight: 800;
+}
+
+.roadbook-card pre {
+  max-height: 420px;
+  overflow: auto;
+  margin: 18px 0 0;
+  white-space: pre-wrap;
+  color: #223955;
+  font: 14px/1.75 ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
 @media (max-width: 1150px) {
   .plan-grid { grid-template-columns: 290px minmax(440px, 1fr); }
   .agent-panel { position: fixed; z-index: 15; right: 18px; top: 92px; bottom: 20px; width: 330px; }
