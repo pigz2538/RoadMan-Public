@@ -2,9 +2,9 @@
 
 更新日期：2026-07-30
 
-当前版本：`0.4.2`
+当前版本：`0.5.0-dev`
 
-当前里程碑：总规划阶段 E 已完成，下一步进入阶段 F 旅游活动与酒店能力
+当前里程碑：总规划阶段 E 已完成，阶段 F 旅游活动与酒店能力实施中
 
 本轮稳定性与交互修复：
 
@@ -82,6 +82,8 @@
 - `amap.poi`：关键字、城市、类型和中心范围 POI 查询。
 - `open_meteo.forecast`：坐标天气预报。
 - `carinfo.demo`：固定车型续航与能耗样本。
+- `flyai.hotel`：按目的地和入住日期搜索飞猪酒店，返回坐标、星级、实时价格区间
+  与详情来源；不可用时自动降级为高德住宿 POI。
 
 驾驶没有路线时按距离和同城条件尝试骑行、步行或公交；全部方式失败才返回
 `ROUTE_UNAVAILABLE`，前端使用灰色虚线作无导航含义的提示。详见
@@ -134,7 +136,7 @@ npm run dev
 
 ## 已验证
 
-- 后端 pytest：33 项通过，1 个真实接口集成用例默认跳过。
+- 后端 pytest：37 项通过，1 个真实接口集成用例默认跳过。
 - Alembic：Docker PostgreSQL 迁移到 `20260730_0002 (head)`。
 - 共享 Schema：18 个成功导出。
 - Docker：PostgreSQL、Redis、Backend、Worker、Frontend 全部健康。
@@ -152,6 +154,15 @@ npm run dev
 [`docs/backend-phase-d-plan.md`](docs/backend-phase-d-plan.md)。
 阶段 E 的详细规则与验收证据见
 [`docs/backend-phase-e-plan.md`](docs/backend-phase-e-plan.md)。
+
+## 阶段 F 当前进度
+
+- 已完成高德景点/餐饮/住宿候选融合、景点真实接驳、景点停留、每日三餐和过夜酒店
+  的确定性时间窗排程。
+- 已完成 FlyAI 酒店 Adapter、容器运行依赖、酒店价格/来源展示和高德降级。
+- 餐食、景点、酒店与移动阶段出现时间重叠时会阻断规划；长途拆段后会顺延后续阶段。
+- 详细设计与验收记录见
+  [`docs/backend-phase-f-plan.md`](docs/backend-phase-f-plan.md)。
 
 ## 当前边界与后续
 

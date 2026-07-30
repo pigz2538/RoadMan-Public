@@ -216,6 +216,8 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .activity-copy strong { font-size: 17px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .activity-copy strong b { display: inline-grid; place-items: center; width: 19px; height: 19px; margin-right: 6px; border-radius: 50%; color: white; background: var(--blue); font-size: 10px; }
 .activity-copy > span { color: var(--muted); font-size: 14px; }
+.activity-copy .activity-meta { font-size: 12px; line-height: 1.35; white-space: normal; }
+.activity-copy .activity-source { color: #2670ce; font-size: 12px; }
 .activity-copy div { display: flex; gap: 7px; }
 .activity-copy button { border: 1px solid #dce5f1; border-radius: 20px; background: white; padding: 5px 8px; font-size: 13px; display: flex; align-items: center; gap: 3px; cursor: pointer; }
 .activity-copy button svg { width: 11px; height: 11px; }

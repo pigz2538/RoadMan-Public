@@ -18,6 +18,19 @@ export interface Activity {
   required?: boolean
   backup?: boolean
   user_note?: string
+  ticket_or_price?: {
+    currency: string
+    minimum: number
+    maximum: number
+    estimated: boolean
+  }
+  opening_hours?: { text: string; confirmed: boolean }
+  source_records?: Array<{
+    provider: string
+    title: string
+    url?: string
+  }>
+  warnings?: Array<{ code: string; message: string; severity?: string }>
 }
 
 export interface Stage {

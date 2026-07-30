@@ -8,6 +8,7 @@ from ..skills.amap import (
 )
 from ..skills.cache import RedisFallbackSkillCache
 from ..skills.carinfo import CarInfoDemoAdapter
+from ..skills.flyai import FlyAIHotelAdapter
 from ..skills.registry import SkillRegistry
 from ..skills.weather import OpenMeteoForecastAdapter
 
@@ -28,4 +29,5 @@ def build_skill_registry(settings: Settings | None = None) -> SkillRegistry:
     registry.register(AmapPoiAdapter(config.amap_webservice_key))
     registry.register(OpenMeteoForecastAdapter())
     registry.register(CarInfoDemoAdapter())
+    registry.register(FlyAIHotelAdapter())
     return registry

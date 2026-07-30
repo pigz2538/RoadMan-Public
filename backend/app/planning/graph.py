@@ -27,6 +27,7 @@ from .deep_drive import (
 )
 from .llm import OllamaRequirementExtractor
 from .state import RoadManState
+from .tourism import schedule_tourism_activities, verify_tourism_plan
 
 ProgressCallback = Callable[[str, str, str, int, str, str | None], Awaitable[None]]
 SHANGHAI = ZoneInfo("Asia/Shanghai")
@@ -207,6 +208,140 @@ def build_planning_graph(
             "progress": {"node": "split_into_days", "value": 64},
         }
 
+    async def discover_tourism(state: RoadManState) -> dict[str, Any]:
+        await emit(
+            state,
+            "discover_tourism",
+            "正在检索景点、餐饮与住宿候选",
+            65,
+            event="tool_started",
+            tool="amap.poi",
+        )
+        destination = state["trip_request"]["destination"]
+        coordinates = destination.get("coordinates")
+        categories = {
+            "attractions": ("景点", 12),
+            "meals": ("餐厅", 10),
+            "hotels": ("酒店", 10),
+        }
+        candidates: dict[str, list[dict[str, Any]]] = {
+            key: [] for key in categories
+        }
+        tourism_sources: list[dict[str, Any]] = []
+        flyai_hotels = await registry.execute(
+            "flyai.hotel",
+            {
+                "destination": destination.get("city") or destination["name"],
+                "poi_name": destination["name"],
+                "check_in_date": state["trip_request"]["start_date"],
+                "check_out_date": state["trip_request"]["end_date"],
+                "sort": "rate_desc",
+            },
+            SkillContext(trip_id=state["trip_id"]),
+        )
+        if flyai_hotels.success and isinstance(flyai_hotels.data, dict):
+            flyai_sources = [
+                item.model_dump(mode="json") for item in flyai_hotels.sources
+            ]
+            tourism_sources.extend(flyai_sources)
+            for item in flyai_hotels.data.get("items", []):
+                if not item.get("name") or not item.get("location"):
+                    continue
+                candidates["hotels"].append(
+                    {
+                        "place": {
+                            "id": item.get("id"),
+                            "name": item["name"],
+                            "address": item.get("address"),
+                            "city": destination.get("city"),
+                            "coordinates": {
+                                "longitude": float(item["longitude"]),
+                                "latitude": float(item["latitude"]),
+                            },
+                            "source_id": item.get("id"),
+                        },
+                        "source_records": flyai_sources,
+                        "provider": flyai_hotels.provider,
+                        "ticket_or_price": (
+                            {
+                                "currency": "CNY",
+                                "minimum": item["price_min_cny"],
+                                "maximum": item["price_max_cny"],
+                                "estimated": item.get("price_estimated", False),
+                            }
+                            if item.get("price_min_cny") is not None
+                            else None
+                        ),
+                    }
+                )
+        for category, (keywords, page_size) in categories.items():
+            if category == "hotels" and candidates["hotels"]:
+                continue
+            result = await registry.execute(
+                "amap.poi",
+                {
+                    "keywords": keywords,
+                    "city": destination.get("city"),
+                    "location": (
+                        f"{coordinates['longitude']},{coordinates['latitude']}"
+                        if coordinates
+                        else None
+                    ),
+                    "radius": 25000,
+                    "page_size": page_size,
+                },
+                SkillContext(trip_id=state["trip_id"]),
+            )
+            if not result.success or not isinstance(result.data, dict):
+                continue
+            source_records = [
+                item.model_dump(mode="json") for item in result.sources
+            ]
+            tourism_sources.extend(source_records)
+            for item in result.data.get("items", []):
+                location = item.get("location")
+                if not item.get("name") or not location:
+                    continue
+                try:
+                    longitude, latitude = location.split(",", 1)
+                    place = {
+                        "id": item.get("id"),
+                        "name": item["name"],
+                        "address": item.get("address"),
+                        "city": item.get("city") or destination.get("city"),
+                        "coordinates": {
+                            "longitude": float(longitude),
+                            "latitude": float(latitude),
+                        },
+                        "source_id": item.get("id"),
+                    }
+                except (TypeError, ValueError):
+                    continue
+                candidates[category].append(
+                    {
+                        "place": place,
+                        "source_records": source_records,
+                        "provider": result.provider,
+                    }
+                )
+        await emit(
+            state,
+            "discover_tourism",
+            (
+                f"已找到 {len(candidates['attractions'])} 个景点、"
+                f"{len(candidates['meals'])} 个餐饮和 "
+                f"{len(candidates['hotels'])} 个住宿候选"
+            ),
+            67,
+            event="tool_completed",
+            tool="amap.poi",
+        )
+        return {
+            "tourism_candidates": candidates,
+            "sources": [*state.get("sources", []), *tourism_sources],
+            "progress": {"node": "discover_tourism", "value": 67},
+        }
+
     async def build_local_routes(state: RoadManState) -> dict[str, Any]:
         await emit(
             state,
@@ -221,18 +356,10 @@ def build_planning_graph(
         coordinates = destination.get("coordinates")
         if not coordinates:
             return {"local_routes": []}
-        poi_result = await registry.execute(
-            "amap.poi",
-            {
-                "keywords": "景点",
-                "city": destination.get("city"),
-                "location": f"{coordinates['longitude']},{coordinates['latitude']}",
-                "radius": 20000,
-                "page_size": 12,
-            },
-            SkillContext(trip_id=state["trip_id"]),
+        attraction_candidates = state.get("tourism_candidates", {}).get(
+            "attractions", []
         )
-        if not poi_result.success or not isinstance(poi_result.data, dict):
+        if not attraction_candidates:
             return {
                 "local_routes": [],
                 "warnings": [
@@ -244,24 +371,7 @@ def build_planning_graph(
                     },
                 ],
             }
-        places = []
-        for item in poi_result.data.get("items", []):
-            if not item.get("name") or not item.get("location"):
-                continue
-            longitude, latitude = item["location"].split(",", 1)
-            places.append(
-                {
-                    "id": item.get("id"),
-                    "name": item["name"],
-                    "address": item.get("address"),
-                    "city": item.get("city") or destination.get("city"),
-                    "coordinates": {
-                        "longitude": float(longitude),
-                        "latitude": float(latitude),
-                    },
-                    "source_id": item.get("id"),
-                }
-            )
+        places = [item["place"] for item in attraction_candidates]
         if not places:
             return {"local_routes": []}
 
@@ -329,7 +439,6 @@ def build_planning_graph(
             "local_routes": local_routes,
             "sources": [
                 *state.get("sources", []),
-                *[item.model_dump(mode="json") for item in poi_result.sources],
                 *[
                     source
                     for item in local_routes
@@ -392,7 +501,7 @@ def build_planning_graph(
                     start_at=local_start,
                 )
                 stages.append(stage)
-                local_start = stage.planned_end + timedelta(minutes=45)
+                local_start = stage.planned_end + timedelta(minutes=105)
             if index == len(day_defs) - 1:
                 return_start = max(
                     local_start,
@@ -675,6 +784,20 @@ def build_planning_graph(
             int(state["trip_request"].get("max_continuous_drive_minutes") or 120),
         )
         for day in plans:
+            previous_end: datetime | None = None
+            for stage in sorted(
+                day.get("stages", []),
+                key=lambda item: item.get("sequence", 0),
+            ):
+                start_at = datetime.fromisoformat(stage["planned_start"])
+                end_at = datetime.fromisoformat(stage["planned_end"])
+                if previous_end and start_at < previous_end:
+                    duration = end_at - start_at
+                    start_at = previous_end + timedelta(minutes=15)
+                    end_at = start_at + duration
+                    stage["planned_start"] = start_at.isoformat()
+                    stage["planned_end"] = end_at.isoformat()
+                previous_end = end_at
             day["total_drive_minutes"] = sum(
                 stage["duration_minutes"]
                 for stage in day.get("stages", [])
@@ -684,6 +807,22 @@ def build_planning_graph(
             "day_plans": plans,
             "warnings": [*state.get("warnings", []), *warnings],
             "progress": {"node": "enrich_deep_drive", "value": 88},
+        }
+
+    async def schedule_tourism(state: RoadManState) -> dict[str, Any]:
+        await emit(
+            state,
+            "schedule_tourism",
+            "正在安排景点停留、每日餐食与过夜住宿",
+            88,
+        )
+        plans = schedule_tourism_activities(
+            state.get("day_plans", []),
+            state.get("tourism_candidates", {}),
+        )
+        return {
+            "day_plans": plans,
+            "progress": {"node": "schedule_tourism", "value": 88},
         }
 
     async def verify_plan(state: RoadManState) -> dict[str, Any]:
@@ -713,6 +852,12 @@ def build_planning_graph(
             )
         )
         issues.extend(_verify_route_closure(state.get("day_plans", [])))
+        issues.extend(
+            verify_tourism_plan(
+                state.get("day_plans", []),
+                state.get("tourism_candidates", {}),
+            )
+        )
         return {
             "verification_result": {
                 "passed": not any(item["severity"] == "blocker" for item in issues),
@@ -747,7 +892,8 @@ def build_planning_graph(
             "",
         ]
         for day in state.get("day_plans", []):
-            lines.extend([f"## {day['title']} · {day['date']}", ""])
+            day_title = day.get("title") or f"第 {day.get('day_index', 1)} 天"
+            lines.extend([f"## {day_title} · {day['date']}", ""])
             for stage in day.get("stages", []):
                 lines.extend(
                     [
@@ -799,12 +945,14 @@ def build_planning_graph(
     builder.add_node("generate_clarification", generate_clarification)
     builder.add_node("build_base_route", build_base_route)
     builder.add_node("split_into_days", split_into_days)
+    builder.add_node("discover_tourism", discover_tourism)
     builder.add_node("build_local_routes", build_local_routes)
     builder.add_node("build_stages", build_stages)
     builder.add_node("sample_weather", sample_weather)
     builder.add_node("load_vehicle_profile", load_vehicle_profile)
     builder.add_node("discover_services", discover_services)
     builder.add_node("enrich_deep_drive", enrich_deep_drive)
+    builder.add_node("schedule_tourism", schedule_tourism)
     builder.add_node("verify_plan", verify_plan)
     builder.add_node("repair_plan", repair_plan)
     builder.add_node("render_markdown", render_markdown)
@@ -820,13 +968,15 @@ def build_planning_graph(
     )
     builder.add_edge("generate_clarification", END)
     builder.add_edge("build_base_route", "split_into_days")
-    builder.add_edge("split_into_days", "build_local_routes")
+    builder.add_edge("split_into_days", "discover_tourism")
+    builder.add_edge("discover_tourism", "build_local_routes")
     builder.add_edge("build_local_routes", "build_stages")
     builder.add_edge("build_stages", "load_vehicle_profile")
     builder.add_edge("load_vehicle_profile", "discover_services")
     builder.add_edge("discover_services", "sample_weather")
     builder.add_edge("sample_weather", "enrich_deep_drive")
-    builder.add_edge("enrich_deep_drive", "verify_plan")
+    builder.add_edge("enrich_deep_drive", "schedule_tourism")
+    builder.add_edge("schedule_tourism", "verify_plan")
     builder.add_conditional_edges(
         "verify_plan",
         after_verification,
