@@ -2,7 +2,7 @@ import json
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from ..db import SessionLocal, SkillCallRow
 from ..domain.models import SkillCallRecord, SkillResult
@@ -64,3 +64,32 @@ class SkillCallRepository:
             )
             for row in rows
         ]
+
+    async def summary(self) -> dict:
+        async with SessionLocal() as session:
+            total = await session.scalar(select(func.count()).select_from(SkillCallRow))
+            successful = await session.scalar(
+                select(func.count()).select_from(SkillCallRow).where(SkillCallRow.success.is_(True))
+            )
+            cached = await session.scalar(
+                select(func.count()).select_from(SkillCallRow).where(SkillCallRow.cache_hit.is_(True))
+            )
+            average_latency = await session.scalar(select(func.avg(SkillCallRow.latency_ms)))
+            rows = (
+                await session.execute(
+                    select(SkillCallRow.adapter, func.count())
+                    .group_by(SkillCallRow.adapter)
+                    .order_by(func.count().desc())
+                )
+            ).all()
+        total_value = int(total or 0)
+        return {
+            "total_calls": total_value,
+            "successful_calls": int(successful or 0),
+            "failed_calls": max(0, total_value - int(successful or 0)),
+            "cache_hits": int(cached or 0),
+            "average_latency_ms": round(float(average_latency or 0), 2),
+            "by_adapter": {adapter: int(count) for adapter, count in rows},
+            "estimated_cost_usd": None,
+            "cost_note": "当前外部 Skill 未返回可计费 token，保留调用量与延迟统计。",
+        }

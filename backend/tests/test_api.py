@@ -17,6 +17,16 @@ async def test_health(client):
 
 
 @pytest.mark.asyncio
+async def test_operational_metrics_expose_request_and_skill_summary(client):
+    await client.get("/health")
+    response = await client.get("/api/v1/ops/metrics")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["service"]["requests"] >= 1
+    assert "total_calls" in body["skills"]
+
+
+@pytest.mark.asyncio
 async def test_trip_crud(client):
     payload = {
         "title": "测试行程",

@@ -33,7 +33,9 @@
 ### 导出
 
 - Markdown 行程安排支持浏览器下载；
-- 前端规划页提供“保存版本”和“导出 Markdown”。
+- 前端规划页提供“保存版本”和导出入口；
+- 从同一份冻结 Trip Snapshot 生成 PDF、PPTX 和长图 PNG，避免不同格式内容漂移；
+- 导出未就绪时返回结构化 `ROADBOOK_NOT_READY`，不会生成空文件。
 
 ## 新增依赖
 
@@ -43,9 +45,15 @@
 - `python-docx`
 - `openpyxl`
 
+## 已补齐
+
+- `GET /api/v1/trips/{trip_id}/roadbook.pdf`；
+- `GET /api/v1/trips/{trip_id}/roadbook.pptx`；
+- `GET /api/v1/trips/{trip_id}/roadbook.png`；
+- 前端规划页提供 PDF、PPT、长图下载按钮；
+
 ## 尚待完成
 
-- PDF、PPT、长图与地图截图导出；
-- 前端附件解析预览/勾选确认界面；
+- 专用地图导出页与 Playwright 地图截图嵌入 PPT/PDF；
 - 订单截图真实模型兼容性与字段召回测试；
 - 导出任务异步化及文件自动清理。

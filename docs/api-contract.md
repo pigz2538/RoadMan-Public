@@ -58,6 +58,9 @@
 - `POST /api/v1/trips/{trip_id}/planning/clarifications`：补充答案并恢复规划。
 - `GET /api/v1/trips/{trip_id}/planning/events`：跨进程 SSE 进度。
 - `GET /api/v1/trips/{trip_id}/roadbook`：`text/markdown` 路书。
+- `GET /api/v1/trips/{trip_id}/roadbook.pdf`：冻结快照 PDF 导出。
+- `GET /api/v1/trips/{trip_id}/roadbook.pptx`：冻结快照 PPTX 导出。
+- `GET /api/v1/trips/{trip_id}/roadbook.png`：冻结快照长图 PNG 导出。
 - `GET /api/v1/trips/{trip_id}/risks`：按阶段返回风险等级、标签、警告和汇总。
 - `GET /api/v1/trips/{trip_id}/services`：返回七类沿途 POI 清单与已选停靠。
 
@@ -78,6 +81,8 @@ SSE 使用命名事件，每条事件包含单调递增的 `id:`。客户端断�
 |---|---|---|
 | GET | `/api/v1/skills/health` | Adapter 与 Redis/内存缓存健康状态 |
 | GET | `/api/v1/skills/calls` | 最近 SkillCall 审计记录 |
+| GET | `/api/v1/skills/metrics` | Skill 调用量、成功率、缓存命中和延迟统计 |
+| GET | `/api/v1/ops/metrics` | 服务请求与 Skill 聚合监控指标 |
 | POST | `/api/v1/skills/amap/geocode` | 高德地理编码 |
 | POST | `/api/v1/skills/amap/driving` | 高德驾车路线 |
 | POST | `/api/v1/skills/amap/route` | 驾车/骑行/步行/公交统一路线编排 |

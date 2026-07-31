@@ -5,7 +5,7 @@ from datetime import date
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, Header, Query, Response, status
-from fastapi.responses import PlainTextResponse, StreamingResponse
+from fastapi.responses import PlainTextResponse, Response, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.errors import AppError
@@ -42,6 +42,7 @@ from ..planning.editing import (
 )
 from ..repositories import JobRepository, TripRepository
 from ..services.job_queue import enqueue_job
+from ..services.exports import export_lines, render_long_image, render_pdf, render_pptx
 from ..services.sse import sse_manager
 from ..skills.base import SkillContext
 from ..skills.registry import SkillRegistry
@@ -656,6 +657,42 @@ async def get_roadbook(
             )
         },
     )
+
+
+async def _export_snapshot(trip_id: str, repo: TripRepository, kind: str) -> Response:
+    trip = await repo.get(trip_id)
+    if not trip:
+        raise AppError("TRIP_NOT_FOUND", "行程不存在", 404, {"trip_id": trip_id})
+    _, markdown = await repo.get_planning_snapshot(trip_id)
+    if not markdown and not trip.days:
+        raise AppError("ROADBOOK_NOT_READY", "行程安排尚未生成", 409)
+    lines = export_lines(trip, markdown or "")
+    renderers = {
+        "pdf": (render_pdf, "application/pdf", "pdf"),
+        "pptx": (render_pptx, "application/vnd.openxmlformats-officedocument.presentationml.presentation", "pptx"),
+        "png": (render_long_image, "image/png", "png"),
+    }
+    renderer, media_type, extension = renderers[kind]
+    return Response(
+        renderer(lines),
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="roadman-{trip_id}.{extension}"'},
+    )
+
+
+@router.get("/{trip_id}/roadbook.pdf")
+async def get_roadbook_pdf(trip_id: str, repo: TripRepository = Depends(get_repo)) -> Response:
+    return await _export_snapshot(trip_id, repo, "pdf")
+
+
+@router.get("/{trip_id}/roadbook.pptx")
+async def get_roadbook_pptx(trip_id: str, repo: TripRepository = Depends(get_repo)) -> Response:
+    return await _export_snapshot(trip_id, repo, "pptx")
+
+
+@router.get("/{trip_id}/roadbook.png")
+async def get_roadbook_image(trip_id: str, repo: TripRepository = Depends(get_repo)) -> Response:
+    return await _export_snapshot(trip_id, repo, "png")
 
 
 @router.get("/{trip_id}/risks")

@@ -61,3 +61,11 @@ $env:OLLAMA_MODEL='deepseek-v4-flash:cloud'
 - [`docs/api-contract.md`](docs/api-contract.md)
 - [`docs/backend-phase-c-plan.md`](docs/backend-phase-c-plan.md)
 - [`docs/backend-phase-d-plan.md`](docs/backend-phase-d-plan.md)
+- [`docs/backend-phase-h-plan.md`](docs/backend-phase-h-plan.md)
+- [`docs/backend-phase-i-plan.md`](docs/backend-phase-i-plan.md)
+
+导出：规划页可下载 Markdown、PDF、PPTX 和长图 PNG；接口分别为
+`/roadbook`、`/roadbook.pdf`、`/roadbook.pptx`、`/roadbook.png`。
+监控：`/api/v1/ops/metrics` 和 `/api/v1/skills/metrics`；请求会透传
+`X-Request-ID`、`X-Trace-ID`。默认每个客户端每分钟允许 600 次请求，可通过
+`RATE_LIMIT_PER_MINUTE` 调整。

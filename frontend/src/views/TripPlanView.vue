@@ -6,6 +6,7 @@ import {
   answerClarification,
   createTripVersion,
   downloadTripMarkdown,
+  downloadTripExport,
   fetchMockTrip,
   fetchPlanning,
   fetchTrip,
@@ -160,6 +161,11 @@ function exportMarkdown() {
   downloadTripMarkdown(store.trip.id)
 }
 
+function exportSnapshot(format: 'pdf' | 'pptx' | 'png') {
+  if (!store.trip || store.trip.id === 'trip_wuhan_lushan_demo') return
+  downloadTripExport(store.trip.id, format)
+}
+
 function selectStageById(stageId: string) {
   const item = allStages.value.find((entry) => entry.stage.id === stageId)
   if (item) selectJourneyStage(item)
@@ -287,6 +293,9 @@ watch(
       <div class="top-actions">
         <button class="ghost-button" @click="saveVersion"><Share2 />保存版本</button>
         <button class="ghost-button" @click="exportMarkdown"><Download />导出 Markdown</button>
+        <button class="ghost-button export-small" @click="exportSnapshot('pdf')">PDF</button>
+        <button class="ghost-button export-small" @click="exportSnapshot('pptx')">PPT</button>
+        <button class="ghost-button export-small" @click="exportSnapshot('png')">长图</button>
       </div>
     </header>
     <div v-if="versionMessage" class="degraded-banner">{{ versionMessage }}</div>

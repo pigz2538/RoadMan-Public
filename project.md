@@ -4,7 +4,7 @@
 
 当前版本：`0.6.0-dev`
 
-当前里程碑：总规划阶段 G 已完成，阶段 H 附件、版本与导出实施中
+当前里程碑：总规划阶段 H 已完成核心导出，阶段 I 工程化与可观测首轮已实现
 
 本轮稳定性与交互修复：
 
@@ -189,12 +189,17 @@ npm run dev
   Ollama Cloud 时使用多模态抽取。
 - 所有附件结果先预览，用户确认后才写入必去地点。
 - 行程版本可命名保存、列出与恢复；Markdown 可从规划页直接下载。
+- 导出统一从冻结快照生成 PDF、PPTX 与长图 PNG；规划页已提供对应下载入口。
+- 导出未就绪时返回结构化 `ROADBOOK_NOT_READY`，不生成空文件。
+- 阶段 I 首轮新增 `/api/v1/ops/metrics` 和 `/api/v1/skills/metrics`，并记录请求/Skill 延迟、失败与缓存命中。
+- 请求统一透传 `X-Request-ID`、`X-Trace-ID`，默认启用滑动窗口限流，日志不记录请求体和密钥。
 - 新依赖已写入 `backend/requirements.txt`，并安装进 `roadman` Conda 环境。
 - 详细进度见 [`docs/backend-phase-h-plan.md`](docs/backend-phase-h-plan.md)。
 
 ## 当前边界与后续
 
-- 阶段 H 下一步是 PDF/PPT/长图/地图截图导出与附件确认前端，之后进入阶段 I。
+- 阶段 H 的核心文档导出已完成，地图截图嵌入和异步导出清理仍待阶段 I 工程化补齐。
+- 阶段 I 详细记录见 [`docs/backend-phase-i-plan.md`](docs/backend-phase-i-plan.md)；下一步是文件清理、备份、部署模板和压力测试。
 - 语音识别、真实酒店价格/库存、充电动态和完整导出将在后续阶段实现。
 - 总规划只定义到阶段 J；本轮把“阶段 K”解释为 D–J 完成后的全链路验收、
   文档冻结和发布检查，不虚构额外产品范围。

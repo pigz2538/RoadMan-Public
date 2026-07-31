@@ -31,6 +31,11 @@ async def skill_calls(limit: int = Query(default=50, ge=1, le=200)):
     return await SkillCallRepository().list(limit)
 
 
+@router.get("/metrics")
+async def skill_metrics():
+    return await SkillCallRepository().summary()
+
+
 @router.post("/amap/geocode")
 async def geocode(
     payload: dict,
