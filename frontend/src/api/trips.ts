@@ -238,3 +238,27 @@ export async function interpretTripEdit(
     body: JSON.stringify(payload),
   }))
 }
+
+export interface TripVersion {
+  id: string
+  trip_id: string
+  name: string
+  note?: string
+  created_at: string
+}
+
+export async function createTripVersion(
+  tripId: string,
+  name: string,
+  note?: string,
+): Promise<TripVersion> {
+  return json(await fetch(`${API_BASE}/api/v1/trips/${tripId}/versions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, note }),
+  }))
+}
+
+export function downloadTripMarkdown(tripId: string) {
+  window.location.href = `${API_BASE}/api/v1/trips/${tripId}/roadbook`
+}

@@ -17,8 +17,13 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:5173"
     upload_dir: str = "./data/uploads"
     max_upload_bytes: int = 20 * 1024 * 1024
-    allowed_upload_extensions: str = ".png,.jpg,.jpeg,.webp,.pdf"
-    allowed_upload_mime_types: str = "image/png,image/jpeg,image/webp,application/pdf"
+    allowed_upload_extensions: str = ".png,.jpg,.jpeg,.webp,.pdf,.docx,.md,.xlsx"
+    allowed_upload_mime_types: str = (
+        "image/png,image/jpeg,image/webp,application/pdf,"
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document,"
+        "text/markdown,text/plain,"
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
     ollama_api_url: str = "https://ollama.com/api/generate"
     ollama_api_key: str = ""
     ollama_model: str = "deepseek-v4-flash:cloud"

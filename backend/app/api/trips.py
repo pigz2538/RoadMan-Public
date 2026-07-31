@@ -647,7 +647,15 @@ async def get_roadbook(
     _, markdown = await repo.get_planning_snapshot(trip_id)
     if not markdown:
         raise AppError("ROADBOOK_NOT_READY", "行程安排尚未生成", 409)
-    return PlainTextResponse(markdown, media_type="text/markdown; charset=utf-8")
+    return PlainTextResponse(
+        markdown,
+        media_type="text/markdown; charset=utf-8",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="roadman-{trip_id}.md"'
+            )
+        },
+    )
 
 
 @router.get("/{trip_id}/risks")

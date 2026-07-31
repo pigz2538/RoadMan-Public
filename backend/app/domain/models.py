@@ -126,6 +126,21 @@ class FileRecord(BaseModel):
     created_at: datetime = Field(default_factory=utc_now)
 
 
+class AttachmentExtraction(BaseModel):
+    file_id: str
+    status: Literal["preview", "confirmed"] = "preview"
+    places: list[str] = Field(default_factory=list)
+    hotels: list[str] = Field(default_factory=list)
+    dates: list[str] = Field(default_factory=list)
+    order_numbers: list[str] = Field(default_factory=list)
+    text_preview: str = ""
+    warnings: list[str] = Field(default_factory=list)
+
+
+class AttachmentConfirmation(BaseModel):
+    accepted_places: list[str] = Field(default_factory=list, max_length=50)
+
+
 class JobStatus(StrEnum):
     queued = "queued"
     running = "running"
@@ -360,6 +375,19 @@ class PlanPatch(BaseModel):
     risk_delta: str | None = None
     requires_replan: bool = False
     status: Literal["preview", "accepted", "rejected", "applied", "rolled_back"] = "preview"
+
+
+class TripVersionCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    note: str | None = Field(default=None, max_length=500)
+
+
+class TripVersion(BaseModel):
+    id: str = Field(default_factory=lambda: f"version_{uuid4().hex[:12]}")
+    trip_id: str
+    name: str
+    note: str | None = None
+    created_at: datetime = Field(default_factory=utc_now)
 
 
 class VerificationIssue(BaseModel):

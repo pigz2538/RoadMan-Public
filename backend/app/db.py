@@ -28,6 +28,19 @@ class TripRow(TimestampColumns, Base):
     messages_json: Mapped[str] = mapped_column(Text, default="[]")
 
 
+class TripVersionRow(Base):
+    __tablename__ = "trip_versions"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    trip_id: Mapped[str] = mapped_column(String(64), index=True)
+    name: Mapped[str] = mapped_column(String(100))
+    note: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    trip_document: Mapped[str] = mapped_column(Text)
+    state_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    plan_markdown: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+
 class VehicleRow(TimestampColumns, Base):
     __tablename__ = "vehicles"
 

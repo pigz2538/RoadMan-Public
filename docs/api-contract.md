@@ -39,6 +39,10 @@
 | POST | `/api/v1/files` | 校验大小、扩展名、MIME 和文件签名后上传 |
 | GET | `/api/v1/files/{file_id}` | 文件元数据 |
 | GET | `/api/v1/files/{file_id}/content` | 下载文件内容 |
+| POST | `/api/v1/files/{file_id}/extract` | 解析附件并返回待确认预览 |
+| POST | `/api/v1/files/{file_id}/confirm` | 用户确认后写入地点需求 |
+| POST/GET | `/api/v1/trips/{trip_id}/versions` | 保存、列出行程版本 |
+| POST | `/api/v1/trips/{trip_id}/versions/{version_id}/restore` | 恢复版本 |
 | POST | `/api/v1/jobs` | 创建异步任务并投递 ARQ |
 | GET | `/api/v1/jobs/{job_id}` | 查询任务状态与进度 |
 | POST | `/api/v1/jobs/{job_id}/cancel` | 取消排队中或执行中的任务 |

@@ -4,6 +4,8 @@ import { useRoute, useRouter } from 'vue-router'
 import { ArrowLeft, ChevronLeft, ChevronRight, Download, Share2 } from '@lucide/vue'
 import {
   answerClarification,
+  createTripVersion,
+  downloadTripMarkdown,
   fetchMockTrip,
   fetchPlanning,
   fetchTrip,
@@ -26,6 +28,7 @@ const stageTrack = ref<HTMLElement | null>(null)
 const planningSnapshot = ref<PlanningSnapshot | null>(null)
 const clarificationAnswer = ref('')
 const planningError = ref('')
+const versionMessage = ref('')
 let pollingTimer: number | undefined
 const stageDrag = { active: false, moved: false, startX: 0, startScrollLeft: 0, pointerId: -1 }
 const categories = ['景点', '住宿', '餐饮', '服务'] as const
@@ -138,6 +141,24 @@ async function requestActivityRemoval(activityId: string) {
   }
 }
 
+async function saveVersion() {
+  if (!store.trip || store.trip.id === 'trip_wuhan_lushan_demo') return
+  const name = window.prompt('版本名称', `行程版本 ${new Date().toLocaleString('zh-CN')}`)?.trim()
+  if (!name) return
+  try {
+    const version = await createTripVersion(store.trip.id, name)
+    versionMessage.value = `已保存版本：${version.name}`
+    window.setTimeout(() => { versionMessage.value = '' }, 3000)
+  } catch (error) {
+    versionMessage.value = error instanceof Error ? error.message : '版本保存失败'
+  }
+}
+
+function exportMarkdown() {
+  if (!store.trip || store.trip.id === 'trip_wuhan_lushan_demo') return
+  downloadTripMarkdown(store.trip.id)
+}
+
 function selectStageById(stageId: string) {
   const item = allStages.value.find((entry) => entry.stage.id === stageId)
   if (item) selectJourneyStage(item)
@@ -246,10 +267,11 @@ watch(
         <h1>{{ store.trip?.title || '自驾游深度规划页' }}</h1>
       </div>
       <div class="top-actions">
-        <button class="ghost-button"><Share2 />分享</button>
-        <button class="ghost-button"><Download />导出</button>
+        <button class="ghost-button" @click="saveVersion"><Share2 />保存版本</button>
+        <button class="ghost-button" @click="exportMarkdown"><Download />导出 Markdown</button>
       </div>
     </header>
+    <div v-if="versionMessage" class="degraded-banner">{{ versionMessage }}</div>
 
     <div v-if="loading" class="page-state">正在加载武汉—庐山行程…</div>
     <section v-else-if="planningSnapshot && !store.currentDay" class="planning-state glass-card">

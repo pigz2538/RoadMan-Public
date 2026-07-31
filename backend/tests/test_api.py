@@ -42,6 +42,33 @@ async def test_trip_crud(client):
 
 
 @pytest.mark.asyncio
+async def test_trip_version_save_and_restore(client):
+    created = await client.post(
+        "/api/v1/trips",
+        json={
+            "title": "版本原稿",
+            "request": {"raw_text": "武汉周末游"},
+        },
+    )
+    trip_id = created.json()["id"]
+    saved = await client.post(
+        f"/api/v1/trips/{trip_id}/versions",
+        json={"name": "初版", "note": "用户主动保存"},
+    )
+    assert saved.status_code == 201
+
+    await client.patch(f"/api/v1/trips/{trip_id}", json={"title": "修改后"})
+    versions = await client.get(f"/api/v1/trips/{trip_id}/versions")
+    assert versions.json()[0]["name"] == "初版"
+
+    restored = await client.post(
+        f"/api/v1/trips/{trip_id}/versions/{saved.json()['id']}/restore",
+    )
+    assert restored.status_code == 200
+    assert restored.json()["title"] == "版本原稿"
+
+
+@pytest.mark.asyncio
 async def test_trip_recommendations_returns_ranked_persisted_candidates(client):
     created = await client.post(
         "/api/v1/trips",
@@ -368,6 +395,46 @@ async def test_file_upload_metadata_and_download(client):
     )
     assert rejected.status_code == 415
     assert rejected.json()["error"]["code"] == "FILE_TYPE_NOT_ALLOWED"
+
+
+@pytest.mark.asyncio
+async def test_attachment_requires_preview_and_confirmation_before_trip_update(client):
+    created = await client.post(
+        "/api/v1/trips",
+        json={"title": "附件测试", "request": {"raw_text": "武汉出发"}},
+    )
+    trip_id = created.json()["id"]
+    uploaded = await client.post(
+        "/api/v1/files",
+        data={"trip_id": trip_id},
+        files={
+            "upload": (
+                "攻略.md",
+                "# 庐山攻略\n计划游览庐山风景区\n入住牯岭街云上酒店\n日期 2026-08-02",
+                "text/markdown",
+            )
+        },
+    )
+    assert uploaded.status_code == 201
+    file_id = uploaded.json()["id"]
+    before = await client.get(f"/api/v1/trips/{trip_id}")
+    assert before.json()["request"]["must_visit"] == []
+
+    preview = await client.post(f"/api/v1/files/{file_id}/extract")
+    assert preview.status_code == 200
+    assert preview.json()["status"] == "preview"
+    assert "牯岭街云上酒店" in preview.json()["hotels"]
+    still_unchanged = await client.get(f"/api/v1/trips/{trip_id}")
+    assert still_unchanged.json()["request"]["must_visit"] == []
+
+    confirmed = await client.post(
+        f"/api/v1/files/{file_id}/confirm",
+        json={"accepted_places": ["牯岭街云上酒店"]},
+    )
+    assert confirmed.status_code == 200
+    assert confirmed.json()["status"] == "confirmed"
+    updated = await client.get(f"/api/v1/trips/{trip_id}")
+    assert updated.json()["request"]["must_visit"][0]["name"] == "牯岭街云上酒店"
 
 
 @pytest.mark.asyncio

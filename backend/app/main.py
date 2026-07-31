@@ -12,6 +12,7 @@ from .api.jobs import router as jobs_router
 from .api.skills import router as skills_router
 from .api.trips import router as trips_router
 from .api.vehicles import router as vehicles_router
+from .api.versions import router as versions_router
 from .core.config import get_settings
 from .core.errors import (
     AppError,
@@ -69,6 +70,7 @@ app.include_router(skills_router)
 app.include_router(vehicles_router)
 app.include_router(files_router)
 app.include_router(jobs_router)
+app.include_router(versions_router)
 
 
 @app.get("/health")

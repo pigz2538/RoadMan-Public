@@ -4,7 +4,7 @@
 
 当前版本：`0.6.0-dev`
 
-当前里程碑：总规划阶段 G 核心闭环已完成，准备阶段 H 附件、版本与导出
+当前里程碑：总规划阶段 G 已完成，阶段 H 附件、版本与导出实施中
 
 本轮稳定性与交互修复：
 
@@ -182,9 +182,19 @@ npm run dev
 - 详细设计与验收记录见
   [`docs/backend-phase-g-plan.md`](docs/backend-phase-g-plan.md)。
 
+## 阶段 H 当前进度
+
+- 图片、PDF、DOCX、Markdown、XLSX 均通过文件签名/结构校验后上传。
+- PDF/Word/Markdown/Excel 可提取地点、酒店、日期、订单号；图片在已配置
+  Ollama Cloud 时使用多模态抽取。
+- 所有附件结果先预览，用户确认后才写入必去地点。
+- 行程版本可命名保存、列出与恢复；Markdown 可从规划页直接下载。
+- 新依赖已写入 `backend/requirements.txt`，并安装进 `roadman` Conda 环境。
+- 详细进度见 [`docs/backend-phase-h-plan.md`](docs/backend-phase-h-plan.md)。
+
 ## 当前边界与后续
 
-- 阶段 H 将接入附件解析确认、行程版本保存/恢复和 Markdown/PDF/PPT/长图导出。
+- 阶段 H 下一步是 PDF/PPT/长图/地图截图导出与附件确认前端，之后进入阶段 I。
 - 语音识别、真实酒店价格/库存、充电动态和完整导出将在后续阶段实现。
 - 总规划只定义到阶段 J；本轮把“阶段 K”解释为 D–J 完成后的全链路验收、
   文档冻结和发布检查，不虚构额外产品范围。
