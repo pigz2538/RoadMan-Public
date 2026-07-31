@@ -26,6 +26,7 @@ from .deep_drive import (
     verify_deep_drive_plan,
 )
 from .llm import OllamaRequirementExtractor
+from .recommendations import rank_tourism_candidates
 from .state import RoadManState
 from .tourism import schedule_tourism_activities, verify_tourism_plan
 
@@ -228,6 +229,20 @@ def build_planning_graph(
             key: [] for key in categories
         }
         tourism_sources: list[dict[str, Any]] = []
+        flyai_ticket_items: list[dict[str, Any]] = []
+        flyai_pois = await registry.execute(
+            "flyai.poi",
+            {
+                "city_name": destination.get("city") or destination["name"],
+                "keyword": destination["name"],
+            },
+            SkillContext(trip_id=state["trip_id"]),
+        )
+        if flyai_pois.success and isinstance(flyai_pois.data, dict):
+            flyai_ticket_items = list(flyai_pois.data.get("items", []))
+            tourism_sources.extend(
+                item.model_dump(mode="json") for item in flyai_pois.sources
+            )
         flyai_hotels = await registry.execute(
             "flyai.hotel",
             {
@@ -262,6 +277,7 @@ def build_planning_graph(
                         },
                         "source_records": flyai_sources,
                         "provider": flyai_hotels.provider,
+                        "rating": item.get("rating"),
                         "ticket_or_price": (
                             {
                                 "currency": "CNY",
@@ -324,6 +340,83 @@ def build_planning_graph(
                         "provider": result.provider,
                     }
                 )
+        if coordinates:
+            open_trip_map = await registry.execute(
+                "opentripmap.nearby",
+                {
+                    "longitude": coordinates["longitude"],
+                    "latitude": coordinates["latitude"],
+                    "radius_m": 25000,
+                    "limit": 12,
+                    "language": "en",
+                },
+                SkillContext(trip_id=state["trip_id"]),
+            )
+            if open_trip_map.success and isinstance(open_trip_map.data, dict):
+                source_records = [
+                    item.model_dump(mode="json") for item in open_trip_map.sources
+                ]
+                tourism_sources.extend(source_records)
+                known_names = {
+                    item["place"]["name"].strip().lower()
+                    for item in candidates["attractions"]
+                }
+                for item in open_trip_map.data.get("items", []):
+                    name = str(item.get("name") or "").strip()
+                    if not name or name.lower() in known_names:
+                        continue
+                    candidates["attractions"].append(
+                        {
+                            "place": {
+                                "id": item.get("id"),
+                                "name": name,
+                                "name_en": item.get("name_en") or name,
+                                "name_local": item.get("name_local") or name,
+                                "city": destination.get("city"),
+                                "coordinates": {
+                                    "longitude": float(item["longitude"]),
+                                    "latitude": float(item["latitude"]),
+                                },
+                                "source_id": item.get("id"),
+                            },
+                            "categories": item.get("kinds"),
+                            "rating": item.get("rating"),
+                            "source_records": source_records,
+                            "provider": open_trip_map.provider,
+                        }
+                    )
+                    known_names.add(name.lower())
+        if flyai_ticket_items:
+            for candidate in candidates["attractions"]:
+                candidate_name = candidate["place"]["name"].replace(" ", "").lower()
+                match = next(
+                    (
+                        item
+                        for item in flyai_ticket_items
+                        if item.get("name")
+                        and (
+                            item["name"].replace(" ", "").lower() in candidate_name
+                            or candidate_name in item["name"].replace(" ", "").lower()
+                        )
+                    ),
+                    None,
+                )
+                if not match:
+                    continue
+                candidate["ticket_name"] = match.get("ticket_name")
+                candidate["ticket_date"] = match.get("ticket_date")
+                if match.get("price_min_cny") is not None:
+                    candidate["ticket_or_price"] = {
+                        "currency": "CNY",
+                        "minimum": match["price_min_cny"],
+                        "maximum": match["price_max_cny"],
+                        "estimated": match.get("price_estimated", False),
+                    }
+        candidates = rank_tourism_candidates(
+            candidates,
+            destination,
+            state["trip_request"].get("preferences", []),
+        )
         await emit(
             state,
             "discover_tourism",

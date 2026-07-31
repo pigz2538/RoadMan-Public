@@ -1,6 +1,11 @@
 import pytest
 
+from app.db import SessionLocal
+from datetime import date, datetime, timezone
+
+from app.domain.models import Activity, DayItemRef, DayPlan, Trip
 from app.domain.models import SSEEvent
+from app.repositories import TripRepository
 from app.services.sse import sse_manager
 
 
@@ -34,6 +39,151 @@ async def test_trip_crud(client):
 
     deleted = await client.delete(f"/api/v1/trips/{trip_id}")
     assert deleted.status_code == 204
+
+
+@pytest.mark.asyncio
+async def test_trip_recommendations_returns_ranked_persisted_candidates(client):
+    created = await client.post(
+        "/api/v1/trips",
+        json={
+            "title": "候选测试",
+            "request": {
+                "raw_text": "从武汉去庐山",
+                "origin": {"name": "武汉"},
+                "destination": {"name": "庐山"},
+            },
+        },
+    )
+    trip = Trip.model_validate(created.json())
+    async with SessionLocal() as session:
+        await TripRepository(session).save_planning_result(
+            trip,
+            {
+                "tourism_candidates": {
+                    "attractions": [
+                        {
+                            "candidate_id": "attractions:amap:1",
+                            "rank": 1,
+                            "score": 88.5,
+                            "place": {"name": "庐山风景区"},
+                        }
+                    ]
+                }
+            },
+            None,
+        )
+    response = await client.get(
+        f"/api/v1/trips/{trip.id}/recommendations",
+        params={"category": "attractions"},
+    )
+    assert response.status_code == 200
+    assert response.json()["items"][0]["rank"] == 1
+
+
+@pytest.mark.asyncio
+async def test_candidate_patch_requires_preview_before_apply(client):
+    created = await client.post(
+        "/api/v1/trips",
+        json={
+            "title": "备选修改测试",
+            "request": {
+                "raw_text": "从武汉去庐山",
+                "origin": {"name": "武汉"},
+                "destination": {"name": "庐山"},
+            },
+        },
+    )
+    trip = Trip.model_validate(created.json())
+    meal = Activity(
+        id="activity_meal",
+        day_id="day_patch",
+        sequence=0,
+        type="meal",
+        place={"name": "原餐厅"},
+        planned_start=datetime(2026, 8, 2, 12, tzinfo=timezone.utc),
+        planned_end=datetime(2026, 8, 2, 13, tzinfo=timezone.utc),
+        duration_minutes=60,
+    )
+    trip.days = [
+        DayPlan(
+            id="day_patch",
+            day_index=1,
+            date=date(2026, 8, 2),
+            title="测试日",
+            activities=[meal],
+            items=[DayItemRef(type="activity", id=meal.id)],
+        )
+    ]
+    state = {
+        "tourism_candidates": {
+            "attractions": [
+                {
+                    "candidate_id": "attractions:amap:1",
+                    "rank": 1,
+                    "score": 88.5,
+                    "place": {"name": "庐山风景区"},
+                    "ticket_or_price": {
+                        "currency": "CNY",
+                        "minimum": 160,
+                        "maximum": 160,
+                        "estimated": False,
+                    },
+                }
+            ]
+        }
+    }
+    async with SessionLocal() as session:
+        await TripRepository(session).save_planning_result(trip, state, None)
+
+    preview = await client.post(
+        f"/api/v1/trips/{trip.id}/patches/preview",
+        json={
+            "candidate_id": "attractions:amap:1",
+            "category": "attractions",
+            "day_id": "day_patch",
+            "operation": "add",
+        },
+    )
+    assert preview.status_code == 200
+    assert preview.json()["status"] == "preview"
+    unchanged = await client.get(f"/api/v1/trips/{trip.id}")
+    assert len(unchanged.json()["days"][0]["activities"]) == 1
+
+    applied = await client.post(
+        f"/api/v1/trips/{trip.id}/patches/{preview.json()['id']}/apply",
+    )
+    assert applied.status_code == 200
+    assert applied.json()["patch"]["status"] == "applied"
+    assert [
+        item["place"]["name"]
+        for item in applied.json()["trip"]["days"][0]["activities"]
+    ] == ["庐山风景区", "原餐厅"]
+    rolled_back = await client.post(
+        f"/api/v1/trips/{trip.id}/patches/{preview.json()['id']}/rollback",
+    )
+    assert rolled_back.status_code == 200
+    assert rolled_back.json()["patch"]["status"] == "rolled_back"
+    assert [
+        item["place"]["name"]
+        for item in rolled_back.json()["trip"]["days"][0]["activities"]
+    ] == ["原餐厅"]
+
+    delete_intent = await client.post(
+        f"/api/v1/trips/{trip.id}/editing/interpret",
+        json={
+            "message": "把当前这个餐厅删除",
+            "current_day_id": "day_patch",
+            "current_target_id": "activity_meal",
+        },
+    )
+    assert delete_intent.status_code == 200
+    assert "修改预览" in delete_intent.json()["message"]
+    delete_patch = delete_intent.json()["patch"]
+    deleted = await client.post(
+        f"/api/v1/trips/{trip.id}/patches/{delete_patch['id']}/apply",
+    )
+    assert deleted.status_code == 200
+    assert deleted.json()["trip"]["days"][0]["activities"] == []
 
 
 @pytest.mark.asyncio

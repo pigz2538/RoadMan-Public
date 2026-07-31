@@ -1,6 +1,7 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import type { Activity, Category, PlanningEvent, Stage, Trip } from '../types/trip'
+import type { PlanPatch } from '../api/trips'
 
 export const useTripStore = defineStore('trip', () => {
   const trip = ref<Trip | null>(null)
@@ -10,6 +11,8 @@ export const useTripStore = defineStore('trip', () => {
   const category = ref<Category>('景点')
   const planningEvent = ref<PlanningEvent | null>(null)
   const patchVisible = ref(false)
+  const pendingPatch = ref<PlanPatch | null>(null)
+  const lastAppliedPatchId = ref<string | null>(null)
 
   const currentDay = computed(() => trip.value?.days[currentDayIndex.value])
   const currentStage = computed(() =>
@@ -47,6 +50,8 @@ export const useTripStore = defineStore('trip', () => {
     category,
     planningEvent,
     patchVisible,
+    pendingPatch,
+    lastAppliedPatchId,
     setDay,
     setStage,
     selectActivity,

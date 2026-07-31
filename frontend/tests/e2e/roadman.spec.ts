@@ -64,7 +64,7 @@ test('规划页支持天、阶段和节点选择', async ({ page }) => {
   await expect(page.getByText('武汉—庐山两天一夜自然之旅')).toBeVisible()
   await expect(page.getByText('高德 JSAPI · 真实道路轨迹')).toBeVisible({ timeout: 25_000 })
   await page.getByRole('button', { name: /高速转盘山公路/ }).click()
-  await expect(page.getByText(/当前已选：stage_2/)).toBeVisible()
+  await expect(page.getByText(/当前阶段：高速转盘山公路/)).toBeVisible()
   const stageCards = page.locator('.stage-card')
   expect(await stageCards.count()).toBe(6)
   const activeStageCard = page.locator('.stage-card.active')
@@ -75,11 +75,11 @@ test('规划页支持天、阶段和节点选择', async ({ page }) => {
   await expect(activeStageCard).toContainText('路况')
   await expect(activeStageCard).toContainText('天气')
   await page.getByRole('button', { name: '下一个阶段' }).click()
-  await expect(page.getByText(/当前已选：stage_4/)).toBeVisible()
+  await expect(page.getByText(/当前阶段：午餐后步行前往景点/)).toBeVisible()
   await expect(page.locator('.trip-sidebar select')).toHaveValue('0')
   await expect(page.locator('.stage-card.active')).toContainText('步行前往景点')
   await page.getByRole('button', { name: '上一个阶段' }).click()
-  await expect(page.getByText(/当前已选：stage_2/)).toBeVisible()
+  await expect(page.getByText(/当前阶段：高速转盘山公路/)).toBeVisible()
   await expect(page.locator('.trip-sidebar select')).toHaveValue('0')
 
   const track = page.locator('.stage-track')
@@ -116,4 +116,65 @@ test('规划页支持天、阶段和节点选择', async ({ page }) => {
   if (!after) throw new Error('地图平移缩放后 Marker 丢失')
   expect(Math.abs(after.x - before.x)).toBeGreaterThan(10)
   await expect(page.getByText('高德 JSAPI · 真实道路轨迹')).toBeVisible()
+})
+
+test('Agent 备选方案先预览再应用', async ({ page }) => {
+  await page.route('**/api/v1/trips/trip_wuhan_lushan_demo/recommendations?category=attractions', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        items: [{
+          candidate_id: 'attractions:amap:backup',
+          rank: 1,
+          score: 91.5,
+          place: { name: '庐山植物园', address: '庐山风景区内' },
+          recommendation_reasons: ['符合自然景观偏好', '距离当前路线较近'],
+          ticket_or_price: {
+            currency: 'CNY',
+            minimum: 30,
+            maximum: 30,
+            estimated: false,
+          },
+        }],
+      }),
+    })
+  })
+  await page.route('**/api/v1/trips/trip_wuhan_lushan_demo/patches/preview', async (route) => {
+    const request = route.request().postDataJSON()
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        id: 'patch_e2e',
+        trip_id: 'trip_wuhan_lushan_demo',
+        target_type: 'activity',
+        target_id: 'new',
+        operation: request.operation,
+        original_value: {},
+        proposed_value: {
+          candidate_id: request.candidate_id,
+          category: request.category,
+          day_id: request.day_id,
+          candidate: {
+            candidate_id: request.candidate_id,
+            rank: 1,
+            score: 91.5,
+            place: { name: '庐山植物园' },
+          },
+        },
+        impact_scope: [request.day_id],
+        time_delta_minutes: 90,
+        status: 'preview',
+      }),
+    })
+  })
+
+  await page.goto('/trips/trip_wuhan_lushan_demo/plan')
+  await page.getByRole('button', { name: '查看景点备选' }).click()
+  await expect(page.getByText('#1 庐山植物园')).toBeVisible()
+  await expect(page.getByText('91.5 分')).toBeVisible()
+  await page.getByRole('button', { name: '加入' }).click()
+  await expect(page.getByText('修改预览')).toBeVisible()
+  await expect(page.getByText('正式行程')).toBeVisible()
+  await expect(page.getByText('尚未修改')).toBeVisible()
+  await expect(page.getByRole('button', { name: '确认应用' })).toBeVisible()
 })

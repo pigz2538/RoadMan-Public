@@ -1,51 +1,229 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import { Bot, Send } from '@lucide/vue'
+import { computed, ref, watch } from 'vue'
+import { Bot, RefreshCw, Send, Sparkles } from '@lucide/vue'
+import {
+  applyPlanPatch,
+  fetchRecommendations,
+  interpretTripEdit,
+  previewCandidatePatch,
+  rejectPlanPatch,
+  rollbackPlanPatch,
+  type RecommendationCandidate,
+} from '../../api/trips'
 import { useTripStore } from '../../stores/trip'
 
 const store = useTripStore()
 const message = ref('')
 const messages = ref([
-  { side: 'ai', text: '路线与阶段已经生成。您可以点击地图或下方卡片查看具体路段。' },
+  { side: 'ai', text: '行程安排已经生成。您可以选择地图、阶段或活动，再让我查看相关备选。' },
 ])
+const recommendationOpen = ref(false)
+const recommendationLoading = ref(false)
+const recommendationError = ref('')
+const recommendations = ref<RecommendationCandidate[]>([])
 
+const categoryMap = {
+  景点: 'attractions',
+  住宿: 'hotels',
+  餐饮: 'meals',
+} as const
+const currentCategory = computed(() => categoryMap[store.category as keyof typeof categoryMap])
+const selectedActivity = computed(() =>
+  store.currentDay?.activities.find((item) => item.id === store.selectedNodeId),
+)
+const canReplace = computed(() => {
+  const expectedType = {
+    attractions: 'attraction',
+    hotels: 'hotel',
+    meals: 'meal',
+  }[currentCategory.value ?? 'attractions']
+  return Boolean(selectedActivity.value && selectedActivity.value.type === expectedType)
+})
 const contextText = computed(() => {
-  if (store.selectedNodeId) return `当前已选：${store.selectedNodeId}`
+  if (selectedActivity.value) return `已选安排：${selectedActivity.value.place.name}`
+  if (store.currentStage) return `当前阶段：${store.currentStage.title}`
   return '请先在地图或阶段栏选择目标'
 })
 
-function send() {
+function candidatePrice(candidate: RecommendationCandidate) {
+  const price = candidate.ticket_or_price
+  const minimum = price?.minimum ?? candidate.price_min_cny
+  const maximum = price?.maximum ?? candidate.price_max_cny
+  if (minimum === undefined && maximum === undefined) return '价格待查询'
+  return minimum === maximum || maximum === undefined
+    ? `¥${minimum}`
+    : `¥${minimum}–${maximum}`
+}
+
+async function loadRecommendations() {
+  if (!store.trip || !currentCategory.value) return
+  recommendationOpen.value = true
+  recommendationLoading.value = true
+  recommendationError.value = ''
+  store.pendingPatch = null
+  try {
+    const result = await fetchRecommendations(store.trip.id, currentCategory.value)
+    recommendations.value = result.items
+  } catch (error) {
+    recommendationError.value = error instanceof Error ? error.message : '备选方案加载失败'
+  } finally {
+    recommendationLoading.value = false
+  }
+}
+
+async function preview(
+  candidate: RecommendationCandidate,
+  operation: 'add' | 'replace',
+) {
+  if (!store.trip || !store.currentDay || !currentCategory.value) return
+  recommendationError.value = ''
+  try {
+    store.pendingPatch = await previewCandidatePatch(store.trip.id, {
+      candidate_id: candidate.candidate_id,
+      category: currentCategory.value,
+      day_id: store.currentDay.id,
+      operation,
+      target_activity_id: operation === 'replace' ? selectedActivity.value?.id : undefined,
+    })
+  } catch (error) {
+    recommendationError.value = error instanceof Error ? error.message : '无法生成修改预览'
+  }
+}
+
+async function decidePatch(apply: boolean) {
+  if (!store.trip || !store.pendingPatch) return
+  recommendationError.value = ''
+  try {
+    if (apply) {
+      const patchName = displayPatchName(store.pendingPatch)
+      const result = await applyPlanPatch(store.trip.id, store.pendingPatch.id)
+      store.trip = result.trip
+      store.lastAppliedPatchId = result.patch.id
+      messages.value.push({
+        side: 'ai',
+        text: `已应用：${patchName}`,
+      })
+    } else {
+      await rejectPlanPatch(store.trip.id, store.pendingPatch.id)
+    }
+    store.pendingPatch = null
+  } catch (error) {
+    recommendationError.value = error instanceof Error ? error.message : '修改处理失败'
+  }
+}
+
+function displayPatchName(patch: NonNullable<typeof store.pendingPatch>) {
+  return patch.proposed_value.candidate?.place.name
+    || (patch.original_value.place as { name?: string } | undefined)?.name
+    || '当前安排'
+}
+
+async function undoLastPatch() {
+  if (!store.trip || !store.lastAppliedPatchId) return
+  recommendationError.value = ''
+  try {
+    const result = await rollbackPlanPatch(store.trip.id, store.lastAppliedPatchId)
+    store.trip = result.trip
+    store.lastAppliedPatchId = null
+    messages.value.push({ side: 'ai', text: '已撤销上一次修改。' })
+  } catch (error) {
+    recommendationError.value = error instanceof Error ? error.message : '撤销失败'
+  }
+}
+
+async function send() {
   const text = message.value.trim()
-  if (!text) return
+  if (!text || !store.trip) return
   messages.value.push({ side: 'user', text })
   message.value = ''
-  messages.value.push({
-    side: 'ai',
-    text: '我已记录这条需求。阶段 D 目前支持初次规划与澄清，局部修改将在阶段 G 接入。',
-  })
+  recommendationError.value = ''
+  try {
+    const result = await interpretTripEdit(store.trip.id, {
+      message: text,
+      current_day_id: store.currentDay?.id,
+      current_target_id: store.selectedNodeId ?? undefined,
+    })
+    messages.value.push({ side: 'ai', text: result.message })
+    if (result.patch) store.pendingPatch = result.patch
+  } catch (error) {
+    messages.value.push({
+      side: 'ai',
+      text: error instanceof Error ? error.message : '暂时无法理解这条修改要求',
+    })
+  }
 }
+
+watch(() => store.category, () => {
+  recommendationOpen.value = false
+  recommendations.value = []
+  store.pendingPatch = null
+})
+watch(() => store.pendingPatch?.id, (patchId) => {
+  if (patchId) recommendationOpen.value = true
+})
 </script>
 
 <template>
   <aside class="agent-panel glass-card">
     <header><Bot /><strong>Agent 行程助理</strong><span class="online-dot" /></header>
     <div class="context-chip">{{ contextText }}</div>
-    <div class="chat-stream">
-      <div
-        v-if="store.planningEvent"
-        class="message ai"
-      >{{ store.planningEvent.label }}（{{ store.planningEvent.progress }}%）</div>
+
+    <div v-if="recommendationOpen" class="recommendation-panel">
+      <header>
+        <div><Sparkles /><strong>{{ store.category }}备选</strong></div>
+        <button aria-label="刷新备选" @click="loadRecommendations"><RefreshCw /></button>
+      </header>
+      <div v-if="recommendationLoading" class="recommendation-state">正在查询并排序…</div>
+      <div v-else-if="recommendationError" class="recommendation-state error">{{ recommendationError }}</div>
+      <div v-else-if="!recommendations.length" class="recommendation-state">暂时没有可用备选</div>
+      <div v-else class="recommendation-list">
+        <article v-for="candidate in recommendations" :key="candidate.candidate_id">
+          <header>
+            <b>#{{ candidate.rank }} {{ candidate.place.name }}</b>
+            <span>{{ candidate.score.toFixed(1) }} 分</span>
+          </header>
+          <p>{{ candidate.recommendation_reasons?.join(' · ') || candidate.place.address || '综合距离与偏好排序' }}</p>
+          <footer>
+            <span>{{ candidatePrice(candidate) }}</span>
+            <button @click="preview(candidate, 'add')">加入</button>
+            <button v-if="canReplace" @click="preview(candidate, 'replace')">替换所选</button>
+          </footer>
+        </article>
+      </div>
+      <div v-if="store.pendingPatch" class="patch-card">
+        <span>修改预览</span>
+        <strong>
+          {{ store.pendingPatch.operation === 'replace' ? '替换为' : store.pendingPatch.operation === 'delete' ? '删除' : '加入' }}
+          {{ displayPatchName(store.pendingPatch) }}
+        </strong>
+        <dl>
+          <div><dt>影响日期</dt><dd>第 {{ store.currentDay?.day_index }} 天</dd></div>
+          <div><dt>时间变化</dt><dd>{{ store.pendingPatch.time_delta_minutes > 0 ? '+' : '' }}{{ store.pendingPatch.time_delta_minutes }} 分钟</dd></div>
+          <div><dt>正式行程</dt><dd class="good">尚未修改</dd></div>
+        </dl>
+        <div>
+          <button @click="decidePatch(false)">放弃</button>
+          <button class="apply" @click="decidePatch(true)">确认应用</button>
+        </div>
+      </div>
+    </div>
+
+    <div v-else class="chat-stream">
+      <div v-if="store.planningEvent" class="message ai">
+        {{ store.planningEvent.label }}（{{ store.planningEvent.progress }}%）
+      </div>
       <div v-for="(item, index) in messages" :key="index" :class="['message', item.side]">
         {{ item.text }}
       </div>
     </div>
     <div class="suggestions">
-      <button @click="message = '查看当前阶段详情'">阶段详情</button>
-      <button @click="message = '有哪些风险提示？'">风险提示</button>
-      <button @click="message = '显示路线来源'">路线来源</button>
+      <button v-if="currentCategory" @click="loadRecommendations">查看{{ store.category }}备选</button>
+      <button @click="recommendationOpen = false">行程对话</button>
+      <button v-if="store.lastAppliedPatchId" @click="undoLastPatch">撤销上次修改</button>
+      <button @click="message = '当前阶段有什么需要注意的？'">阶段提示</button>
     </div>
     <form class="chat-input" @submit.prevent="send">
-      <input v-model="message" placeholder="输入需求…" />
+      <input v-model="message" placeholder="输入调整需求…" />
       <button aria-label="发送"><Send /></button>
     </form>
   </aside>

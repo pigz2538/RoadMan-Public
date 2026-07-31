@@ -23,6 +23,23 @@ class FlyAIHotelInput(BaseModel):
     sort: str = "rate_desc"
 
 
+class FlyAIPoiInput(BaseModel):
+    city_name: str = Field(min_length=1, max_length=80)
+    keyword: str | None = Field(default=None, max_length=80)
+    category: str | None = Field(default=None, max_length=40)
+    poi_level: int | None = Field(default=None, ge=1, le=5)
+
+
+FLYAI_POI_CATEGORIES = {
+    "自然风光", "山湖田园", "森林丛林", "峡谷瀑布", "沙滩海岛", "沙漠草原",
+    "人文古迹", "古镇古村", "历史古迹", "园林花园", "宗教场所", "公园乐园",
+    "主题乐园", "水上乐园", "影视基地", "动物园", "植物园", "海洋馆",
+    "体育场馆", "演出赛事", "剧院剧场", "博物馆", "纪念馆", "展览馆",
+    "地标建筑", "市集", "文创街区", "城市观光", "户外活动", "滑雪",
+    "漂流", "冲浪", "潜水", "露营", "温泉",
+}
+
+
 class FlyAIHotelAdapter(SkillAdapter):
     name = "flyai.hotel"
     version = "1.1.0"
@@ -124,6 +141,104 @@ class FlyAIHotelAdapter(SkillAdapter):
                 SourceRecord(
                     provider="FlyAI / 飞猪",
                     title="酒店实时搜索",
+                    url="https://www.fliggy.com/",
+                )
+            ],
+            latency_ms=int((time.perf_counter() - started) * 1000),
+        )
+
+    async def health_check(self) -> dict[str, Any]:
+        return {
+            "status": "ready" if shutil.which("flyai") else "degraded",
+            "configured": bool(shutil.which("flyai")),
+        }
+
+
+class FlyAIPoiAdapter(SkillAdapter):
+    name = "flyai.poi"
+    version = "1.0.0"
+    category = "travel_search"
+    timeout_seconds = 25
+    max_retries = 0
+    cache_ttl_seconds = 30 * 60
+
+    async def validate_input(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return FlyAIPoiInput.model_validate(payload).model_dump(
+            mode="json",
+            exclude_none=True,
+        )
+
+    async def execute(self, payload: dict[str, Any], _: SkillContext) -> SkillResult:
+        command = shutil.which("flyai")
+        if not command:
+            return SkillResult(
+                success=False,
+                provider="FlyAI / 飞猪",
+                warnings=["运行环境未安装 flyai CLI"],
+                error_code="SKILL_NOT_CONFIGURED",
+            )
+        request = FlyAIPoiInput.model_validate(payload)
+        arguments = [command, "search-poi", "--city-name", request.city_name]
+        if request.keyword:
+            arguments.extend(["--keyword", request.keyword])
+        # The CLI rejects broad labels such as “景点”. Keep keyword search usable
+        # and only forward category values accepted by the upstream command.
+        if request.category in FLYAI_POI_CATEGORIES:
+            arguments.extend(["--category", request.category])
+        if request.poi_level:
+            arguments.extend(["--poi-level", str(request.poi_level)])
+        started = time.perf_counter()
+        process = await asyncio.create_subprocess_exec(
+            *arguments,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, _ = await process.communicate()
+        try:
+            body = json.loads(stdout.decode("utf-8", errors="replace").strip())
+        except json.JSONDecodeError:
+            return SkillResult(
+                success=False,
+                provider="FlyAI / 飞猪",
+                warnings=["FlyAI 景点搜索未返回可解析的 JSON"],
+                error_code="FLYAI_INVALID_RESPONSE",
+            )
+        items = []
+        for item in body.get("data", {}).get("itemList", []):
+            ticket = item.get("ticketInfo") or {}
+            price = _parse_price(ticket.get("price"))
+            if not item.get("name"):
+                continue
+            items.append(
+                {
+                    "id": item.get("id"),
+                    "name": item.get("name"),
+                    "address": item.get("address"),
+                    "image_url": item.get("mainPic"),
+                    "detail_url": item.get("jumpUrl"),
+                    "free_status": item.get("freePoiStatus"),
+                    "ticket_name": ticket.get("ticketName"),
+                    "ticket_date": ticket.get("priceDate"),
+                    "price_min_cny": price[0] if price else None,
+                    "price_max_cny": price[1] if price else None,
+                    "price_estimated": price[2] if price else None,
+                }
+            )
+        if not items:
+            return SkillResult(
+                success=False,
+                provider="FlyAI / 飞猪",
+                warnings=["FlyAI 未返回可用景点或门票"],
+                error_code="FLYAI_NO_RESULTS",
+            )
+        return SkillResult(
+            success=True,
+            provider="FlyAI / 飞猪",
+            data={"items": items, "count": len(items)},
+            sources=[
+                SourceRecord(
+                    provider="FlyAI / 飞猪",
+                    title="景点与门票搜索",
                     url="https://www.fliggy.com/",
                 )
             ],

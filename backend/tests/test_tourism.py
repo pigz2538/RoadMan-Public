@@ -1,8 +1,9 @@
 import pytest
 
+from app.planning.recommendations import rank_tourism_candidates
 from app.planning.tourism import schedule_tourism_activities, verify_tourism_plan
 from app.skills.base import SkillContext
-from app.skills.flyai import FlyAIHotelAdapter, _parse_price
+from app.skills.flyai import FlyAIHotelAdapter, FlyAIPoiAdapter, _parse_price
 
 
 def test_tourism_scheduler_adds_attraction_and_overnight_hotel():
@@ -53,6 +54,12 @@ def test_tourism_scheduler_adds_attraction_and_overnight_hotel():
                     "coordinates": {"longitude": 115.98, "latitude": 29.55},
                 },
                 "source_records": source,
+                "ticket_or_price": {
+                    "currency": "CNY",
+                    "minimum": 80,
+                    "maximum": 100,
+                    "estimated": True,
+                },
             }
         ],
         "hotels": [
@@ -74,6 +81,7 @@ def test_tourism_scheduler_adds_attraction_and_overnight_hotel():
         "attraction",
         "hotel",
     ]
+    assert scheduled[0]["activities"][0]["ticket_or_price"]["minimum"] == 80
     hotel = scheduled[0]["activities"][1]
     assert hotel["required"] is True
     assert hotel["planned_end"].startswith("2026-08-03")
@@ -114,3 +122,52 @@ async def test_flyai_hotel_adapter_degrades_when_cli_is_missing(monkeypatch):
 def test_flyai_masked_price_is_a_range_not_a_fake_exact_amount():
     assert _parse_price("¥3xx") == (300.0, 399.0, True)
     assert _parse_price("¥618") == (618.0, 618.0, False)
+
+
+def test_tourism_candidates_are_ranked_by_rating_distance_and_preference():
+    candidates = {
+        "attractions": [
+            {
+                "place": {
+                    "name": "远方商场",
+                    "coordinates": {"longitude": 116.8, "latitude": 39.9},
+                    "source_id": "far",
+                },
+                "rating": 2,
+                "provider": "高德地图",
+            },
+            {
+                "place": {
+                    "name": "自然湖公园",
+                    "coordinates": {"longitude": 116.401, "latitude": 39.901},
+                    "source_id": "near",
+                },
+                "rating": 4.8,
+                "provider": "OpenTripMap",
+            },
+        ],
+        "hotels": [],
+        "meals": [],
+    }
+    ranked = rank_tourism_candidates(
+        candidates,
+        {"coordinates": {"longitude": 116.4, "latitude": 39.9}},
+        ["喜欢自然风景"],
+    )
+    first = ranked["attractions"][0]
+    assert first["place"]["name"] == "自然湖公园"
+    assert first["rank"] == 1
+    assert first["backup"] is False
+    assert ranked["attractions"][1]["backup"] is True
+    assert first["recommendation_reasons"]
+
+
+@pytest.mark.asyncio
+async def test_flyai_poi_adapter_degrades_when_cli_is_missing(monkeypatch):
+    monkeypatch.setattr("app.skills.flyai.shutil.which", lambda _: None)
+    result = await FlyAIPoiAdapter().execute(
+        {"city_name": "北京"},
+        SkillContext(),
+    )
+    assert result.success is False
+    assert result.error_code == "SKILL_NOT_CONFIGURED"

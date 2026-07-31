@@ -7,6 +7,7 @@ import {
   fetchMockTrip,
   fetchPlanning,
   fetchTrip,
+  previewDeletePatch,
   type PlanningSnapshot,
 } from '../api/trips'
 import { useTripStore } from '../stores/trip'
@@ -121,6 +122,19 @@ async function submitClarification() {
     pollingTimer = window.setTimeout(() => void refreshPlanning(), 500)
   } catch (error) {
     planningError.value = error instanceof Error ? error.message : '提交补充信息失败'
+  }
+}
+
+async function requestActivityRemoval(activityId: string) {
+  if (!store.trip || !store.currentDay) return
+  planningError.value = ''
+  try {
+    store.pendingPatch = await previewDeletePatch(store.trip.id, {
+      day_id: store.currentDay.id,
+      activity_id: activityId,
+    })
+  } catch (error) {
+    planningError.value = error instanceof Error ? error.message : '无法生成删除预览'
   }
 }
 
@@ -286,7 +300,7 @@ watch(
             :activities="filteredActivities"
             :selected-id="store.selectedNodeId"
             @select="store.selectActivity"
-            @remove="store.removeActivity"
+            @remove="requestActivityRemoval"
           />
         </aside>
 

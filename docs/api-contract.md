@@ -26,6 +26,14 @@
 | POST/GET | `/api/v1/trips` | 创建、列出 Trip |
 | GET/PATCH/DELETE | `/api/v1/trips/{trip_id}` | 查询、更新、删除 Trip |
 | GET | `/api/v1/trips/mock/wuhan-lushan` | 固定验收行程 |
+| GET | `/api/v1/trips/{trip_id}/recommendations` | 景点/住宿/餐饮排序备选 |
+| POST | `/api/v1/trips/{trip_id}/editing/interpret` | 结合当前选择理解局部修改意图 |
+| POST | `/api/v1/trips/{trip_id}/patches/preview` | 预览加入/替换，不修改 Trip |
+| POST | `/api/v1/trips/{trip_id}/patches/preview-delete` | 预览删除活动，不修改 Trip |
+| GET | `/api/v1/trips/{trip_id}/patches/{patch_id}` | 查询修改预览 |
+| POST | `/api/v1/trips/{trip_id}/patches/{patch_id}/apply` | 确认并应用修改 |
+| POST | `/api/v1/trips/{trip_id}/patches/{patch_id}/reject` | 放弃修改 |
+| POST | `/api/v1/trips/{trip_id}/patches/{patch_id}/rollback` | 撤销已应用修改 |
 | POST/GET | `/api/v1/vehicles` | 创建、列出车辆 |
 | GET/PATCH/DELETE | `/api/v1/vehicles/{vehicle_id}` | 车辆 CRUD |
 | POST | `/api/v1/files` | 校验大小、扩展名、MIME 和文件签名后上传 |
@@ -72,6 +80,8 @@ SSE 使用命名事件，每条事件包含单调递增的 `id:`。客户端断�
 | POST | `/api/v1/skills/amap/poi` | 高德 POI 检索 |
 | POST | `/api/v1/skills/weather/forecast` | Open-Meteo 坐标天气预报 |
 | POST | `/api/v1/skills/carinfo/search` | 固定车型样本与能耗参数 |
+| POST | `/api/v1/skills/flyai/poi` | FlyAI / 飞猪景点与门票搜索 |
+| POST | `/api/v1/skills/opentripmap/nearby` | OpenTripMap 境外周边景点 |
 
 所有 Adapter 返回统一 `SkillResult`。缓存键包含 Adapter 版本与规范化参数；Redis
 不可用时自动降级到进程内缓存。只有网络传输错误和超时会重试，参数错误与无结果
@@ -87,6 +97,12 @@ SSE 使用命名事件，每条事件包含单调递增的 `id:`。客户端断�
 
 未配置第三方凭据时返回合法的失败 `SkillResult`，例如
 `error_code=SKILL_NOT_CONFIGURED`，不会抛出不透明异常。
+
+候选修改遵循 `PlanPatch` 两阶段契约：`preview` 只保存原值、建议值、影响范围、
+时间/费用变化和是否需要重规划；正式 Trip 保持不变。只有 `apply` 会写入，
+`reject` 仅把补丁标记为拒绝。已处理的补丁不可重复应用。
+替换地点会重算匹配的相邻路线；删除活动会提前后续安排。应用后重新检查活动冲突和
+路线闭环，失败时不持久化。成功应用保存恢复快照，允许一次明确回滚。
 
 ## 数据与运行约束
 

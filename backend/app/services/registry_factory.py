@@ -8,7 +8,8 @@ from ..skills.amap import (
 )
 from ..skills.cache import RedisFallbackSkillCache
 from ..skills.carinfo import CarInfoDemoAdapter
-from ..skills.flyai import FlyAIHotelAdapter
+from ..skills.flyai import FlyAIHotelAdapter, FlyAIPoiAdapter
+from ..skills.opentripmap import OpenTripMapNearbyAdapter
 from ..skills.registry import SkillRegistry
 from ..skills.weather import OpenMeteoForecastAdapter
 
@@ -30,4 +31,6 @@ def build_skill_registry(settings: Settings | None = None) -> SkillRegistry:
     registry.register(OpenMeteoForecastAdapter())
     registry.register(CarInfoDemoAdapter())
     registry.register(FlyAIHotelAdapter())
+    registry.register(FlyAIPoiAdapter())
+    registry.register(OpenTripMapNearbyAdapter(config.opentripmap_api_key))
     return registry

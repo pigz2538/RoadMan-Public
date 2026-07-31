@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     redis_connect_timeout_seconds: float = 0.35
     enable_job_queue: bool = True
     amap_webservice_key: str = ""
+    opentripmap_api_key: str = ""
     load_local_skill_credentials: bool = True
     cors_origins: str = "http://localhost:5173"
     upload_dir: str = "./data/uploads"
@@ -36,4 +37,8 @@ def get_settings() -> Settings:
         local_key = Path(__file__).resolve().parents[3] / "Skills" / "amap-lbs" / "apipkey.txt"
         if local_key.is_file():
             settings.amap_webservice_key = local_key.read_text(encoding="utf-8").strip()
+    if not settings.opentripmap_api_key and settings.load_local_skill_credentials:
+        local_key = Path(__file__).resolve().parents[3] / "Skills" / "opentripmap" / "apikey.txt"
+        if local_key.is_file():
+            settings.opentripmap_api_key = local_key.read_text(encoding="utf-8").strip()
     return settings

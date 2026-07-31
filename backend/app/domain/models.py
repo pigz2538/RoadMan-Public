@@ -359,7 +359,7 @@ class PlanPatch(BaseModel):
     cost_delta: MoneyRange | None = None
     risk_delta: str | None = None
     requires_replan: bool = False
-    status: Literal["preview", "accepted", "rejected", "applied"] = "preview"
+    status: Literal["preview", "accepted", "rejected", "applied", "rolled_back"] = "preview"
 
 
 class VerificationIssue(BaseModel):

@@ -64,6 +64,7 @@ def schedule_tourism_activities(
                     duration_minutes=duration,
                     sources=candidate.get("source_records", []),
                     opening_text="开放时间以景区当天公告为准",
+                    ticket_or_price=candidate.get("ticket_or_price"),
                 )
             )
             existing_names.add(candidate["place"]["name"])

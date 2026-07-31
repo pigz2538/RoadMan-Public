@@ -83,3 +83,21 @@ async def carinfo_search(
     registry: SkillRegistry = Depends(get_registry),
 ):
     return await registry.execute("carinfo.demo", payload, context)
+
+
+@router.post("/flyai/poi")
+async def flyai_poi(
+    payload: dict,
+    context: SkillContext = Depends(context_from_request),
+    registry: SkillRegistry = Depends(get_registry),
+):
+    return await registry.execute("flyai.poi", payload, context)
+
+
+@router.post("/opentripmap/nearby")
+async def opentripmap_nearby(
+    payload: dict,
+    context: SkillContext = Depends(context_from_request),
+    registry: SkillRegistry = Depends(get_registry),
+):
+    return await registry.execute("opentripmap.nearby", payload, context)

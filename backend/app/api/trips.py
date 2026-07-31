@@ -4,7 +4,7 @@ import re
 from datetime import date
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, Header, Response, status
+from fastapi import APIRouter, Depends, Header, Query, Response, status
 from fastapi.responses import PlainTextResponse, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,6 +14,7 @@ from ..domain.models import (
     ClarificationAnswer,
     JobCreate,
     PlanningSnapshot,
+    PlanPatch,
     PreflightIssue,
     PreflightRequest,
     PreflightResponse,
@@ -27,6 +28,17 @@ from ..planning.llm import (
     OllamaRequirementExtractor,
     OllamaRequirementValidator,
     deterministic_extract,
+)
+from ..planning.editing import (
+    CandidatePatchRequest,
+    DeleteActivityPatchRequest,
+    EditIntentRequest,
+    create_candidate_patch,
+    create_delete_activity_patch,
+    decide_candidate_patch,
+    interpret_edit_intent,
+    recompute_and_verify_patch,
+    rollback_patch,
 )
 from ..repositories import JobRepository, TripRepository
 from ..services.job_queue import enqueue_job
@@ -375,6 +387,148 @@ async def get_trip(trip_id: str, repo: TripRepository = Depends(get_repo)) -> Tr
     if not trip:
         raise AppError("TRIP_NOT_FOUND", "行程不存在", 404, {"trip_id": trip_id})
     return trip
+
+
+@router.get("/{trip_id}/recommendations")
+async def get_trip_recommendations(
+    trip_id: str,
+    category: str = Query(default="attractions", pattern="^(attractions|hotels|meals)$"),
+    repo: TripRepository = Depends(get_repo),
+) -> dict[str, object]:
+    trip = await repo.get(trip_id)
+    if not trip:
+        raise AppError("TRIP_NOT_FOUND", "行程不存在", 404, {"trip_id": trip_id})
+    state = await repo.load_planning_state(trip_id) or {}
+    candidates = state.get("tourism_candidates", {})
+    return {
+        "trip_id": trip_id,
+        "category": category,
+        "items": candidates.get(category, []),
+    }
+
+
+@router.post("/{trip_id}/patches/preview", response_model=PlanPatch)
+async def preview_candidate_patch(
+    trip_id: str,
+    payload: CandidatePatchRequest,
+    repo: TripRepository = Depends(get_repo),
+) -> PlanPatch:
+    trip = await repo.get(trip_id)
+    if not trip:
+        raise AppError("TRIP_NOT_FOUND", "行程不存在", 404, {"trip_id": trip_id})
+    state, markdown = await repo.get_planning_snapshot(trip_id)
+    state = state or {}
+    patch = create_candidate_patch(trip, state, payload)
+    await repo.save_planning_result(trip, state, markdown)
+    return patch
+
+
+@router.post("/{trip_id}/editing/interpret")
+async def interpret_trip_edit(
+    trip_id: str,
+    payload: EditIntentRequest,
+    repo: TripRepository = Depends(get_repo),
+) -> dict[str, object]:
+    trip = await repo.get(trip_id)
+    if not trip:
+        raise AppError("TRIP_NOT_FOUND", "行程不存在", 404, {"trip_id": trip_id})
+    state, markdown = await repo.get_planning_snapshot(trip_id)
+    state = state or {}
+    message, patch, global_replan_required = interpret_edit_intent(
+        trip,
+        state,
+        payload,
+    )
+    if patch:
+        await repo.save_planning_result(trip, state, markdown)
+    return {
+        "message": message,
+        "patch": patch,
+        "global_replan_required": global_replan_required,
+    }
+
+
+@router.post("/{trip_id}/patches/preview-delete", response_model=PlanPatch)
+async def preview_delete_activity_patch(
+    trip_id: str,
+    payload: DeleteActivityPatchRequest,
+    repo: TripRepository = Depends(get_repo),
+) -> PlanPatch:
+    trip = await repo.get(trip_id)
+    if not trip:
+        raise AppError("TRIP_NOT_FOUND", "行程不存在", 404, {"trip_id": trip_id})
+    state, markdown = await repo.get_planning_snapshot(trip_id)
+    state = state or {}
+    patch = create_delete_activity_patch(trip, state, payload)
+    await repo.save_planning_result(trip, state, markdown)
+    return patch
+
+
+@router.get("/{trip_id}/patches/{patch_id}", response_model=PlanPatch)
+async def get_candidate_patch(
+    trip_id: str,
+    patch_id: str,
+    repo: TripRepository = Depends(get_repo),
+) -> PlanPatch:
+    if not await repo.get(trip_id):
+        raise AppError("TRIP_NOT_FOUND", "行程不存在", 404, {"trip_id": trip_id})
+    state = await repo.load_planning_state(trip_id) or {}
+    raw_patch = state.get("plan_patches", {}).get(patch_id)
+    if not raw_patch:
+        raise AppError("PATCH_NOT_FOUND", "修改预览不存在或已失效", 404)
+    return PlanPatch.model_validate(raw_patch)
+
+
+@router.post("/{trip_id}/patches/{patch_id}/apply")
+async def apply_candidate_patch(
+    trip_id: str,
+    patch_id: str,
+    repo: TripRepository = Depends(get_repo),
+    registry: SkillRegistry = Depends(get_skill_registry),
+) -> dict[str, object]:
+    trip = await repo.get(trip_id)
+    if not trip:
+        raise AppError("TRIP_NOT_FOUND", "行程不存在", 404, {"trip_id": trip_id})
+    state, markdown = await repo.get_planning_snapshot(trip_id)
+    state = state or {}
+    backup = trip.model_dump(mode="json")
+    patch, trip = decide_candidate_patch(trip, state, patch_id, apply=True)
+    await recompute_and_verify_patch(trip, state, patch, registry)
+    state.setdefault("patch_backups", {})[patch.id] = backup
+    await repo.save_planning_result(trip, state, markdown)
+    return {"patch": patch, "trip": trip}
+
+
+@router.post("/{trip_id}/patches/{patch_id}/reject", response_model=PlanPatch)
+async def reject_candidate_patch(
+    trip_id: str,
+    patch_id: str,
+    repo: TripRepository = Depends(get_repo),
+) -> PlanPatch:
+    trip = await repo.get(trip_id)
+    if not trip:
+        raise AppError("TRIP_NOT_FOUND", "行程不存在", 404, {"trip_id": trip_id})
+    state, markdown = await repo.get_planning_snapshot(trip_id)
+    state = state or {}
+    patch, _ = decide_candidate_patch(trip, state, patch_id, apply=False)
+    await repo.save_planning_result(trip, state, markdown)
+    return patch
+
+
+@router.post("/{trip_id}/patches/{patch_id}/rollback")
+async def rollback_candidate_patch(
+    trip_id: str,
+    patch_id: str,
+    repo: TripRepository = Depends(get_repo),
+) -> dict[str, object]:
+    trip = await repo.get(trip_id)
+    if not trip:
+        raise AppError("TRIP_NOT_FOUND", "行程不存在", 404, {"trip_id": trip_id})
+    state, markdown = await repo.get_planning_snapshot(trip_id)
+    state = state or {}
+    patch, restored = rollback_patch(trip, state, patch_id)
+    await repo.save_planning_result(restored, state, markdown)
+    return {"patch": patch, "trip": restored}
 
 
 @router.patch("/{trip_id}", response_model=Trip)

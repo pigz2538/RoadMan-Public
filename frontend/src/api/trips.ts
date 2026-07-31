@@ -39,6 +39,47 @@ export interface PreflightResult {
   }
 }
 
+export interface RecommendationCandidate {
+  candidate_id: string
+  rank: number
+  score: number
+  backup?: boolean
+  recommendation_reasons?: string[]
+  place: {
+    name: string
+    address?: string
+    coordinates?: { longitude: number; latitude: number }
+  }
+  rating?: number
+  ticket_or_price?: {
+    currency: string
+    minimum: number
+    maximum: number
+    estimated: boolean
+  }
+  price_min_cny?: number
+  price_max_cny?: number
+  source_records?: Array<{ provider: string; title: string; url?: string }>
+}
+
+export interface PlanPatch {
+  id: string
+  trip_id: string
+  target_type: string
+  target_id: string
+  operation: 'add' | 'replace' | 'delete'
+  original_value: Record<string, unknown>
+  proposed_value: {
+    candidate_id?: string
+    category?: 'attractions' | 'hotels' | 'meals'
+    day_id: string
+    candidate?: RecommendationCandidate
+  }
+  impact_scope: string[]
+  time_delta_minutes: number
+  status: 'preview' | 'rejected' | 'applied'
+}
+
 async function json<T>(response: Response): Promise<T> {
   if (!response.ok) {
     const payload = await response.json().catch(() => null)
@@ -115,5 +156,85 @@ export async function answerClarification(
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ answer }),
+  }))
+}
+
+export async function fetchRecommendations(
+  tripId: string,
+  category: 'attractions' | 'hotels' | 'meals',
+): Promise<{ items: RecommendationCandidate[] }> {
+  return json(await fetch(
+    `${API_BASE}/api/v1/trips/${tripId}/recommendations?category=${category}`,
+  ))
+}
+
+export async function previewCandidatePatch(
+  tripId: string,
+  payload: {
+    candidate_id: string
+    category: 'attractions' | 'hotels' | 'meals'
+    day_id: string
+    operation: 'add' | 'replace'
+    target_activity_id?: string
+  },
+): Promise<PlanPatch> {
+  return json(await fetch(`${API_BASE}/api/v1/trips/${tripId}/patches/preview`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  }))
+}
+
+export async function applyPlanPatch(
+  tripId: string,
+  patchId: string,
+): Promise<{ patch: PlanPatch; trip: Trip }> {
+  return json(await fetch(`${API_BASE}/api/v1/trips/${tripId}/patches/${patchId}/apply`, {
+    method: 'POST',
+  }))
+}
+
+export async function rejectPlanPatch(tripId: string, patchId: string): Promise<PlanPatch> {
+  return json(await fetch(`${API_BASE}/api/v1/trips/${tripId}/patches/${patchId}/reject`, {
+    method: 'POST',
+  }))
+}
+
+export async function previewDeletePatch(
+  tripId: string,
+  payload: { day_id: string; activity_id: string },
+): Promise<PlanPatch> {
+  return json(await fetch(`${API_BASE}/api/v1/trips/${tripId}/patches/preview-delete`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  }))
+}
+
+export async function rollbackPlanPatch(
+  tripId: string,
+  patchId: string,
+): Promise<{ patch: PlanPatch; trip: Trip }> {
+  return json(await fetch(`${API_BASE}/api/v1/trips/${tripId}/patches/${patchId}/rollback`, {
+    method: 'POST',
+  }))
+}
+
+export async function interpretTripEdit(
+  tripId: string,
+  payload: {
+    message: string
+    current_day_id?: string
+    current_target_id?: string
+  },
+): Promise<{
+  message: string
+  patch?: PlanPatch
+  global_replan_required: boolean
+}> {
+  return json(await fetch(`${API_BASE}/api/v1/trips/${tripId}/editing/interpret`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
   }))
 }

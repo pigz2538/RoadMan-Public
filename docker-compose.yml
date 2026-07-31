@@ -33,6 +33,7 @@ services:
       DATABASE_URL: postgresql+asyncpg://roadman:roadman_dev@postgres:5432/roadman
       REDIS_URL: redis://redis:6379/0
       AMAP_WEBSERVICE_KEY: ${AMAP_WEBSERVICE_KEY:-}
+      OPENTRIPMAP_API_KEY: ${OPENTRIPMAP_API_KEY:-}
       OLLAMA_API_KEY: ${OLLAMA_API_KEY:-}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-deepseek-v4-flash:cloud}
       LOAD_LOCAL_SKILL_CREDENTIALS: "true"
@@ -41,6 +42,7 @@ services:
     volumes:
       - roadman_uploads:/app/data/uploads
       - ./Skills/amap-lbs/apipkey.txt:/Skills/amap-lbs/apipkey.txt:ro
+      - ./Skills/opentripmap/apikey.txt:/Skills/opentripmap/apikey.txt:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -62,6 +64,7 @@ services:
       DATABASE_URL: postgresql+asyncpg://roadman:roadman_dev@postgres:5432/roadman
       REDIS_URL: redis://redis:6379/0
       AMAP_WEBSERVICE_KEY: ${AMAP_WEBSERVICE_KEY:-}
+      OPENTRIPMAP_API_KEY: ${OPENTRIPMAP_API_KEY:-}
       OLLAMA_API_KEY: ${OLLAMA_API_KEY:-}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-deepseek-v4-flash:cloud}
       LOAD_LOCAL_SKILL_CREDENTIALS: "true"
@@ -69,6 +72,7 @@ services:
     volumes:
       - roadman_uploads:/app/data/uploads
       - ./Skills/amap-lbs/apipkey.txt:/Skills/amap-lbs/apipkey.txt:ro
+      - ./Skills/opentripmap/apikey.txt:/Skills/opentripmap/apikey.txt:ro
     depends_on:
       backend:
         condition: service_healthy
