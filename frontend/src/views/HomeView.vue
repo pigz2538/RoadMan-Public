@@ -17,6 +17,7 @@ const prompt = ref('周六早上从武汉出发，去庐山两天一夜，周日
 const activeMenu = ref('账户设置')
 const drawerOpen = ref(false)
 const accountMenuOpen = ref(false)
+const modelEnabled = ref(true)
 const modelLoaded = ref(false)
 const modelError = ref(false)
 const voiceReserved = ref(false)
@@ -27,9 +28,10 @@ const preflight = ref<PreflightResult | null>(null)
 const clarificationAnswers = ref<Record<string, string>>({})
 const clarificationIndex = ref(0)
 const isFirefox = ref(false)
-const vehicleMotionAttributes = computed(() => (
-  isFirefox.value ? {} : { 'auto-rotate': '' }
-))
+// Keep the model enabled by default; the render target is bounded by CSS and
+// model-viewer's adaptive scale so the real 3D vehicle remains available
+// without recreating the previous oversized canvas.
+const vehicleMotionAttributes = computed(() => ({}))
 const activeClarification = computed(() => preflight.value?.issues[clarificationIndex.value])
 
 const menus = [
@@ -49,9 +51,25 @@ const quickActions = [
 onMounted(() => {
   isFirefox.value = /firefox/i.test(navigator.userAgent)
   void import('@google/model-viewer').then(({ ModelViewerElement }) => {
+    // The model is intentionally loaded, but keep adaptive rendering bounded.
+    // model-viewer clamps this value to a safe minimum of 0.25.
     ModelViewerElement.minimumRenderScale = 0.25
+  }).catch(() => {
+    modelError.value = true
   })
 })
+
+function handleModelLoad(event: Event) {
+  modelLoaded.value = true
+  const viewer = event.currentTarget as HTMLElement
+  const canvas = viewer.shadowRoot?.querySelector('canvas')
+  canvas?.addEventListener('webglcontextlost', (contextEvent) => {
+    contextEvent.preventDefault()
+    modelLoaded.value = false
+    modelError.value = true
+    modelEnabled.value = false
+  }, { once: true })
+}
 
 function issueKey(issue: PreflightResult['issues'][number]) {
   return `${issue.code}:${issue.field || ''}`
@@ -156,15 +174,14 @@ function activate(label: string) {
     <section class="home-content">
       <div class="vehicle-stage">
         <component
+          v-if="modelEnabled"
           :is="'model-viewer'"
           class="vehicle-model"
           :class="{ loaded: modelLoaded }"
-          src="/models/car-concept-optimized.glb"
+          src="/models/car-concept-white.glb"
           alt="可旋转的 RoadMan 3D 车辆模型"
           camera-controls
           v-bind="vehicleMotionAttributes"
-          auto-rotate-delay="1200"
-          rotation-per-second="12deg"
           camera-orbit="35deg 70deg 275%"
           min-camera-orbit="auto auto 55%"
           max-camera-orbit="auto auto 450%"
@@ -172,20 +189,20 @@ function activate(label: string) {
           min-field-of-view="26deg"
           max-field-of-view="38deg"
           variant-name="Pearly Swirly"
-          :shadow-intensity="isFirefox ? 0.45 : 0.8"
+          :shadow-intensity="0"
           shadow-softness="1"
-          :exposure="isFirefox ? 0.9 : 1"
-          environment-image="neutral"
+          :exposure="0.85"
           interaction-prompt="none"
-          @load="modelLoaded = true"
-          @error="modelError = true"
+          @load="handleModelLoad"
+          @error="modelError = true; modelEnabled = false"
         />
-        <div v-if="!modelLoaded && !modelError" class="vehicle-loading" role="status">
+        <div v-if="modelEnabled && !modelLoaded && !modelError" class="vehicle-loading" role="status">
           <i />
           <span>正在加载车辆模型…</span>
         </div>
         <div v-else-if="modelError" class="vehicle-loading error" role="status">
-          车辆模型加载失败，请刷新重试
+          <span>白模渲染失败，已暂停渲染以保护显卡</span>
+          <button type="button" class="secondary-button" @click="modelError = false; modelEnabled = true">重新加载白模</button>
         </div>
         <span class="sr-only">{{ modelLoaded ? '3D 模型已加载' : modelError ? '3D 模型加载失败' : '正在加载 3D 模型' }}</span>
       </div>

@@ -103,13 +103,13 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .settings-menu button svg { color: #1768dc; }
 .settings-menu button.active, .settings-menu button:hover { background: linear-gradient(105deg, #e9f3ff, #f3f7ff); color: #125ac8; }
 .vehicle-stage {
-  height: 100%; min-height: 300px; position: relative; overflow: visible;
+  height: 100%; min-height: 300px; position: relative; overflow: hidden;
   display: flex; justify-content: center; align-items: center;
   background: transparent;
 }
 .vehicle-model {
-  width: 180vw; height: 180vh;
-  position: fixed; z-index: 0; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  width: 100%; height: 100%;
+  position: absolute; z-index: 0; inset: 0;
   opacity: 0;
   --poster-color: transparent; background: transparent; transition: opacity .25s ease;
 }
