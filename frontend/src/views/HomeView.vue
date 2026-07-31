@@ -188,7 +188,6 @@ function activate(label: string) {
           field-of-view="28deg"
           min-field-of-view="26deg"
           max-field-of-view="38deg"
-          variant-name="Pearly Swirly"
           :shadow-intensity="0"
           shadow-softness="1"
           :exposure="0.85"
