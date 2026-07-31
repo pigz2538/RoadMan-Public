@@ -1,21 +1,17 @@
 import { expect, test } from '@playwright/test'
 
-test('Firefox loads the optimized interactive vehicle without WebGL failure', async ({ page }) => {
+test('Firefox loads the low-risk white vehicle without WebGL failure', async ({ page }) => {
   const pageErrors: string[] = []
   page.on('pageerror', (error) => pageErrors.push(error.message))
 
   await page.goto('/')
   const model = page.locator('model-viewer')
   await expect(model).toBeVisible()
-  await expect(model).toHaveAttribute('src', '/models/car-concept-optimized.glb')
+  await expect(model).toHaveAttribute('src', '/models/car-concept-white.glb')
   await expect(page.getByText('3D 模型已加载')).toBeAttached({ timeout: 30_000 })
   await expect(model).toHaveAttribute('camera-controls')
   await expect(model).not.toHaveAttribute('auto-rotate')
   await expect(page.locator('.vehicle-loading.error')).toHaveCount(0)
-  await expect.poll(() => model.evaluate((element) =>
-    (element as HTMLElement & { availableVariants: string[] }).availableVariants,
-  )).toContain('Pearly Swirly')
-
   const radius = await model.evaluate((element) =>
     Number.parseFloat((element as HTMLElement & { getCameraOrbit(): { radius: number } }).getCameraOrbit().radius.toString()),
   )
