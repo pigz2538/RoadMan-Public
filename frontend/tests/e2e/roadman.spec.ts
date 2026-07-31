@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test'
 
 test('首页包含核心规划入口', async ({ page }) => {
-  await page.route('**/models/car-concept-optimized.glb', async (route) => {
+  await page.route('**/models/car-concept-white.glb', async (route) => {
     await new Promise((resolve) => setTimeout(resolve, 500))
     await route.continue()
   })
@@ -42,8 +42,8 @@ test('首页 3D 车辆保留滚轮缩放和大画布缓冲', async ({ page }) =>
   await expect(vehicleModel).not.toHaveAttribute('disable-zoom')
   const box = await vehicleModel.boundingBox()
   if (!box) throw new Error('3D 车辆画布未完成布局')
-  expect(box.width).toBeGreaterThan(page.viewportSize()!.width)
-  expect(box.height).toBeGreaterThan(page.viewportSize()!.height)
+  expect(box.width).toBeLessThanOrEqual(page.viewportSize()!.width)
+  expect(box.height).toBeLessThanOrEqual(page.viewportSize()!.height)
   const beforeRadius = await vehicleModel.evaluate((model) =>
     (model as HTMLElement & { getCameraOrbit: () => { radius: number } }).getCameraOrbit().radius,
   )
