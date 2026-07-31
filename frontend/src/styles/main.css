@@ -90,8 +90,8 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .account-dropdown button:hover, .account-dropdown button.active { background: #ebf3ff; color: #125ac8; }
 .menu-enter-active,.menu-leave-active { transition: .18s ease; }.menu-enter-from,.menu-leave-to { transform: translateY(-8px); opacity: 0; }
 .home-content {
-  max-width: 1440px;
-  width: min(100%, 1440px); min-height: 380px; flex: 0 0 auto;
+  max-width: none;
+  width: 100%; min-height: 380px; flex: 0 0 auto;
   margin: clamp(10px, 1.5vh, 20px) auto 8px;
   display: block; position: relative; z-index: 1; isolation: isolate;
 }
