@@ -300,7 +300,7 @@ async function renderRoutes() {
       borderWeight: 3,
       strokeColor: active && !unavailable ? modeColor[route.mode] : inactiveRouteColor,
       strokeOpacity: active ? 0.96 : 0.78,
-      strokeWeight: active && !unavailable ? 5 : 3,
+      strokeWeight: active && !unavailable ? 6 : 3,
       strokeStyle: unavailable ? 'dashed' : 'solid',
       strokeDasharray: unavailable ? [8, 8] : undefined,
       lineJoin: 'round',
@@ -382,7 +382,7 @@ async function renderRoutes() {
       [80, 80, 80, 80],
       16,
     )
-    map.value.setZoomAndCenter(Math.max(3, fitZoom - 0.2), fitCenter, false, 1500)
+    map.value.setZoomAndCenter(Math.max(3, fitZoom - 0.2), fitCenter, false, 2400)
   } else if (overlays.length) {
     const [fitZoom, fitCenter] = map.value.getFitZoomAndCenterByOverlays(
       overlays,

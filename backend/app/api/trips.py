@@ -23,7 +23,11 @@ from ..domain.models import (
     TripUpdate,
 )
 from ..core.config import get_settings
-from ..planning.llm import OllamaRequirementExtractor
+from ..planning.llm import (
+    OllamaRequirementExtractor,
+    OllamaRequirementValidator,
+    deterministic_extract,
+)
 from ..repositories import JobRepository, TripRepository
 from ..services.job_queue import enqueue_job
 from ..services.sse import sse_manager
@@ -147,10 +151,38 @@ async def preflight_trip(
     payload: PreflightRequest,
     registry: SkillRegistry = Depends(get_skill_registry),
 ) -> PreflightResponse:
-    extracted = await OllamaRequirementExtractor(get_settings()).extract(
-        payload.raw_text,
-        date.today(),
-    )
+    extracted = dict(payload.previous_extracted)
+    if not extracted:
+        fast_extracted = deterministic_extract(payload.raw_text, date.today())
+        core_fields = ("origin_name", "destination_name", "start_date", "end_date")
+        extracted = (
+            fast_extracted
+            if all(fast_extracted.get(field) for field in core_fields)
+            else await OllamaRequirementExtractor(get_settings()).extract(
+                payload.raw_text,
+                date.today(),
+            )
+        )
+    for key, value in payload.answers.items():
+        value = value.strip()
+        if not value:
+            continue
+        _, _, field = key.partition(":")
+        if field in {"origin_name", "destination_name"}:
+            extracted[field] = value
+        elif field in {"start_date", "end_date"}:
+            parsed = _safe_date(value)
+            if parsed:
+                extracted[field] = parsed.isoformat()
+        elif key.startswith("CROSS_SEA_MODE_REQUIRED:"):
+            extracted["preferences"] = list(
+                dict.fromkeys([*extracted.get("preferences", []), value])
+            )
+
+    def answered(code: str, field: str | None = None) -> bool:
+        key = f"{code}:{field or ''}"
+        return bool(payload.answers.get(key, "").strip())
+
     issues: list[PreflightIssue] = []
     labels = {
         "origin_name": "请补充从哪里出发。",
@@ -160,7 +192,14 @@ async def preflight_trip(
     }
     for field, message in labels.items():
         if not extracted.get(field):
-            issues.append(PreflightIssue(code="MISSING_FIELD", field=field, message=message))
+            issues.append(
+                PreflightIssue(
+                    code="MISSING_FIELD",
+                    field=field,
+                    message=message,
+                    answer_type="date" if field in {"start_date", "end_date"} else "text",
+                )
+            )
 
     start_value = _safe_date(extracted.get("start_date"))
     end_value = _safe_date(extracted.get("end_date"))
@@ -171,6 +210,7 @@ async def preflight_trip(
                 field="end_date",
                 severity="error",
                 message="返回日期早于出发日期，请重新确认日期顺序。",
+                answer_type="date",
             )
         )
     if end_value and end_value < date.today():
@@ -180,9 +220,10 @@ async def preflight_trip(
                 field="end_date",
                 severity="error",
                 message="整个行程已经处于过去，请提供今天或未来的日期。",
+                answer_type="date",
             )
         )
-    if "昨天" in payload.raw_text and any(
+    if not answered("PAST_RETURN_TIME", "end_date") and "昨天" in payload.raw_text and any(
         keyword in payload.raw_text for keyword in ("回", "返", "到达", "抵达")
     ):
         issues.append(
@@ -191,6 +232,7 @@ async def preflight_trip(
                 field="end_date",
                 severity="error",
                 message="需求中出现“昨天返回/抵达”，与当前时间矛盾，请修正。",
+                answer_type="date",
             )
         )
 
@@ -202,18 +244,27 @@ async def preflight_trip(
         keyword in payload.raw_text
         for keyword in ("轮渡", "渡轮", "坐船", "飞机", "跨海大桥")
     )
-    if cross_sea and not explicit_cross_sea_mode:
+    if cross_sea and not explicit_cross_sea_mode and not answered(
+        "CROSS_SEA_MODE_REQUIRED",
+        "preferences",
+    ):
         issues.append(
             PreflightIssue(
                 code="CROSS_SEA_MODE_REQUIRED",
                 field="preferences",
                 message="行程涉及跨海，请确认采用轮渡、飞机还是明确可通车的跨海大桥。",
+                answer_type="choice",
+                options=["轮渡", "飞机", "跨海大桥"],
             )
         )
 
     window = _explicit_travel_window_minutes(payload.raw_text)
     different_places = extracted.get("origin_name") != extracted.get("destination_name")
-    if window is not None and different_places:
+    if (
+        window is not None
+        and different_places
+        and not answered("IMPOSSIBLE_TIME_WINDOW", "time_window")
+    ):
         estimated_minutes = None
         if (
             window > 60
@@ -240,14 +291,76 @@ async def preflight_trip(
                         f"明确的移动时间窗口只有 {window} 分钟{estimate_text}，"
                         "无法按时完成，请放宽到达时间。"
                     ),
+                    answer_type="time",
                 )
             )
 
     deduped = list({(item.code, item.message): item for item in issues}.values())
+    semantic_checked = payload.semantic_checked
+    if not deduped and not semantic_checked:
+        clarified_text = "；".join(
+            [payload.raw_text, *[
+                f"用户确认：{value.strip()}"
+                for value in payload.answers.values()
+                if value.strip()
+            ]]
+        )
+        semantic_issues = await OllamaRequirementValidator(get_settings()).validate(
+            clarified_text,
+            extracted,
+        )
+
+        def already_resolved_semantic_issue(item: dict[str, object]) -> bool:
+            message = str(item.get("message") or "")
+            date_resolved = any(
+                key.startswith((
+                    "INVALID_DATE_ORDER:",
+                    "TRIP_IN_PAST:",
+                    "PAST_RETURN_TIME:",
+                ))
+                and value.strip()
+                for key, value in payload.answers.items()
+            )
+            if date_resolved and any(
+                keyword in message for keyword in ("日期", "昨天", "返回", "出发日")
+            ):
+                return True
+            if answered("CROSS_SEA_MODE_REQUIRED", "preferences") and any(
+                keyword in message for keyword in ("跨海", "轮渡", "渡轮", "飞机", "海岛")
+            ):
+                return True
+            if answered("IMPOSSIBLE_TIME_WINDOW", "time_window") and any(
+                keyword in message for keyword in ("时间", "抵达", "到达", "车程", "按时")
+            ):
+                return True
+            return False
+
+        deduped = [
+            PreflightIssue.model_validate(item)
+            for item in semantic_issues
+            if not already_resolved_semantic_issue(item)
+            if not answered(str(item.get("code")), str(item.get("field") or "preferences"))
+        ]
+        semantic_checked = True
+    summary = {
+        "origin_name": extracted.get("origin_name"),
+        "destination_name": extracted.get("destination_name"),
+        "start_date": extracted.get("start_date"),
+        "end_date": extracted.get("end_date"),
+        "travelers": extracted.get("travelers") or 1,
+        "preferences": extracted.get("preferences", []),
+        "clarifications": [
+            value.strip() for value in payload.answers.values() if value.strip()
+        ],
+    }
+    confirmation_required = not deduped and not payload.confirmed
     return PreflightResponse(
-        ready=not deduped,
+        ready=not deduped and payload.confirmed,
+        confirmation_required=confirmation_required,
+        semantic_checked=semantic_checked,
         issues=deduped,
         extracted=extracted,
+        summary=summary,
     )
 
 

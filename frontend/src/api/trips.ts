@@ -17,13 +17,26 @@ export interface PlanningSnapshot {
 
 export interface PreflightResult {
   ready: boolean
+  confirmation_required: boolean
+  semantic_checked: boolean
   issues: Array<{
     code: string
     message: string
     field?: string
     severity: 'question' | 'error'
+    answer_type: 'text' | 'date' | 'choice' | 'time'
+    options: string[]
   }>
   extracted: Record<string, unknown>
+  summary: {
+    origin_name?: string
+    destination_name?: string
+    start_date?: string
+    end_date?: string
+    travelers?: number
+    preferences?: string[]
+    clarifications?: string[]
+  }
 }
 
 async function json<T>(response: Response): Promise<T> {
@@ -56,11 +69,23 @@ export async function createTrip(
   }))
 }
 
-export async function preflightTrip(rawText: string): Promise<PreflightResult> {
+export async function preflightTrip(
+  rawText: string,
+  answers: Record<string, string> = {},
+  confirmed = false,
+  previousExtracted: Record<string, unknown> = {},
+  semanticChecked = false,
+): Promise<PreflightResult> {
   return json(await fetch(`${API_BASE}/api/v1/trips/preflight`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ raw_text: rawText }),
+    body: JSON.stringify({
+      raw_text: rawText,
+      answers,
+      confirmed,
+      previous_extracted: previousExtracted,
+      semantic_checked: semanticChecked,
+    }),
   }))
 }
 

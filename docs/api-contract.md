@@ -37,8 +37,10 @@
 
 ## LangGraph 规划与 SSE
 
-- `POST /api/v1/trips/preflight`：在创建 Trip 前集中理解并校验自然语言需求；返回
-  `ready`、全部 `issues` 和结构化 `extracted`。该接口不创建行程、不投递 Job。
+- `POST /api/v1/trips/preflight`：在创建 Trip 前逐轮理解、校验并确认自然语言需求。
+  请求可携带 `answers`、`previous_extracted`、`semantic_checked`、`confirmed`；
+  响应返回 `ready`、`confirmation_required`、`semantic_checked`、逐题 `issues`、
+  最终 `summary` 和结构化 `extracted`。该接口不创建行程、不投递 Job。
 - `POST /api/v1/trips/{trip_id}/planning/start`：投递 Planning Job，返回 202。
 - `GET /api/v1/trips/{trip_id}/planning`：需求、默认值、追问、校验和 Markdown 快照。
 - `POST /api/v1/trips/{trip_id}/planning/clarifications`：补充答案并恢复规划。
@@ -52,9 +54,10 @@ SSE 使用命名事件，每条事件包含单调递增的 `id:`。客户端断�
 节点写入可展示进度；事件不包含模型私有推理。
 
 正常首页流程必须先通过 `preflight`。日期倒置、过去返回时间、跨海方式未指定及
-明显不可能的移动时间窗口会在输入框上方集中显示；一小时以上的明确窗口会用高德
-真实驾车时长复核，查询失败时安全降级而不阻塞预检。前端将用户修正后的同一段文本
-重新预检，通过后复用 `extracted` 创建 Trip，避免规划过程中再次询问。图执行结束
+明显不可能的移动时间窗口会在输入框上方逐题询问；Requirement Guard 还会检查
+规则库之外的语义矛盾。后续轮次复用 `previous_extracted`，已回答问题不会因换一种
+说法重复出现。所有问题解决后接口返回 `confirmation_required=true`，只有用户携带
+`confirmed=true` 再次请求并获得 `ready=true` 才能创建 Trip。图执行结束
 先发布 96% 的保存核对状态，Trip 和规划快照持久化成功后才发布 100% 终态。
 
 ## Skill Registry

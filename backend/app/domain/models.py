@@ -171,6 +171,10 @@ class TripRequest(BaseModel):
 
 class PreflightRequest(BaseModel):
     raw_text: str = Field(min_length=2, max_length=4000)
+    answers: dict[str, str] = Field(default_factory=dict)
+    previous_extracted: dict[str, Any] = Field(default_factory=dict)
+    semantic_checked: bool = False
+    confirmed: bool = False
 
 
 class PreflightIssue(BaseModel):
@@ -178,12 +182,17 @@ class PreflightIssue(BaseModel):
     message: str
     field: str | None = None
     severity: Literal["question", "error"] = "question"
+    answer_type: Literal["text", "date", "choice", "time"] = "text"
+    options: list[str] = Field(default_factory=list)
 
 
 class PreflightResponse(BaseModel):
     ready: bool
+    confirmation_required: bool = False
+    semantic_checked: bool = False
     issues: list[PreflightIssue] = Field(default_factory=list)
     extracted: dict[str, Any] = Field(default_factory=dict)
+    summary: dict[str, Any] = Field(default_factory=dict)
 
 
 class RouteSegment(BaseModel):

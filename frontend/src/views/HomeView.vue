@@ -24,10 +24,13 @@ const planning = ref(false)
 const preflightChecking = ref(false)
 const planningError = ref('')
 const preflight = ref<PreflightResult | null>(null)
+const clarificationAnswers = ref<Record<string, string>>({})
+const clarificationIndex = ref(0)
 const isFirefox = ref(false)
 const vehicleMotionAttributes = computed(() => (
   isFirefox.value ? {} : { 'auto-rotate': '' }
 ))
+const activeClarification = computed(() => preflight.value?.issues[clarificationIndex.value])
 
 const menus = [
   { label: '账户设置', icon: CircleUserRound },
@@ -50,12 +53,30 @@ onMounted(() => {
   })
 })
 
-async function startPlanning() {
+function issueKey(issue: PreflightResult['issues'][number]) {
+  return `${issue.code}:${issue.field || ''}`
+}
+
+function resetPreflight() {
+  preflight.value = null
+  clarificationAnswers.value = {}
+  clarificationIndex.value = 0
+  planningError.value = ''
+}
+
+async function checkPreflight(confirmed = false) {
   if (planning.value || preflightChecking.value || !prompt.value.trim()) return
   planningError.value = ''
   try {
     preflightChecking.value = true
-    preflight.value = await preflightTrip(prompt.value.trim())
+    preflight.value = await preflightTrip(
+      prompt.value.trim(),
+      clarificationAnswers.value,
+      confirmed,
+      preflight.value?.extracted,
+      preflight.value?.semantic_checked,
+    )
+    clarificationIndex.value = 0
     if (!preflight.value.ready) return
     planning.value = true
     const trip = await createTrip(prompt.value.trim(), preflight.value.extracted)
@@ -67,6 +88,30 @@ async function startPlanning() {
     preflightChecking.value = false
     planning.value = false
   }
+}
+
+async function startPlanning() {
+  await checkPreflight(false)
+}
+
+async function submitClarification() {
+  const issue = activeClarification.value
+  if (!issue) return
+  const key = issueKey(issue)
+  if (!clarificationAnswers.value[key]?.trim()) {
+    planningError.value = '请先回答当前问题。'
+    return
+  }
+  planningError.value = ''
+  if (clarificationIndex.value < (preflight.value?.issues.length ?? 1) - 1) {
+    clarificationIndex.value += 1
+    return
+  }
+  await checkPreflight(false)
+}
+
+async function confirmAndPlan() {
+  await checkPreflight(true)
 }
 
 function activate(label: string) {
@@ -151,18 +196,75 @@ function activate(label: string) {
         <span>从一句话开始</span>
         <h1>我是您的自驾游规划 <em>Agent</em></h1>
       </div>
-      <section v-if="preflight && !preflight.ready" class="preflight-panel glass-card" aria-live="polite">
-        <strong>规划前还需要确认</strong>
-        <p>请直接在下方输入框补充或修正这些信息，确认无误后才会开始生成行程。</p>
-        <ul>
-          <li
-            v-for="issue in preflight.issues"
-            :key="`${issue.code}-${issue.message}`"
-            :class="{ error: issue.severity === 'error' }"
-          >
-            {{ issue.message }}
-          </li>
-        </ul>
+      <section
+        v-if="preflight && !preflight.ready"
+        class="preflight-panel glass-card"
+        role="dialog"
+        aria-modal="false"
+        aria-live="polite"
+        aria-label="规划前需求确认"
+      >
+        <template v-if="activeClarification">
+          <div class="preflight-heading">
+            <span>Agent 需要向您确认</span>
+            <b>{{ clarificationIndex + 1 }} / {{ preflight.issues.length }}</b>
+          </div>
+          <strong>{{ activeClarification.message }}</strong>
+          <p>回答后会重新检查全部条件；所有问题解决前不会开始规划。</p>
+          <div v-if="activeClarification.answer_type === 'choice'" class="preflight-options">
+            <button
+              v-for="option in activeClarification.options"
+              :key="option"
+              :class="{ selected: clarificationAnswers[issueKey(activeClarification)] === option }"
+              @click="clarificationAnswers[issueKey(activeClarification)] = option"
+            >
+              {{ option }}
+            </button>
+          </div>
+          <input
+            v-else
+            v-model="clarificationAnswers[issueKey(activeClarification)]"
+            class="preflight-answer"
+            :type="activeClarification.answer_type === 'date' ? 'date' : 'text'"
+            :placeholder="activeClarification.answer_type === 'time'
+              ? '例如：取消原到达限制，按合理车程安排'
+              : '请输入修正或补充信息'"
+            @keyup.enter="submitClarification"
+          />
+          <div class="preflight-actions">
+            <button
+              class="secondary-button"
+              :disabled="clarificationIndex === 0"
+              @click="clarificationIndex -= 1"
+            >
+              上一个
+            </button>
+            <button class="primary-button" :disabled="preflightChecking" @click="submitClarification">
+              {{ clarificationIndex < preflight.issues.length - 1 ? '下一个问题' : '重新检查全部条件' }}
+            </button>
+          </div>
+        </template>
+        <template v-else-if="preflight.confirmation_required">
+          <div class="preflight-heading">
+            <span>最终确认</span>
+            <b>检查通过</b>
+          </div>
+          <strong>请确认以下需求，确认后才会开始规划</strong>
+          <dl class="preflight-summary">
+            <div><dt>路线</dt><dd>{{ preflight.summary.origin_name }} → {{ preflight.summary.destination_name }}</dd></div>
+            <div><dt>日期</dt><dd>{{ preflight.summary.start_date }} 至 {{ preflight.summary.end_date }}</dd></div>
+            <div><dt>人数</dt><dd>{{ preflight.summary.travelers || 1 }} 人</dd></div>
+            <div v-if="preflight.summary.clarifications?.length">
+              <dt>已确认</dt><dd>{{ preflight.summary.clarifications.join('；') }}</dd>
+            </div>
+          </dl>
+          <div class="preflight-actions">
+            <button class="secondary-button" @click="resetPreflight">返回修改</button>
+            <button class="primary-button" :disabled="preflightChecking || planning" @click="confirmAndPlan">
+              确认无误，开始规划
+            </button>
+          </div>
+        </template>
       </section>
       <div class="planner-box glass-card">
         <div class="agent-orb">AI</div>
@@ -172,6 +274,7 @@ function activate(label: string) {
             <input
               id="trip-prompt"
               v-model="prompt"
+              @input="resetPreflight"
               @keyup.enter="startPlanning"
               placeholder="输入目的地，或描述您的旅行设想…"
             />
@@ -189,9 +292,13 @@ function activate(label: string) {
               >
                 <Mic />
               </button>
-              <button class="primary-button" :disabled="planning || preflightChecking" @click="startPlanning">
+              <button
+                class="primary-button"
+                :disabled="planning || preflightChecking || Boolean(preflight && !preflight.ready)"
+                @click="startPlanning"
+              >
                 <Send :size="20" />
-                {{ planning ? '正在启动…' : preflightChecking ? '正在检查…' : preflight && !preflight.ready ? '重新检查' : '开始规划' }}
+                {{ planning ? '正在启动…' : preflightChecking ? '正在检查…' : preflight && !preflight.ready ? '请先完成确认' : '开始规划' }}
               </button>
             </div>
           </div>

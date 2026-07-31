@@ -29,16 +29,29 @@ test('阶段 D 真实 Agent 行程可展示地图、阶段和 Markdown', async (
 })
 
 test('首页在规划前集中询问矛盾与缺失信息', async ({ page }) => {
+  test.setTimeout(60_000)
   await page.goto('http://127.0.0.1:8080/home')
   const input = page.locator('#trip-prompt')
-  await input.fill('今天从上海跨海去海岛，昨天返回，下午3点出发到下午3点抵达')
+  await input.fill(
+    '2026-08-02从上海出发跨海去普陀山，2026-08-01返回，下午3点出发到下午3点抵达',
+  )
   await page.getByRole('button', { name: '开始规划' }).click()
 
   const panel = page.locator('.preflight-panel')
   await expect(panel).toBeVisible({ timeout: 30_000 })
   await expect(panel).toContainText('返回日期早于出发日期')
-  await expect(panel).toContainText('行程涉及跨海')
-  await expect(panel).toContainText('时间窗口只有 0 分钟')
   await expect(page).toHaveURL(/\/home$/)
-  await expect(page.getByRole('button', { name: '重新检查' })).toBeVisible()
+  await panel.locator('.preflight-answer').fill('2026-08-03')
+  await panel.getByRole('button', { name: '下一个问题' }).click()
+  await expect(panel).toContainText('行程涉及跨海')
+  await panel.getByRole('button', { name: '轮渡' }).click()
+  await panel.getByRole('button', { name: '下一个问题' }).click()
+  await expect(panel).toContainText('时间窗口只有 0 分钟')
+  await panel.locator('.preflight-answer').fill('取消原到达限制，按合理车程安排')
+  await panel.getByRole('button', { name: '重新检查全部条件' }).click()
+  await expect(panel).toContainText('最终确认')
+  await expect(panel).toContainText('上海')
+  await expect(panel).toContainText('普陀山')
+  await expect(panel).toContainText('2026-08-03')
+  await expect(panel.getByRole('button', { name: '确认无误，开始规划' })).toBeVisible()
 })

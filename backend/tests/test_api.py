@@ -55,6 +55,49 @@ async def test_preflight_blocks_temporal_and_cross_sea_conflicts(client):
     assert "INVALID_DATE_ORDER" in codes
     assert "CROSS_SEA_MODE_REQUIRED" in codes
     assert "IMPOSSIBLE_TIME_WINDOW" in codes
+    cross_sea = next(
+        item for item in body["issues"] if item["code"] == "CROSS_SEA_MODE_REQUIRED"
+    )
+    assert cross_sea["answer_type"] == "choice"
+    assert cross_sea["options"] == ["轮渡", "飞机", "跨海大桥"]
+
+    answers = {
+        "INVALID_DATE_ORDER:end_date": "2026-08-03",
+        "CROSS_SEA_MODE_REQUIRED:preferences": "轮渡",
+        "IMPOSSIBLE_TIME_WINDOW:time_window": "取消原到达限制，按合理车程安排",
+    }
+    reviewed = await client.post(
+        "/api/v1/trips/preflight",
+        json={
+            "raw_text": (
+                "2026-08-02从上海出发跨海去海岛，2026-08-01返回，"
+                "下午3点出发到下午3点抵达"
+            ),
+            "answers": answers,
+            "semantic_checked": True,
+        },
+    )
+    reviewed_body = reviewed.json()
+    assert reviewed_body["ready"] is False
+    assert reviewed_body["confirmation_required"] is True
+    assert reviewed_body["issues"] == []
+    assert reviewed_body["extracted"]["end_date"] == "2026-08-03"
+    assert "轮渡" in reviewed_body["extracted"]["preferences"]
+
+    confirmed = await client.post(
+        "/api/v1/trips/preflight",
+        json={
+            "raw_text": (
+                "2026-08-02从上海出发跨海去海岛，2026-08-01返回，"
+                "下午3点出发到下午3点抵达"
+            ),
+            "answers": answers,
+            "semantic_checked": True,
+            "confirmed": True,
+        },
+    )
+    assert confirmed.json()["ready"] is True
+    assert confirmed.json()["confirmation_required"] is False
 
 
 @pytest.mark.asyncio

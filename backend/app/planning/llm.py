@@ -48,6 +48,64 @@ class OllamaRequirementExtractor:
             return deterministic
 
 
+class OllamaRequirementValidator:
+    def __init__(self, settings: Settings) -> None:
+        self.settings = settings
+
+    async def validate(
+        self,
+        raw_text: str,
+        extracted: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        if not self.settings.ollama_api_key:
+            return []
+        prompt = (
+            "你是 RoadMan Requirement Guard，只检查旅行需求是否自相矛盾、"
+            "明显不可执行或缺少必须由用户决定的信息，不规划路线，不重复检查"
+            "出发地、目的地、日期顺序、跨海方式和明确时间窗。"
+            "返回单个 JSON：{\"issues\":[{\"code\":\"SEMANTIC_*\","
+            "\"message\":\"给用户的简短问题\",\"field\":\"preferences\","
+            "\"answer_type\":\"text\",\"options\":[]}]}。没有问题返回 {\"issues\":[]}。"
+            f"结构化需求：{json.dumps(extracted, ensure_ascii=False)}；原始需求：{raw_text}"
+        )
+        try:
+            async with httpx.AsyncClient(timeout=self.settings.ollama_timeout_seconds) as client:
+                response = await client.post(
+                    self.settings.ollama_api_url,
+                    headers={"Authorization": f"Bearer {self.settings.ollama_api_key}"},
+                    json={
+                        "model": self.settings.ollama_model,
+                        "prompt": prompt,
+                        "stream": False,
+                        "think": False,
+                    },
+                )
+                response.raise_for_status()
+                payload = _parse_json_object(response.json().get("response", ""))
+                issues = payload.get("issues", [])
+                if not isinstance(issues, list):
+                    return []
+                return [
+                    {
+                        "code": str(item.get("code") or "SEMANTIC_REQUIREMENT"),
+                        "message": str(item.get("message") or "请进一步确认该项需求。"),
+                        "field": str(item.get("field") or "preferences"),
+                        "answer_type": (
+                            item.get("answer_type")
+                            if item.get("answer_type") in {"text", "date", "choice", "time"}
+                            else "text"
+                        ),
+                        "options": [
+                            str(option) for option in item.get("options", [])
+                        ][:5],
+                    }
+                    for item in issues[:5]
+                    if isinstance(item, dict)
+                ]
+        except (httpx.HTTPError, ValueError, TypeError, json.JSONDecodeError):
+            return []
+
+
 def _parse_json_object(text: str) -> dict[str, Any]:
     match = re.search(r"\{.*\}", text, re.DOTALL)
     if not match:
@@ -62,6 +120,7 @@ def _parse_json_object(text: str) -> dict[str, Any]:
         "end_date",
         "travelers",
         "preferences",
+        "issues",
     }
     return {key: value for key, value in value.items() if key in allowed}
 
