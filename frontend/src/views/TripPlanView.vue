@@ -1,12 +1,16 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowLeft, ChevronLeft, ChevronRight, Download, Share2 } from '@lucide/vue'
+import { ArrowLeft, ChevronLeft, ChevronRight, Download, Paperclip, Share2 } from '@lucide/vue'
 import {
   answerClarification,
   createTripVersion,
   downloadTripMarkdown,
   downloadTripExport,
+  confirmTripAttachment,
+  extractTripAttachment,
+  uploadTripAttachment,
+  type AttachmentExtraction,
   fetchMockTrip,
   fetchPlanning,
   fetchTrip,
@@ -31,6 +35,10 @@ const planningSnapshot = ref<PlanningSnapshot | null>(null)
 const clarificationAnswer = ref('')
 const planningError = ref('')
 const versionMessage = ref('')
+const attachmentInput = ref<HTMLInputElement | null>(null)
+const attachmentPreview = ref<AttachmentExtraction | null>(null)
+const attachmentSelection = ref<string[]>([])
+const attachmentMessage = ref('')
 let pollingTimer: number | undefined
 const stageDrag = { active: false, moved: false, startX: 0, startScrollLeft: 0, pointerId: -1 }
 const categories = ['景点', '住宿', '餐饮', '服务'] as const
@@ -166,6 +174,37 @@ function exportSnapshot(format: 'pdf' | 'pptx' | 'png') {
   downloadTripExport(store.trip.id, format)
 }
 
+function openAttachmentPicker() {
+  attachmentInput.value?.click()
+}
+
+async function onAttachmentSelected(event: Event) {
+  const file = (event.target as HTMLInputElement).files?.[0]
+  if (!file || !store.trip || store.trip.id === 'trip_wuhan_lushan_demo') return
+  attachmentMessage.value = '正在解析附件…'
+  try {
+    const uploaded = await uploadTripAttachment(store.trip.id, file)
+    attachmentPreview.value = await extractTripAttachment(uploaded.id)
+    attachmentSelection.value = [...attachmentPreview.value.places]
+    attachmentMessage.value = `已解析：${uploaded.original_name}`
+  } catch (error) {
+    attachmentMessage.value = error instanceof Error ? error.message : '附件解析失败'
+  } finally {
+    if (attachmentInput.value) attachmentInput.value.value = ''
+  }
+}
+
+async function confirmAttachment() {
+  if (!attachmentPreview.value) return
+  try {
+    await confirmTripAttachment(attachmentPreview.value.file_id, attachmentSelection.value)
+    attachmentPreview.value = null
+    attachmentMessage.value = '附件地点已确认，重新规划时会纳入行程'
+  } catch (error) {
+    attachmentMessage.value = error instanceof Error ? error.message : '附件确认失败'
+  }
+}
+
 function selectStageById(stageId: string) {
   const item = allStages.value.find((entry) => entry.stage.id === stageId)
   if (item) selectJourneyStage(item)
@@ -296,9 +335,21 @@ watch(
         <button class="ghost-button export-small" @click="exportSnapshot('pdf')">PDF</button>
         <button class="ghost-button export-small" @click="exportSnapshot('pptx')">PPT</button>
         <button class="ghost-button export-small" @click="exportSnapshot('png')">长图</button>
+        <button class="ghost-button export-small" @click="openAttachmentPicker"><Paperclip />附件</button>
+        <input ref="attachmentInput" class="sr-only" type="file" accept=".png,.jpg,.jpeg,.webp,.pdf,.docx,.md,.xlsx" @change="onAttachmentSelected">
       </div>
     </header>
     <div v-if="versionMessage" class="degraded-banner">{{ versionMessage }}</div>
+    <section v-if="attachmentPreview || attachmentMessage" class="attachment-preview glass-card">
+      <div class="attachment-preview-heading"><strong>附件解析预览</strong><span>{{ attachmentMessage }}</span></div>
+      <div v-if="attachmentPreview" class="attachment-place-list">
+        <label v-for="place in attachmentPreview.places" :key="place">
+          <input v-model="attachmentSelection" type="checkbox" :value="place">{{ place }}
+        </label>
+        <p v-if="attachmentPreview.warnings.length">{{ attachmentPreview.warnings.join('；') }}</p>
+        <button class="primary-button" @click="confirmAttachment">确认选中地点</button>
+      </div>
+    </section>
 
     <div v-if="loading" class="page-state">正在加载武汉—庐山行程…</div>
     <section v-else-if="planningSnapshot && !store.currentDay" class="planning-state glass-card">

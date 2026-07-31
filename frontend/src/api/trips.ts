@@ -247,6 +247,36 @@ export interface TripVersion {
   created_at: string
 }
 
+export interface AttachmentExtraction {
+  file_id: string
+  status: 'preview' | 'confirmed'
+  places: string[]
+  hotels: string[]
+  dates: string[]
+  order_numbers: string[]
+  text_preview: string
+  warnings: string[]
+}
+
+export async function uploadTripAttachment(tripId: string, file: File): Promise<{ id: string; original_name: string }> {
+  const body = new FormData()
+  body.append('trip_id', tripId)
+  body.append('upload', file)
+  return json(await fetch(`${API_BASE}/api/v1/files`, { method: 'POST', body }))
+}
+
+export async function extractTripAttachment(fileId: string): Promise<AttachmentExtraction> {
+  return json(await fetch(`${API_BASE}/api/v1/files/${fileId}/extract`, { method: 'POST' }))
+}
+
+export async function confirmTripAttachment(fileId: string, acceptedPlaces: string[]): Promise<AttachmentExtraction> {
+  return json(await fetch(`${API_BASE}/api/v1/files/${fileId}/confirm`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ accepted_places: acceptedPlaces }),
+  }))
+}
+
 export async function createTripVersion(
   tripId: string,
   name: string,
