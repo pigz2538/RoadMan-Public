@@ -90,8 +90,8 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .account-dropdown button:hover, .account-dropdown button.active { background: #ebf3ff; color: #125ac8; }
 .menu-enter-active,.menu-leave-active { transition: .18s ease; }.menu-enter-from,.menu-leave-to { transform: translateY(-8px); opacity: 0; }
 .home-content {
-  max-width: 900px;
-  width: 100%; min-height: 300px; flex: 1 1 auto;
+  max-width: 1440px;
+  width: min(100%, 1440px); min-height: 380px; flex: 0 0 auto;
   margin: clamp(10px, 1.5vh, 20px) auto 8px;
   display: block; position: relative; z-index: 1; isolation: isolate;
 }
@@ -103,14 +103,15 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .settings-menu button svg { color: #1768dc; }
 .settings-menu button.active, .settings-menu button:hover { background: linear-gradient(105deg, #e9f3ff, #f3f7ff); color: #125ac8; }
 .vehicle-stage {
-  height: 100%; min-height: 300px; position: relative; overflow: hidden;
+  width: 100%; height: clamp(380px, 46vh, 560px); min-height: 380px;
+  position: relative; overflow: hidden;
   display: flex; justify-content: center; align-items: center;
   background: transparent;
 }
 .vehicle-model {
   width: 100%; height: 100%;
   position: absolute; z-index: 0; inset: 0;
-  opacity: 0;
+  contain: strict; opacity: 0;
   --poster-color: transparent; background: transparent; transition: opacity .25s ease;
 }
 .vehicle-model.loaded { opacity: 1; }
@@ -576,7 +577,7 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 @media (max-width: 820px) {
   .home-shell { padding: 12px; }.home-top { height: auto; padding: 15px; }.top-stats span:first-child { display: none; }
   .home-content { display: block; min-height: auto; }
-  .vehicle-stage { height: 300px; }.planner-box { flex-wrap: wrap; }.prompt-wrap { flex-basis: calc(100% - 100px); }
+  .vehicle-stage { height: 300px; min-height: 300px; }.planner-box { flex-wrap: wrap; }.prompt-wrap { flex-basis: calc(100% - 100px); }
   .quick-grid { grid-template-columns: 1fr; }
   .plan-shell { padding: 10px; }.plan-top { grid-template-columns: auto 1fr auto; }.plan-top .eyebrow, .top-actions .ghost-button:first-child { display: none; }
   .plan-grid { height: auto; display: block; }.trip-sidebar { height: 420px; margin-bottom: 12px; }.map-workspace { height: 650px; }

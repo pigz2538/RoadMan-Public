@@ -19,6 +19,7 @@ from ..domain.models import (
     SourceRecord,
 )
 from ..skills.base import SkillContext
+from ..skills.amap import RoutePoint, _haversine_km
 from ..skills.registry import SkillRegistry
 from .deep_drive import (
     default_vehicle,
@@ -363,7 +364,11 @@ def build_planning_graph(
                 }
                 for item in open_trip_map.data.get("items", []):
                     name = str(item.get("name") or "").strip()
-                    if not name or name.lower() in known_names:
+                    # OpenTripMap is backed by OSM and its English endpoint
+                    # frequently returns Latin-only names in China. Do not
+                    # leak those labels into the Chinese itinerary; AMap and
+                    # FlyAI remain the authoritative local-name sources.
+                    if not name or not _contains_cjk(name) or name.lower() in known_names:
                         continue
                     candidates["attractions"].append(
                         {
@@ -509,17 +514,18 @@ def build_planning_graph(
                     preferred_mode="transit",
                     fallback_modes=["walking", "riding", "driving"],
                 )
-                if route.get("success"):
-                    local_routes.append(
-                        {
-                            "day_index": day_index,
-                            "sequence": 2,
-                            "origin": anchor,
-                            "destination": destination,
-                            "route": route,
-                            "return_to_base": True,
-                        }
-                    )
+                if not route.get("success"):
+                    route = _fallback_local_route(anchor, destination, "transit")
+                local_routes.append(
+                    {
+                        "day_index": day_index,
+                        "sequence": 2,
+                        "origin": anchor,
+                        "destination": destination,
+                        "route": route,
+                        "return_to_base": True,
+                    }
+                )
         await emit(
             state,
             "build_local_routes",
@@ -1235,6 +1241,49 @@ def _movement_stage(
     )
 
 
+def _fallback_local_route(
+    origin: dict[str, Any],
+    destination: dict[str, Any],
+    mode: str,
+) -> dict[str, Any]:
+    """Keep a local itinerary connected when a provider has no short-route result."""
+    origin_coordinates = origin.get("coordinates") or {}
+    destination_coordinates = destination.get("coordinates") or {}
+    try:
+        origin_point = RoutePoint(
+            longitude=float(origin_coordinates["longitude"]),
+            latitude=float(origin_coordinates["latitude"]),
+        )
+        destination_point = RoutePoint(
+            longitude=float(destination_coordinates["longitude"]),
+            latitude=float(destination_coordinates["latitude"]),
+        )
+        distance_km = round(_haversine_km(origin_point, destination_point), 2)
+    except (KeyError, TypeError, ValueError):
+        distance_km = 0.1
+    speed_kmh = {"walking": 4.5, "riding": 15.0, "transit": 25.0}.get(mode, 25.0)
+    duration_minutes = max(5, round(distance_km / speed_kmh * 60))
+    geometry = [
+        {"longitude": origin_point.longitude, "latitude": origin_point.latitude},
+        {"longitude": destination_point.longitude, "latitude": destination_point.latitude},
+    ] if "origin_point" in locals() and "destination_point" in locals() else []
+    return {
+        "success": True,
+        "data": {
+            "selected_mode": mode,
+            "distance_km": distance_km,
+            "duration_minutes": duration_minutes,
+            "tolls_cny": 0,
+            "geometry": geometry,
+            "steps": [],
+            "traffic_summary": None,
+            "estimated": True,
+        },
+        "sources": [],
+        "warnings": ["高德未返回完整接驳路线，已使用估算直连，仅用于保持行程闭环"],
+    }
+
+
 def _local_stage_title(mode: str | None, *, return_to_base: bool = False) -> str:
     if return_to_base:
         return "返回住宿或目的地核心区"
@@ -1346,6 +1395,11 @@ def _poi_place(item: dict[str, Any]) -> dict[str, Any]:
         },
         "source_id": item.get("id"),
     }
+
+
+def _contains_cjk(value: str) -> bool:
+    """Return whether a POI label contains at least one CJK ideograph."""
+    return any("\u4e00" <= character <= "\u9fff" for character in value)
 
 
 def _energy_markdown(estimate: dict[str, Any] | None) -> str:

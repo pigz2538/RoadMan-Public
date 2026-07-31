@@ -23,7 +23,7 @@ test('首页包含核心规划入口', async ({ page }) => {
       resetTurntableRotation?: (theta?: number) => void
     }
     viewer.resetTurntableRotation?.(0)
-    viewer.cameraOrbit = '35deg 70deg 275%'
+    viewer.cameraOrbit = '35deg 70deg 220%'
     viewer.jumpCameraToGoal?.()
   })
   await page.waitForTimeout(300)
