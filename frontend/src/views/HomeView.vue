@@ -265,6 +265,20 @@ function activate(label: string) {
             </button>
           </div>
         </template>
+        <template v-else>
+          <div class="preflight-heading">
+            <span>检查结果需要刷新</span>
+            <b>可恢复</b>
+          </div>
+          <strong>没有收到需要补充的具体问题，请重新检查一次。</strong>
+          <p>这不会创建行程，也不会丢失输入内容。</p>
+          <div class="preflight-actions">
+            <button class="secondary-button" @click="resetPreflight">返回修改</button>
+            <button class="primary-button" :disabled="preflightChecking" @click="checkPreflight(false)">
+              重新检查
+            </button>
+          </div>
+        </template>
       </section>
       <div class="planner-box glass-card">
         <div class="agent-orb">AI</div>

@@ -1,5 +1,37 @@
 import { expect, test } from '@playwright/test'
 
+test('正常需求预检后进入最终确认而不是空阻塞', async ({ page }) => {
+  test.setTimeout(60_000)
+  await page.goto('http://127.0.0.1:8080/home')
+  await page.getByRole('button', { name: '开始规划' }).click()
+  const panel = page.locator('.preflight-panel')
+  await expect(panel).toContainText('最终确认', { timeout: 45_000 })
+  await expect(panel).toContainText('武汉')
+  await expect(panel).toContainText('庐山')
+  await expect(panel.getByRole('button', { name: '确认无误，开始规划' })).toBeVisible()
+})
+
+test('预检异常空响应提供可恢复操作', async ({ page }) => {
+  await page.route('**/api/v1/trips/preflight', (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      ready: false,
+      confirmation_required: false,
+      semantic_checked: false,
+      issues: [],
+      extracted: {},
+      summary: {},
+    }),
+  }))
+  await page.goto('http://127.0.0.1:8080/home')
+  await page.getByRole('button', { name: '开始规划' }).click()
+  const panel = page.locator('.preflight-panel')
+  await expect(panel).toContainText('没有收到需要补充的具体问题')
+  await expect(panel.getByRole('button', { name: '重新检查' })).toBeVisible()
+  await expect(panel.getByRole('button', { name: '返回修改' })).toBeVisible()
+})
+
 test('阶段 D 真实 Agent 行程可展示地图、阶段和 Markdown', async ({ page }) => {
   const tripId = process.env.ROADMAN_E2E_TRIP_ID
   test.skip(!tripId, '需要 ROADMAN_E2E_TRIP_ID 指向已完成的规划行程')
