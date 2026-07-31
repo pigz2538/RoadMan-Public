@@ -51,6 +51,7 @@
 - `GET /api/v1/trips/{trip_id}/roadbook.pptx`；
 - `GET /api/v1/trips/{trip_id}/roadbook.png`；
 - 前端规划页提供 PDF、PPT、长图下载按钮；
+- 规划页支持附件上传、解析预览和地点勾选确认，确认前不会改写正式行程；
 
 ## 尚待完成
 

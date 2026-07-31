@@ -191,6 +191,7 @@ npm run dev
 - 行程版本可命名保存、列出与恢复；Markdown 可从规划页直接下载。
 - 导出统一从冻结快照生成 PDF、PPTX 与长图 PNG；规划页已提供对应下载入口。
 - 导出未就绪时返回结构化 `ROADBOOK_NOT_READY`，不生成空文件。
+- 规划页已接入附件上传、解析预览和地点勾选确认，确认后才写入行程必去地点。
 - 阶段 I 首轮新增 `/api/v1/ops/metrics` 和 `/api/v1/skills/metrics`，并记录请求/Skill 延迟、失败与缓存命中。
 - 请求统一透传 `X-Request-ID`、`X-Trace-ID`，默认启用滑动窗口限流，日志不记录请求体和密钥。
 - 新依赖已写入 `backend/requirements.txt`，并安装进 `roadman` Conda 环境。
