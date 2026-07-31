@@ -283,6 +283,7 @@ async function renderRoutes() {
     transit: '#18a66a',
     direct: '#9aa5b4',
   }
+  const inactiveRouteColor = '#98a3b2'
   for (const { stage, route } of plannedPaths) {
     const unavailable = route.mode === 'direct'
     const start = stage.origin.coordinates
@@ -297,14 +298,14 @@ async function renderRoutes() {
       isOutline: active && !unavailable,
       outlineColor: '#dbe9ff',
       borderWeight: 3,
-      strokeColor: unavailable ? '#9aa5b4' : modeColor[route.mode],
-      strokeOpacity: unavailable ? 0.72 : active ? 0.95 : 0.56,
-      strokeWeight: unavailable ? 3 : active ? 6 : 4,
+      strokeColor: active && !unavailable ? modeColor[route.mode] : inactiveRouteColor,
+      strokeOpacity: active ? 0.96 : 0.78,
+      strokeWeight: active && !unavailable ? 5 : 3,
       strokeStyle: unavailable ? 'dashed' : 'solid',
       strokeDasharray: unavailable ? [8, 8] : undefined,
       lineJoin: 'round',
       lineCap: 'round',
-      showDir: !unavailable,
+      showDir: active && !unavailable,
       zIndex: active ? 80 : 50,
       extData: { stageId: stage.id, unavailable, mode: route.mode },
     })
@@ -317,15 +318,15 @@ async function renderRoutes() {
     const unavailable = route.mode === 'direct'
     const polyline = new AMap.value.Polyline({
       path: route.path,
-      strokeColor: modeColor[route.mode],
-      strokeOpacity: unavailable ? 0.72 : 0.9,
-      strokeWeight: unavailable ? 3 : 5,
+      strokeColor: inactiveRouteColor,
+      strokeOpacity: unavailable ? 0.72 : 0.78,
+      strokeWeight: 3,
       strokeStyle: unavailable ? 'dashed' : 'solid',
       strokeDasharray: unavailable ? [8, 8] : undefined,
       lineJoin: 'round',
       lineCap: 'round',
-      showDir: !unavailable,
-      zIndex: 70,
+      showDir: false,
+      zIndex: 45,
       extData: { connectorId: connector.id, unavailable, mode: route.mode },
     })
     routeOverlays.value.push({ stageId: connector.id, polyline })
@@ -378,10 +379,10 @@ async function renderRoutes() {
   if (activeRoute) {
     const [fitZoom, fitCenter] = map.value.getFitZoomAndCenterByOverlays(
       [activeRoute],
-      [140, 140, 140, 140],
-      15,
+      [80, 80, 80, 80],
+      16,
     )
-    map.value.setZoomAndCenter(Math.max(3, fitZoom - 1.8), fitCenter, false, 1500)
+    map.value.setZoomAndCenter(Math.max(3, fitZoom - 0.2), fitCenter, false, 1500)
   } else if (overlays.length) {
     const [fitZoom, fitCenter] = map.value.getFitZoomAndCenterByOverlays(
       overlays,
