@@ -920,6 +920,10 @@ def build_planning_graph(
 
     async def verify_plan(state: RoadManState) -> dict[str, Any]:
         await emit(state, "verify_plan", "正在校验路线、交通方式、天气与时间约束", 89)
+        # Normalize provider timestamps before enforcing hard constraints.
+        # A service or meal can be returned at the exact start of the next
+        # movement segment; move that segment forward to avoid a false blocker.
+        normalized_days = _repair_activity_stage_overlaps(state.get("day_plans", []))
         issues: list[dict[str, Any]] = []
         if state.get("error"):
             issues.append(
@@ -939,19 +943,20 @@ def build_planning_graph(
             )
         issues.extend(
             verify_deep_drive_plan(
-                state.get("day_plans", []),
+                normalized_days,
                 state.get("vehicle_profile"),
                 int(state["trip_request"].get("max_continuous_drive_minutes") or 120),
             )
         )
-        issues.extend(_verify_route_closure(state.get("day_plans", [])))
+        issues.extend(_verify_route_closure(normalized_days))
         issues.extend(
             verify_tourism_plan(
-                state.get("day_plans", []),
+                normalized_days,
                 state.get("tourism_candidates", {}),
             )
         )
         return {
+            "day_plans": normalized_days,
             "verification_result": {
                 "passed": not any(item["severity"] == "blocker" for item in issues),
                 "issues": issues,
@@ -961,7 +966,9 @@ def build_planning_graph(
 
     async def repair_plan(state: RoadManState) -> dict[str, Any]:
         await emit(state, "repair_plan", "正在执行一次确定性自动修复", 88)
+        repaired_days = _repair_activity_stage_overlaps(state.get("day_plans", []))
         return {
+            "day_plans": repaired_days,
             "repair_attempted": True,
             "warnings": [
                 *state.get("warnings", []),
@@ -1270,6 +1277,44 @@ def _verify_route_closure(day_plans: list[dict[str, Any]]) -> list[dict[str, Any
             }
         )
     return issues
+
+
+def _repair_activity_stage_overlaps(day_plans: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Move fixed service/rest stops out of split driving stages.
+
+    Deep-drive splitting inserts a required stop at a segment boundary. A provider
+    may return the next segment with the same timestamp as that stop; shift the
+    affected segment and all following segments instead of leaving a blocker.
+    """
+    movable_types = {"charging", "fueling", "rest", "service", "parking", "meal"}
+    for day in day_plans:
+        stages = sorted(day.get("stages", []), key=lambda item: item.get("sequence", 0))
+        activities = sorted(day.get("activities", []), key=lambda item: item.get("planned_start", ""))
+        # Walk the complete day timeline and push the later item forward when
+        # a provider returns overlapping timestamps.  Durations are retained,
+        # so meal/attraction/hotel blocks and movement stages remain usable.
+        timeline = sorted(
+            [*stages, *activities],
+            key=lambda item: (item.get("planned_start", ""), item.get("sequence", 0)),
+        )
+        previous_end: datetime | None = None
+        for item in timeline:
+            start = datetime.fromisoformat(item["planned_start"])
+            end = datetime.fromisoformat(item["planned_end"])
+            if previous_end is not None and start < previous_end:
+                duration = end - start
+                start = previous_end
+                end = start + duration
+                item["planned_start"] = start.isoformat()
+                item["planned_end"] = end.isoformat()
+            previous_end = end
+        for sequence, item in enumerate(sorted(stages + activities, key=lambda value: value.get("planned_start", ""))):
+            item["sequence"] = sequence
+        day["items"] = [
+            *({"type": "stage", "id": item["id"]} for item in stages),
+            *({"type": "activity", "id": item["id"]} for item in activities),
+        ]
+    return day_plans
 
 
 def _same_place(first: dict[str, Any] | None, second: dict[str, Any] | None) -> bool:

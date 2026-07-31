@@ -437,7 +437,7 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .preflight-panel {
   width: min(1280px, calc(100vw - 48px)); margin: 0 auto 12px; padding: 18px 22px;
   border: 1px solid #9bc7ff; background: rgba(247, 251, 255, .98);
-  box-shadow: 0 14px 36px rgba(35, 91, 166, .14);
+  border-radius: 26px; box-shadow: 0 14px 36px rgba(35, 91, 166, .14);
 }
 .preflight-heading { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; color: #1768dc; font-size: 13px; font-weight: 800; letter-spacing: .04em; }
 .preflight-heading b { padding: 5px 9px; border-radius: 999px; color: #1c5eae; background: #e6f1ff; letter-spacing: 0; }
@@ -463,6 +463,7 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
   margin: 12vh auto;
   padding: 36px;
   text-align: center;
+  border-radius: 26px;
 }
 
 .planning-state h2 {
@@ -505,6 +506,9 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
   background: #edf4ff;
   color: #35618d;
 }
+
+.planning-recovery { margin-top: 18px; padding: 14px 16px; border: 1px solid #f0c3bd; border-radius: 16px; background: #fff8f6; }
+.planning-error-detail { margin: 0; color: #a84b43; font-size: 14px; }
 
 .clarification-form {
   display: flex;

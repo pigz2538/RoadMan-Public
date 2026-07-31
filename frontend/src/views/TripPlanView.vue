@@ -9,6 +9,7 @@ import {
   fetchMockTrip,
   fetchPlanning,
   fetchTrip,
+  startPlanning,
   previewDeletePatch,
   type PlanningSnapshot,
 } from '../api/trips'
@@ -191,6 +192,23 @@ function formatDuration(minutes: number) {
   return `${Math.floor(minutes / 60)}小时${minutes % 60 ? `${minutes % 60}分钟` : ''}`
 }
 
+function humanizeDefault(value: string) {
+  const match = value.match(/^travelers=(\d+)$/)
+  if (match) return `按 ${match[1]} 人规划`
+  if (value.includes('=')) return '已应用规划默认值'
+  return value
+}
+
+async function retryPlanning() {
+  planningError.value = ''
+  try {
+    planningSnapshot.value = await startPlanning(String(route.params.tripId))
+    pollingTimer = window.setTimeout(() => void refreshPlanning(), 500)
+  } catch (error) {
+    planningError.value = error instanceof Error ? error.message : '规划任务无法重新启动'
+  }
+}
+
 function nameClass(value: string) {
   return {
     'text-long': value.length > 4,
@@ -276,14 +294,23 @@ watch(
     <div v-if="loading" class="page-state">正在加载武汉—庐山行程…</div>
     <section v-else-if="planningSnapshot && !store.currentDay" class="planning-state glass-card">
       <span class="eyebrow">LANGGRAPH PLANNING</span>
-      <h2>{{ planningSnapshot.clarification_question || '正在生成您的真实路线与行程安排…' }}</h2>
+      <h2>{{ planningSnapshot.status === 'failed' ? '这次行程未通过安全校验' : planningSnapshot.clarification_question || '正在生成您的真实路线与行程安排…' }}</h2>
       <div class="planning-meter">
         <i :style="{ width: `${store.planningEvent?.progress || planningSnapshot.progress.value || 3}%` }" />
       </div>
-      <p>{{ store.planningEvent?.label || planningSnapshot.progress.label || '规划任务已进入队列' }}</p>
+      <p>{{ planningSnapshot.status === 'failed' ? planningError || '规划校验未通过，请修改需求后重试。' : store.planningEvent?.label || planningSnapshot.progress.label || '规划任务已进入队列' }}</p>
       <div v-if="planningSnapshot.defaults_applied.length" class="visible-defaults">
         <strong>已采用的可见默认值</strong>
-        <span v-for="item in planningSnapshot.defaults_applied" :key="item">{{ item }}</span>
+        <span v-for="item in planningSnapshot.defaults_applied" :key="item">{{ humanizeDefault(item) }}</span>
+      </div>
+      <div v-if="planningSnapshot.status === 'failed'" class="planning-recovery">
+        <p class="planning-error-detail">
+          {{ planningSnapshot.verification_result?.issues?.[0]?.description || '请调整时间、交通方式或停留安排后重新规划。' }}
+        </p>
+        <div class="preflight-actions">
+          <button class="secondary-button" @click="router.push('/home')">返回修改需求</button>
+          <button class="primary-button" @click="retryPlanning">重新规划</button>
+        </div>
       </div>
       <form
         v-if="planningSnapshot.status === 'clarification_required'"
