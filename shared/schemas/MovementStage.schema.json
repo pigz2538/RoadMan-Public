@@ -244,6 +244,19 @@
           "default": false,
           "title": "Estimated",
           "type": "boolean"
+        },
+        "elevation_gain_m": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Elevation Gain M"
         }
       },
       "required": [
@@ -488,6 +501,19 @@
       "minimum": 0,
       "title": "Duration Minutes",
       "type": "integer"
+    },
+    "elevation_gain_m": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Elevation Gain M"
     },
     "traffic_summary": {
       "anyOf": [

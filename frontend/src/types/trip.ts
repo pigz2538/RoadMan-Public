@@ -50,11 +50,13 @@ export interface Stage {
     coordinates: Array<{ longitude: number; latitude: number }>
     road_name?: string
     estimated?: boolean
+    elevation_gain_m?: number
   }>
   planned_start: string
   planned_end: string
   distance_km: number
   duration_minutes: number
+  elevation_gain_m?: number
   traffic_summary?: string
   weather_summary?: string
   toll_fee?: { currency: string; minimum: number; maximum: number; estimated: boolean }

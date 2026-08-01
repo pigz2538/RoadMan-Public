@@ -41,7 +41,17 @@ class OllamaRequirementExtractor:
                 response.raise_for_status()
                 parsed = _parse_json_object(response.json().get("response", ""))
                 merged = _merge_extraction(deterministic, parsed)
-                if not re.search(r"[一二三四五六七八九十两\d]+\s*(?:人|位|口)", raw_text):
+                if merged.get("destination_name"):
+                    merged["destination_name"] = _normalize_place_name(
+                        str(merged["destination_name"])
+                    )
+                relation_travelers = deterministic.get("travelers")
+                has_explicit_travelers = bool(
+                    re.search(r"[一二三四五六七八九十两\d]+\s*(?:人|位|口)", raw_text)
+                )
+                if relation_travelers and not has_explicit_travelers:
+                    merged["travelers"] = relation_travelers
+                elif not has_explicit_travelers:
                     merged.pop("travelers", None)
                 return merged
         except (httpx.HTTPError, ValueError, TypeError, json.JSONDecodeError):
@@ -290,7 +300,7 @@ def deterministic_extract(raw_text: str, today: date) -> dict[str, Any]:
     )
     if route_match:
         result["origin_name"] = route_match.group("origin")
-        result["destination_name"] = route_match.group("destination")
+        result["destination_name"] = _normalize_place_name(route_match.group("destination"))
     else:
         origin_match = re.search(
             r"从(?P<origin>[\u4e00-\u9fffA-Za-z0-9·]{2,20}?)(?=出发|启程|去|前往|到)",
@@ -306,7 +316,9 @@ def deterministic_extract(raw_text: str, today: date) -> dict[str, Any]:
         if origin_match:
             result["origin_name"] = origin_match.group("origin")
         if destination_matches:
-            result["destination_name"] = destination_matches[-1]
+            result["destination_name"] = _normalize_place_name(destination_matches[-1])
+    if any(qualifier in raw_text for qualifier in ("及其周边", "周边地区", "周边", "附近", "一带")):
+        result["preferences"].append("目的地周边")
 
     weekday_map = {"一": 0, "二": 1, "三": 2, "四": 3, "五": 4, "六": 5, "日": 6, "天": 6}
     weekday_match = re.search(r"周([一二三四五六日天])", raw_text)
@@ -328,10 +340,23 @@ def deterministic_extract(raw_text: str, today: date) -> dict[str, Any]:
     traveler_match = re.search(r"([一二三四五六七八九十两\d]+)\s*(?:人|位|口)", raw_text)
     if traveler_match:
         result["travelers"] = _cn_number(traveler_match.group(1))
+    elif any(keyword in raw_text for keyword in ("情侣", "夫妻", "两口子", "两人", "二人")):
+        result["travelers"] = 2
+    elif "一家三口" in raw_text:
+        result["travelers"] = 3
     for keyword in ("自然风景", "自然景观", "山水风景", "亲子", "轻松", "省钱", "不走夜路", "新能源"):
         if keyword in raw_text:
             result["preferences"].append(keyword)
     return result
+
+
+def _normalize_place_name(value: str) -> str:
+    """Remove natural-language radius qualifiers before geocoding a place."""
+    normalized = re.sub(r"\s+", "", value).strip("，,。；;、")
+    for suffix in ("及其周边地区", "及其周边", "周边地区", "周边", "附近", "一带"):
+        if normalized.endswith(suffix) and len(normalized) > len(suffix):
+            return normalized[: -len(suffix)]
+    return normalized
 
 
 def _cn_number(value: str) -> int | None:

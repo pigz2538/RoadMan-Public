@@ -356,6 +356,23 @@ function roadNames(stage: NonNullable<typeof store.currentStage>) {
   return [...new Set(stage.route_segments.map((item) => item.road_name).filter(Boolean))].join(' / ') || '以高德实时规划为准'
 }
 
+function stageConditionLabel(mode: string) {
+  return mode === 'walking' || mode === 'riding' ? '路线起伏' : mode === 'transit' ? '班次' : '路况'
+}
+
+function stageCondition(stage: NonNullable<typeof store.currentStage>) {
+  if (stage.traffic_summary) {
+    return stage.traffic_summary.replace('当前路况参考（非未来预测）', '当前路况')
+  }
+  if (stage.mode === 'walking' || stage.mode === 'riding') {
+    return stage.elevation_gain_m != null
+      ? `总爬升约 ${Math.round(stage.elevation_gain_m)} m`
+      : '高程数据暂不可用'
+  }
+  if (stage.mode === 'transit') return '按高德当前班次规划'
+  return '当前路况：高德暂无分段实时数据'
+}
+
 function modeEmoji(mode: string, transitType?: string) {
   if (mode === 'transit') {
     return { bus: '🚌', subway: '🚇', shuttle: '🚐' }[transitType ?? ''] ?? '🚌'
@@ -601,7 +618,7 @@ watch(
                 </div>
                 <dl>
                   <div><dt>道路</dt><dd>{{ roadNames(item.stage) }}</dd></div>
-                  <div><dt>路况</dt><dd>{{ item.stage.traffic_summary || '以高德实时路况为准' }}</dd></div>
+                  <div><dt>{{ stageConditionLabel(item.stage.mode) }}</dt><dd>{{ stageCondition(item.stage) }}</dd></div>
                   <div><dt>天气</dt><dd>{{ item.stage.weather_summary || store.trip?.days[item.dayIndex]?.weather_summary || '出发前更新' }}</dd></div>
                 </dl>
                 <footer>

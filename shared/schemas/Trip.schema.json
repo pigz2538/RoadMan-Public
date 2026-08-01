@@ -74,6 +74,42 @@
           "default": null,
           "title": "User Note"
         },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "image_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Image Url"
+        },
+        "detail_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Detail Url"
+        },
         "ticket_or_price": {
           "anyOf": [
             {
@@ -426,6 +462,19 @@
           "title": "Duration Minutes",
           "type": "integer"
         },
+        "elevation_gain_m": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Elevation Gain M"
+        },
         "traffic_summary": {
           "anyOf": [
             {
@@ -705,6 +754,19 @@
           "default": false,
           "title": "Estimated",
           "type": "boolean"
+        },
+        "elevation_gain_m": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Elevation Gain M"
         }
       },
       "required": [

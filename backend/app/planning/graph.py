@@ -6,6 +6,7 @@ from typing import Any, Literal
 from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
+import httpx
 from langgraph.graph import END, START, StateGraph
 
 from ..core.config import Settings
@@ -163,6 +164,7 @@ def build_planning_graph(
             registry,
             request["destination"],
             state["trip_id"],
+            nearby=origin,
         )
         request["origin"] = origin
         request["destination"] = destination
@@ -723,10 +725,67 @@ def build_planning_graph(
         )
         day_defs = state["day_plans"]
         plans: list[dict[str, Any]] = []
+        elevation_sources: list[dict[str, Any]] = []
+        elevation_cache: dict[str, float | None] = {}
+
+        async def prepare_route(route: dict[str, Any]) -> dict[str, Any]:
+            """Attach best-effort terrain gain to walking/riding routes."""
+            if not settings.enable_route_elevation:
+                return route
+            data = route.get("data") or {}
+            mode = data.get("selected_mode")
+            geometry = data.get("geometry") or []
+            if mode not in {"walking", "riding"} or len(geometry) < 2:
+                return route
+            cache_key = ";".join(
+                f"{point.get('longitude')},{point.get('latitude')}"
+                for point in geometry[:: max(1, len(geometry) // 24)]
+                if isinstance(point, dict)
+            )
+            if cache_key in elevation_cache:
+                data["elevation_gain_m"] = elevation_cache[cache_key]
+                return route
+            sampled = [
+                point
+                for point in geometry[:: max(1, len(geometry) // 24)]
+                if isinstance(point, dict) and point.get("longitude") is not None and point.get("latitude") is not None
+            ]
+            if sampled[-1] is not geometry[-1] and isinstance(geometry[-1], dict):
+                sampled.append(geometry[-1])
+            try:
+                async with httpx.AsyncClient(timeout=3.5) as client:
+                    response = await client.get(
+                        "https://api.open-meteo.com/v1/forecast",
+                        params={
+                            "latitude": ",".join(str(point["latitude"]) for point in sampled),
+                            "longitude": ",".join(str(point["longitude"]) for point in sampled),
+                            "current": "temperature_2m",
+                        },
+                    )
+                    response.raise_for_status()
+                    payload = response.json()
+                entries = payload if isinstance(payload, list) else [payload]
+                elevations = [float(item["elevation"]) for item in entries if item.get("elevation") is not None]
+                gain = round(sum(max(0.0, current - previous) for previous, current in zip(elevations, elevations[1:])), 1)
+            except (httpx.HTTPError, ValueError, TypeError, KeyError):
+                gain = None
+            elevation_cache[cache_key] = gain
+            data["elevation_gain_m"] = gain
+            if gain is not None:
+                elevation_sources.append(
+                    SourceRecord(
+                        provider="Open-Meteo",
+                        title="路线高程 API",
+                        url="https://api.open-meteo.com/v1/forecast",
+                    ).model_dump(mode="json")
+                )
+            return route
+
         for index, day_def in enumerate(day_defs):
             stages: list[MovementStage] = []
             day_date = date.fromisoformat(day_def["date"])
             if index == 0:
+                outbound = await prepare_route(outbound)
                 stages.append(
                     _movement_stage(
                         day_id=f"day_{index + 1}",
@@ -751,6 +810,7 @@ def build_planning_graph(
                 ),
                 key=lambda item: item["sequence"],
             ):
+                local["route"] = await prepare_route(local["route"])
                 stage = _movement_stage(
                     day_id=f"day_{index + 1}",
                     sequence=len(stages),
@@ -766,6 +826,7 @@ def build_planning_graph(
                 stages.append(stage)
                 local_start = stage.planned_end + timedelta(minutes=105)
             if index == len(day_defs) - 1:
+                inbound = await prepare_route(inbound)
                 return_start = max(
                     local_start,
                     datetime.combine(day_date, time(14, 30), tzinfo=SHANGHAI),
@@ -797,7 +858,11 @@ def build_planning_graph(
                 ),
             )
             plans.append(plan.model_dump(mode="json"))
-        return {"day_plans": plans, "progress": {"node": "build_stages", "value": 78}}
+        return {
+            "day_plans": plans,
+            "sources": [*state.get("sources", []), *elevation_sources],
+            "progress": {"node": "build_stages", "value": 78},
+        }
 
     async def sample_weather(state: RoadManState) -> dict[str, Any]:
         await emit(
@@ -1262,6 +1327,7 @@ async def _ensure_coordinates(
     registry: SkillRegistry,
     place: dict[str, Any],
     trip_id: str,
+    nearby: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if place.get("coordinates"):
         return place
@@ -1273,12 +1339,74 @@ async def _ensure_coordinates(
     if not result.success or not isinstance(result.data, dict):
         return place
     longitude, latitude = result.data["location"].split(",", 1)
-    return {
+    resolved = {
         **place,
         "address": result.data.get("formatted_address"),
         "city": result.data.get("city") or place.get("city"),
+        "province": result.data.get("province"),
         "coordinates": {"longitude": float(longitude), "latitude": float(latitude)},
     }
+    # A short scenic name can be ambiguous in AMap geocoding (乌镇, 南山, etc.).
+    # If the first geocode is implausibly far from the departure point, use a
+    # nearby POI search to select the matching local attraction instead of
+    # silently planning a 1,900 km detour.
+    nearby_coordinates = (nearby or {}).get("coordinates") or {}
+    if nearby_coordinates:
+        distance = _haversine_km(
+            RoutePoint(
+                longitude=float(nearby_coordinates["longitude"]),
+                latitude=float(nearby_coordinates["latitude"]),
+            ),
+            RoutePoint(longitude=float(longitude), latitude=float(latitude)),
+        )
+        if distance > 250 and len(str(place.get("name") or "")) <= 12:
+            poi_result = await registry.execute(
+                "amap.poi",
+                {
+                    "keywords": place["name"],
+                    "location": f"{nearby_coordinates['longitude']},{nearby_coordinates['latitude']}",
+                    "radius": 50000,
+                    "page_size": 10,
+                },
+                SkillContext(trip_id=trip_id),
+            )
+            items = poi_result.data.get("items", []) if poi_result.success and isinstance(poi_result.data, dict) else []
+            normalized_name = str(place["name"]).replace(" ", "").lower()
+            candidates = [
+                item for item in items
+                if item.get("name") and item.get("location")
+                and (
+                    normalized_name in str(item["name"]).replace(" ", "").lower()
+                    or str(item["name"]).replace(" ", "").lower() in normalized_name
+                )
+            ]
+            if candidates:
+                chosen = min(
+                    candidates,
+                    key=lambda item: _haversine_km(
+                        RoutePoint(
+                            longitude=float(nearby_coordinates["longitude"]),
+                            latitude=float(nearby_coordinates["latitude"]),
+                        ),
+                        RoutePoint(
+                            longitude=float(item["location"].split(",", 1)[0]),
+                            latitude=float(item["location"].split(",", 1)[1]),
+                        ),
+                    ),
+                )
+                item_longitude, item_latitude = chosen["location"].split(",", 1)
+                resolved.update(
+                    {
+                        "name": chosen.get("name") or place["name"],
+                        "address": chosen.get("address") or resolved.get("address"),
+                        "city": chosen.get("city") or resolved.get("city"),
+                        "coordinates": {
+                            "longitude": float(item_longitude),
+                            "latitude": float(item_latitude),
+                        },
+                    }
+                )
+    return resolved
 
 
 async def _route(
@@ -1440,17 +1568,25 @@ def _movement_stage(
         duration_minutes=duration,
         road_name=" / ".join(road_names[:3]) or None,
         toll=bool(data.get("tolls_cny")),
+        elevation_gain_m=data.get("elevation_gain_m"),
     )
     traffic_summary = data.get("traffic_summary")
     if data.get("selected_mode") == "driving" and traffic_summary:
         if start_at.date() != date.today():
-            traffic_summary = f"当前路况参考（非未来预测）：{traffic_summary}"
+            traffic_summary = f"当前路况：{traffic_summary}"
     elif data.get("selected_mode") != "driving":
-        traffic_summary = {
-            "transit": "公共交通按高德当前班次规划",
-            "walking": "步行路段不适用机动车实时路况",
-            "riding": "骑行路段不适用机动车实时路况",
-        }.get(data.get("selected_mode"), "按高德路线规划")
+        mode = data.get("selected_mode")
+        if mode in {"walking", "riding"}:
+            gain = data.get("elevation_gain_m")
+            traffic_summary = (
+                f"路线起伏：总爬升约 {gain:g} m"
+                if gain is not None
+                else "路线起伏：高程数据暂不可用"
+            )
+        else:
+            traffic_summary = {
+                "transit": "公共交通按高德当前班次规划",
+            }.get(mode, "按高德路线规划")
     return MovementStage(
         day_id=day_id,
         sequence=sequence,
@@ -1464,6 +1600,7 @@ def _movement_stage(
         planned_end=start_at + timedelta(minutes=duration),
         distance_km=data["distance_km"],
         duration_minutes=duration,
+        elevation_gain_m=data.get("elevation_gain_m"),
         traffic_summary=traffic_summary,
         toll_fee={
             "minimum": data.get("tolls_cny", 0),

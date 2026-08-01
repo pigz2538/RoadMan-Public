@@ -218,6 +218,7 @@ class RouteSegment(BaseModel):
     road_name: str | None = None
     toll: bool = False
     estimated: bool = False
+    elevation_gain_m: float | None = Field(default=None, ge=0)
 
 
 class EnergyEstimate(BaseModel):
@@ -254,6 +255,7 @@ class MovementStage(BaseModel):
     planned_end: datetime
     distance_km: float = Field(ge=0)
     duration_minutes: int = Field(ge=0)
+    elevation_gain_m: float | None = Field(default=None, ge=0)
     traffic_summary: str | None = None
     weather_summary: str | None = None
     toll_fee: MoneyRange | None = None

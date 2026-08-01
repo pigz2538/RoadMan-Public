@@ -36,6 +36,7 @@ services:
       OPENTRIPMAP_API_KEY: ${OPENTRIPMAP_API_KEY:-}
       OLLAMA_API_KEY: ${OLLAMA_API_KEY:-}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-deepseek-v4-flash:cloud}
+      ENABLE_ROUTE_ELEVATION: "true"
       LOAD_LOCAL_SKILL_CREDENTIALS: "true"
       CORS_ORIGINS: http://localhost:8080
       UPLOAD_DIR: /app/data/uploads
@@ -68,6 +69,7 @@ services:
       OPENTRIPMAP_API_KEY: ${OPENTRIPMAP_API_KEY:-}
       OLLAMA_API_KEY: ${OLLAMA_API_KEY:-}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-deepseek-v4-flash:cloud}
+      ENABLE_ROUTE_ELEVATION: "true"
       LOAD_LOCAL_SKILL_CREDENTIALS: "true"
       UPLOAD_DIR: /app/data/uploads
       FILE_RETENTION_DAYS: ${FILE_RETENTION_DAYS:-30}

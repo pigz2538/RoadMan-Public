@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     ollama_timeout_seconds: float = 90
     enable_llm_requirement_extraction: bool = True
     enable_poi_web_enrichment: bool = True
+    enable_route_elevation: bool = False
     poi_web_timeout_seconds: float = 1.8
     max_clarification_rounds: int = 3
     planning_state_ttl_seconds: int = 24 * 60 * 60

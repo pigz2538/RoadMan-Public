@@ -7,7 +7,7 @@ from app.core.config import Settings
 from app.api.trips import get_trip_risks, get_trip_services
 from app.db import SessionLocal, create_tables
 from app.domain.models import SkillResult, TripCreate, TripRequest, VehicleProfile
-from app.planning.graph import build_planning_graph
+from app.planning.graph import _ensure_coordinates, _movement_stage, build_planning_graph
 from app.planning.llm import deterministic_extract
 from app.planning.runner import run_planning
 from app.repositories import TripRepository, VehicleRepository
@@ -25,6 +25,82 @@ def test_requirement_extractor_handles_departure_and_later_arrival_time():
     assert extracted["origin_name"] == "武汉"
     assert extracted["destination_name"] == "北京"
     assert "travelers" not in extracted
+
+
+def test_requirement_extractor_understands_couple_and_destination_radius():
+    extracted = deterministic_extract(
+        "情侣出游，从湖州南浔到乌镇及其周边，玩两天",
+        date(2026, 8, 1),
+    )
+
+    assert extracted["travelers"] == 2
+    assert extracted["destination_name"] == "乌镇"
+    assert "目的地周边" in extracted["preferences"]
+
+
+def test_non_driving_stage_exposes_total_elevation_gain():
+    stage = _movement_stage(
+        day_id="day_1",
+        sequence=0,
+        title="骑行游览接驳",
+        origin={"name": "起点", "coordinates": {"longitude": 120.4, "latitude": 30.8}},
+        destination={"name": "终点", "coordinates": {"longitude": 120.5, "latitude": 30.7}},
+        route={
+            "data": {
+                "selected_mode": "riding",
+                "distance_km": 8.2,
+                "duration_minutes": 35,
+                "geometry": [
+                    {"longitude": 120.4, "latitude": 30.8},
+                    {"longitude": 120.5, "latitude": 30.7},
+                ],
+                "elevation_gain_m": 186,
+            },
+            "sources": [],
+        },
+        start_at=datetime(2026, 8, 1, 9, 0),
+    )
+
+    assert stage.elevation_gain_m == 186
+    assert stage.traffic_summary == "路线起伏：总爬升约 186 m"
+
+
+@pytest.mark.asyncio
+async def test_ambiguous_destination_is_corrected_by_nearby_poi():
+    class AmbiguousRegistry:
+        async def execute(self, name, payload, _):
+            if name == "amap.geocode":
+                return SkillResult(
+                    success=True,
+                    provider="fake-amap",
+                    data={
+                        "formatted_address": "陕西省榆林市佳县乌镇",
+                        "location": "110.364601,37.936564",
+                        "city": "榆林市",
+                    },
+                )
+            return SkillResult(
+                success=True,
+                provider="fake-amap",
+                data={
+                    "items": [
+                        {
+                            "name": "乌镇风景区",
+                            "location": "120.486173,30.748979",
+                            "address": "石佛南路18号",
+                            "city": "嘉兴市",
+                        }
+                    ]
+                },
+            )
+
+    origin = await _ensure_coordinates(AmbiguousRegistry(), {"name": "湖州南浔"}, "trip")
+    destination = await _ensure_coordinates(
+        AmbiguousRegistry(), {"name": "乌镇"}, "trip", nearby=origin | {"coordinates": {"longitude": 120.418244, "latitude": 30.850835}}
+    )
+
+    assert destination["name"] == "乌镇风景区"
+    assert destination["coordinates"]["longitude"] == 120.486173
 
 
 class FakeGeocodeAdapter(SkillAdapter):

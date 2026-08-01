@@ -108,7 +108,8 @@
         "preview",
         "accepted",
         "rejected",
-        "applied"
+        "applied",
+        "rolled_back"
       ],
       "title": "Status",
       "type": "string"
