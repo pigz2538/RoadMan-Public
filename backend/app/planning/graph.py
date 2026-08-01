@@ -74,9 +74,21 @@ def build_planning_graph(
             current["origin"] = {"name": extracted["origin_name"]}
         if extracted.get("destination_name") and not current.get("destination"):
             current["destination"] = {"name": extracted["destination_name"]}
+        defaults = set(current.get("defaults_applied", []))
         for field in ("start_date", "end_date", "departure_time", "return_time", "travelers"):
-            if extracted.get(field) is not None and current.get(field) is None:
+            if extracted.get(field) is not None and (
+                current.get(field) is None
+                or (field == "travelers" and "travelers=1" in defaults)
+            ):
                 current[field] = extracted[field]
+                if field == "travelers" and extracted[field] != 1:
+                    # A retry may be starting from a request that previously
+                    # applied the visible ``travelers=1`` default.  Once the
+                    # requirement Agent has resolved a semantic party size,
+                    # remove that stale marker so the UI and audit trail do
+                    # not claim the value was still a default.
+                    defaults.discard("travelers=1")
+        current["defaults_applied"] = list(dict.fromkeys(defaults))
         current["raw_text"] = state["raw_input"]
         current["preferences"] = list(
             dict.fromkeys([*current.get("preferences", []), *extracted.get("preferences", [])])

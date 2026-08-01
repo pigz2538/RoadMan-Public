@@ -71,7 +71,10 @@ async def execute_job(_: dict, job_id: str) -> dict:
         else:
             result = {"accepted": True, "kind": kind, "payload": payload}
     except Exception as exc:
-        error_message = str(exc).strip()[:240] or type(exc).__name__
+        if isinstance(exc, KeyError):
+            error_message = "行程数据缺少必要标识，已停止保存并可重新规划。"
+        else:
+            error_message = str(exc).strip()[:240] or type(exc).__name__
         async with SessionLocal() as session:
             row = await session.get(JobRow, job_id)
             if row:

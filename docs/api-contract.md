@@ -140,3 +140,5 @@ SSE 使用命名事件，每条事件包含单调递增的 `id:`。客户端断�
 - `GET /api/v1/trips` 返回已持久化的历史规划，首页历史规划下拉可直接恢复进行中或已完成行程。
 - `POST /api/v1/skills/weather/forecast` 接受浏览器定位或武汉回退坐标，首页展示当前温度、天气和位置来源。
 - LangGraph 的 `review_daily_schedule` 节点是首轮旅游编排后的第二次日程检查；它核验每日时间覆盖和三餐住宿，并在没有可安全插入候选时写入可调整的 `rest` 活动。
+- 规划任务对 Agent 生成的日期对象会补齐稳定 `day_id`；内部异常会转换为结构化的 `PLANNING_EXECUTION_FAILED` 中文说明。Requirement Agent 网络不可用时仅启用语义人数降级，不覆盖有效的 Agent 输出，也不把情侣需求伪装成“默认 1 人”。
+- 旅游编排同样会为漏出日期标题的对象补齐“第 N 天”，使缺少展示字段不会阻断最终 Trip 持久化。

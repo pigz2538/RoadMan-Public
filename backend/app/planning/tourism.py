@@ -20,6 +20,16 @@ def schedule_tourism_activities(
     }
 
     for day_index, day in enumerate(day_plans):
+        # Some agent-produced day dictionaries omit the optional model id.
+        # Materialize a stable id before creating activity ids so one malformed
+        # day cannot abort the entire planning job.
+        day.setdefault("id", f"day_{day.get('day_index', day_index + 1)}")
+        # ``title`` is required by the persisted DayPlan model, but is not
+        # semantically important to the scheduling pass.  Agents may omit it
+        # while returning an otherwise usable day; give it a localized,
+        # deterministic fallback instead of failing the whole planning job at
+        # the final persistence step.
+        day.setdefault("title", f"第 {day.get('day_index', day_index + 1)} 天")
         activities = list(day.get("activities", []))
         stages = sorted(day.get("stages", []), key=lambda item: item.get("sequence", 0))
         _reschedule_meals(day, activities, stages)

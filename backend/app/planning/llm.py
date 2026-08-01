@@ -18,7 +18,7 @@ class OllamaRequirementExtractor:
             not self.settings.enable_llm_requirement_extraction
             or not self.settings.ollama_api_key
         ):
-            return deterministic
+            return _offline_semantic_fallback(deterministic, raw_text)
         prompt = (
             "You are RoadMan Requirement Agent. Extract requirements only; never plan a route. "
             f"Today is {today.isoformat()}. Return ONLY one valid JSON object (no markdown, no explanation) "
@@ -81,9 +81,9 @@ class OllamaRequirementExtractor:
                     merged["travelers"] = _coerce_travelers(merged.get("travelers"))
                 if merged.get("travelers") is None:
                     merged.pop("travelers", None)
-                return merged
+                return _offline_semantic_fallback(merged, raw_text)
         except (httpx.HTTPError, ValueError, TypeError, json.JSONDecodeError):
-            return deterministic
+            return _offline_semantic_fallback(deterministic, raw_text)
 
 
 class OllamaRequirementValidator:
@@ -425,6 +425,23 @@ def _coerce_travelers(value: Any) -> int | None:
         if match:
             return _cn_number(match.group(1))
     return None
+
+
+def _offline_semantic_fallback(extracted: dict[str, Any], raw_text: str) -> dict[str, Any]:
+    """Keep semantic party-size hints usable when the cloud Agent is offline.
+
+    This is deliberately only a degradation path: the Requirement Agent's
+    value wins whenever it returns a valid count. It prevents a transient
+    Ollama/DNS failure from silently turning an explicit couple trip into the
+    visible default of one traveler.
+    """
+    result = dict(extracted)
+    if result.get("travelers") is None:
+        if re.search(r"情侣|夫妻|伴侣|二人|两人|两位", raw_text):
+            result["travelers"] = 2
+        elif re.search(r"一家三口|三人|三位", raw_text):
+            result["travelers"] = 3
+    return result
 
 
 def _normalize_clock(value: Any) -> str | None:

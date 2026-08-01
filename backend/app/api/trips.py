@@ -367,7 +367,10 @@ async def preflight_trip(
         "end_date": extracted.get("end_date"),
         "departure_time": extracted.get("departure_time"),
         "return_time": extracted.get("return_time"),
-        "travelers": extracted.get("travelers") or 1,
+        # Keep an unknown party size visible as unknown until the user or the
+        # Requirement Agent supplies it; do not present the runtime fallback
+        # of one traveler as if it came from the user's request.
+        "travelers": extracted.get("travelers"),
         "preferences": extracted.get("preferences", []),
         "clarifications": [
             value.strip() for value in payload.answers.values() if value.strip()

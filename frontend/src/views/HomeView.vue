@@ -385,7 +385,7 @@ function activate(label: string) {
           <dl class="preflight-summary">
             <div><dt>路线</dt><dd>{{ preflight.summary.origin_name }} → {{ preflight.summary.destination_name }}</dd></div>
             <div><dt>日期</dt><dd>{{ preflight.summary.start_date }} 至 {{ preflight.summary.end_date }}</dd></div>
-            <div><dt>人数</dt><dd>{{ preflight.summary.travelers || 1 }} 人</dd></div>
+            <div><dt>人数</dt><dd>{{ preflight.summary.travelers ?? '待确认' }}{{ preflight.summary.travelers ? ' 人' : '' }}</dd></div>
             <div v-if="preflight.summary.clarifications?.length">
               <dt>已确认</dt><dd>{{ preflight.summary.clarifications.join('；') }}</dd>
             </div>

@@ -136,6 +136,20 @@ def test_daily_review_is_idempotent_and_does_not_duplicate_hotels():
     assert sum(item["type"] == "attraction" for item in second[0]["activities"]) >= 2
 
 
+def test_tourism_scheduler_materializes_missing_day_id():
+    days = [{
+        "date": "2026-08-02",
+        "items": [],
+        "activities": [],
+        "stages": [],
+    }]
+
+    scheduled = schedule_tourism_activities(days, {"attractions": [], "hotels": [], "meals": []})
+
+    assert scheduled[0]["id"] == "day_1"
+    assert scheduled[0]["title"] == "第 1 天"
+
+
 @pytest.mark.asyncio
 async def test_flyai_hotel_adapter_degrades_when_cli_is_missing(monkeypatch):
     monkeypatch.setattr("app.skills.flyai.shutil.which", lambda _: None)
