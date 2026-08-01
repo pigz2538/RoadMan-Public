@@ -118,6 +118,48 @@ test('规划页支持天、阶段和节点选择', async ({ page }) => {
   await expect(page.getByText('高德 JSAPI · 真实道路轨迹')).toBeVisible()
 })
 
+test('规划校验失败以中性弹窗展示原因和偏好建议', async ({ page }) => {
+  await page.route('**/api/v1/trips/failure-demo', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        id: 'failure-demo',
+        title: '需要调整的行程',
+        status: 'failed',
+        days: [],
+        warnings: [],
+        request: { raw_text: '自然景观旅行', defaults_applied: [], preferences: ['自然景观', '不走夜路'] },
+      }),
+    })
+  })
+  await page.route('**/api/v1/trips/failure-demo/planning', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        trip_id: 'failure-demo',
+        status: 'failed',
+        missing_fields: [],
+        clarification_round: 0,
+        defaults_applied: [],
+        progress: { node: 'verify_plan', value: 100 },
+        verification_result: {
+          passed: false,
+          issues: [{ code: 'TIME_WINDOW', description: '连续移动时间超出可接受范围。' }],
+        },
+      }),
+    })
+  })
+
+  await page.goto('/trips/failure-demo/plan')
+  const dialog = page.getByRole('alertdialog', { name: '这次安排需要调整' })
+  await expect(dialog).toBeVisible()
+  await expect(dialog).toContainText('连续移动时间超出可接受范围')
+  await expect(dialog).toContainText('自然景观、不走夜路')
+  await expect(dialog).toContainText('返回修改需求')
+  await expect(dialog).toContainText('重新规划')
+  await expect(page.locator('.planning-error')).toHaveCount(0)
+})
+
 test('Agent 备选方案先预览再应用', async ({ page }) => {
   await page.route('**/api/v1/trips/trip_wuhan_lushan_demo/recommendations?category=attractions', async (route) => {
     await route.fulfill({

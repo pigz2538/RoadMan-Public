@@ -8,7 +8,7 @@ from app.api.trips import get_trip_risks, get_trip_services
 from app.db import SessionLocal, create_tables
 from app.domain.models import SkillResult, TripCreate, TripRequest, VehicleProfile
 from app.planning.graph import _ensure_coordinates, _movement_stage, build_planning_graph
-from app.planning.llm import deterministic_extract
+from app.planning.llm import OllamaRequirementExtractor, deterministic_extract
 from app.planning.runner import run_planning
 from app.repositories import TripRepository, VehicleRepository
 from app.services.sse import sse_manager
@@ -27,15 +27,94 @@ def test_requirement_extractor_handles_departure_and_later_arrival_time():
     assert "travelers" not in extracted
 
 
-def test_requirement_extractor_understands_couple_and_destination_radius():
+def test_deterministic_extractor_does_not_guess_relationship_based_party_size():
     extracted = deterministic_extract(
+        "情侣出游，从湖州南浔到乌镇及其周边，玩两天",
+        date(2026, 8, 1),
+    )
+
+    assert "travelers" not in extracted
+    assert extracted["destination_name"] == "乌镇"
+    assert "目的地周边" in extracted["preferences"]
+
+
+@pytest.mark.asyncio
+async def test_requirement_agent_decides_semantic_party_size(monkeypatch):
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "response": (
+                    '{"origin_name":"湖州南浔","destination_name":"乌镇及其周边",'
+                    '"start_date":"2026-08-01","end_date":"2026-08-02",'
+                    '"travelers":2,"preferences":["目的地周边"]}'
+                )
+            }
+
+    class FakeClient:
+        prompt = ""
+
+        def __init__(self, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return None
+
+        async def post(self, _url, **kwargs):
+            FakeClient.prompt = kwargs["json"]["prompt"]
+            return FakeResponse()
+
+    monkeypatch.setattr("app.planning.llm.httpx.AsyncClient", FakeClient)
+    extractor = OllamaRequirementExtractor(
+        Settings(ollama_api_key="test-key", enable_llm_requirement_extraction=True)
+    )
+
+    extracted = await extractor.extract(
         "情侣出游，从湖州南浔到乌镇及其周边，玩两天",
         date(2026, 8, 1),
     )
 
     assert extracted["travelers"] == 2
     assert extracted["destination_name"] == "乌镇"
-    assert "目的地周边" in extracted["preferences"]
+    assert "根据语义判断同行人数" in FakeClient.prompt
+
+
+@pytest.mark.asyncio
+async def test_requirement_agent_preserves_explicit_party_size(monkeypatch):
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"response": '{"travelers":2}'}
+
+    class FakeClient:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return None
+
+        async def post(self, *_args, **_kwargs):
+            return FakeResponse()
+
+    monkeypatch.setattr("app.planning.llm.httpx.AsyncClient", FakeClient)
+    extractor = OllamaRequirementExtractor(Settings(ollama_api_key="test-key"))
+
+    extracted = await extractor.extract(
+        "情侣出游，从武汉到庐山，同行 4 人",
+        date(2026, 8, 1),
+    )
+
+    assert extracted["travelers"] == 4
 
 
 def test_non_driving_stage_exposes_total_elevation_gain():

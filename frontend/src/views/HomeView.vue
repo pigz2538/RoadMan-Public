@@ -24,6 +24,7 @@ const voiceReserved = ref(false)
 const planning = ref(false)
 const preflightChecking = ref(false)
 const planningError = ref('')
+const planningServiceError = ref('')
 const preflight = ref<PreflightResult | null>(null)
 const clarificationAnswers = ref<Record<string, string>>({})
 const clarificationIndex = ref(0)
@@ -80,6 +81,7 @@ function resetPreflight() {
   clarificationAnswers.value = {}
   clarificationIndex.value = 0
   planningError.value = ''
+  planningServiceError.value = ''
 }
 
 async function checkPreflight(confirmed = false) {
@@ -101,7 +103,7 @@ async function checkPreflight(confirmed = false) {
     await startPlanningRequest(trip.id)
     await router.push(`/trips/${trip.id}/plan?planning=1`)
   } catch (error) {
-    planningError.value = error instanceof Error ? error.message : '规划服务暂不可用'
+    planningServiceError.value = error instanceof Error ? error.message : '规划服务暂不可用'
   } finally {
     preflightChecking.value = false
     planning.value = false
@@ -182,9 +184,9 @@ function activate(label: string) {
           alt="可旋转的 RoadMan 3D 车辆模型"
           camera-controls
           v-bind="vehicleMotionAttributes"
-          camera-orbit="35deg 70deg 220%"
-          min-camera-orbit="auto auto 145%"
-          max-camera-orbit="auto auto 360%"
+          camera-orbit="35deg 70deg 170%"
+          min-camera-orbit="auto auto 115%"
+          max-camera-orbit="auto auto 300%"
           field-of-view="28deg"
           min-field-of-view="26deg"
           max-field-of-view="38deg"
@@ -334,7 +336,6 @@ function activate(label: string) {
           </div>
         </div>
       </div>
-      <p v-if="planningError" class="planning-error">{{ planningError }}</p>
 
       <div class="quick-grid">
         <button v-for="[icon, label] in quickActions" :key="label" @click="prompt = String(label)">
@@ -342,6 +343,29 @@ function activate(label: string) {
         </button>
       </div>
     </section>
+
+    <Transition name="failure-modal">
+      <div
+        v-if="planningServiceError"
+        class="failure-dialog-backdrop"
+        role="presentation"
+        @click.self="planningServiceError = ''"
+      >
+        <section class="failure-dialog glass-card" role="alertdialog" aria-modal="true" aria-labelledby="home-failure-title">
+          <div class="failure-dialog-icon" aria-hidden="true">!</div>
+          <div>
+            <span class="failure-dialog-kicker">暂时无法开始规划</span>
+            <h2 id="home-failure-title">需求还需要调整</h2>
+            <p>{{ planningServiceError }}</p>
+            <div class="failure-dialog-hint">保留你的原始输入，你可以关闭提示后补充时间、目的地或交通方式。</div>
+          </div>
+          <div class="failure-dialog-actions">
+            <button class="secondary-button" @click="planningServiceError = ''">返回修改</button>
+            <button class="primary-button" @click="planningServiceError = ''; checkPreflight(false)">重新检查</button>
+          </div>
+        </section>
+      </div>
+    </Transition>
 
     <Transition name="drawer">
       <aside v-if="drawerOpen" class="vehicle-drawer glass-card">

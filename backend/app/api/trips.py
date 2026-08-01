@@ -169,16 +169,18 @@ async def preflight_trip(
 ) -> PreflightResponse:
     extracted = dict(payload.previous_extracted)
     if not extracted:
+        settings = get_settings()
         fast_extracted = deterministic_extract(payload.raw_text, date.today())
-        core_fields = ("origin_name", "destination_name", "start_date", "end_date")
-        extracted = (
-            fast_extracted
-            if all(fast_extracted.get(field) for field in core_fields)
-            else await OllamaRequirementExtractor(get_settings()).extract(
+        # Let the Requirement Agent interpret semantic details (for example
+        # relationship-based party size) whenever it is configured. The
+        # deterministic parser remains the offline fallback only.
+        if settings.enable_llm_requirement_extraction and settings.ollama_api_key:
+            extracted = await OllamaRequirementExtractor(settings).extract(
                 payload.raw_text,
                 date.today(),
             )
-        )
+        else:
+            extracted = fast_extracted
     for key, value in payload.answers.items():
         value = value.strip()
         if not value:

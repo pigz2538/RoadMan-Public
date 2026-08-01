@@ -129,3 +129,4 @@ SSE 使用命名事件，每条事件包含单调递增的 `id:`。客户端断�
 - 补丁应用接口在事务提交后重新读取 canonical Trip；前端也会重新 hydrate，保证连续删除、加入、替换操作不会恢复旧活动。
 - `GET /api/v1/trips/{trip_id}/roadbook.html`：统一 HTML 报告模板，包含路线图、景点/餐饮/住宿图片卡片和逐日阶段详情。
 - `MovementStage` 与 `RouteSegment` 支持可选 `elevation_gain_m`；步行/骑行阶段可展示路线总爬升。Docker 默认开启 `ENABLE_ROUTE_ELEVATION`，高程服务失败时降级为“高程数据暂不可用”。
+- 配置 Ollama Agent 后，`POST /api/v1/trips/preflight` 会始终经过 Requirement Agent，由 Agent 语义判断同行人数；确定性解析器只负责离线兜底和明确数字，不对“情侣”等关系词做本地人数推断。

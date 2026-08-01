@@ -23,7 +23,10 @@ class OllamaRequirementExtractor:
             "你是 RoadMan Requirement Agent，只抽取需求，禁止规划路线。"
             f"今天是 {today.isoformat()}。将用户文本转成单个 JSON 对象，字段仅允许："
             "origin_name,destination_name,start_date,end_date,travelers,preferences。"
-            "日期必须 YYYY-MM-DD；未知字段用 null 或空数组。不要 Markdown。用户文本："
+            "日期必须 YYYY-MM-DD；未知字段用 null 或空数组。"
+            "travelers 必须根据语义判断同行人数：例如情侣/夫妻通常是 2 人，"
+            "一家三口是 3 人；如果文本没有足够依据就填 null，绝不要机械默认 1。"
+            "如果用户明确说了人数，以明确人数为准。不要 Markdown。用户文本："
             + raw_text
         )
         try:
@@ -45,13 +48,16 @@ class OllamaRequirementExtractor:
                     merged["destination_name"] = _normalize_place_name(
                         str(merged["destination_name"])
                     )
-                relation_travelers = deterministic.get("travelers")
                 has_explicit_travelers = bool(
                     re.search(r"[一二三四五六七八九十两\d]+\s*(?:人|位|口)", raw_text)
                 )
-                if relation_travelers and not has_explicit_travelers:
-                    merged["travelers"] = relation_travelers
-                elif not has_explicit_travelers:
+                if has_explicit_travelers and deterministic.get("travelers"):
+                    # An explicit count is a hard user constraint; semantic
+                    # inference is only used when the user did not state one.
+                    merged["travelers"] = deterministic["travelers"]
+                else:
+                    merged["travelers"] = _coerce_travelers(merged.get("travelers"))
+                if merged.get("travelers") is None:
                     merged.pop("travelers", None)
                 return merged
         except (httpx.HTTPError, ValueError, TypeError, json.JSONDecodeError):
@@ -340,10 +346,6 @@ def deterministic_extract(raw_text: str, today: date) -> dict[str, Any]:
     traveler_match = re.search(r"([一二三四五六七八九十两\d]+)\s*(?:人|位|口)", raw_text)
     if traveler_match:
         result["travelers"] = _cn_number(traveler_match.group(1))
-    elif any(keyword in raw_text for keyword in ("情侣", "夫妻", "两口子", "两人", "二人")):
-        result["travelers"] = 2
-    elif "一家三口" in raw_text:
-        result["travelers"] = 3
     for keyword in ("自然风景", "自然景观", "山水风景", "亲子", "轻松", "省钱", "不走夜路", "新能源"):
         if keyword in raw_text:
             result["preferences"].append(keyword)
@@ -364,3 +366,18 @@ def _cn_number(value: str) -> int | None:
         return int(value)
     mapping = {"一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
     return mapping.get(value)
+
+
+def _coerce_travelers(value: Any) -> int | None:
+    """Normalize the Requirement Agent's semantic count without inferring it locally."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value >= 1 else None
+    if isinstance(value, float) and value.is_integer():
+        return int(value) if value >= 1 else None
+    if isinstance(value, str):
+        match = re.search(r"([一二三四五六七八九十两\d]+)", value)
+        if match:
+            return _cn_number(match.group(1))
+    return None

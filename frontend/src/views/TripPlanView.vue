@@ -62,6 +62,15 @@ const planningComplete = computed(() =>
   (planningSnapshot.value?.status === 'completed' || store.trip?.status === 'completed')
   && store.planningPresentationIdle,
 )
+const planningFailure = computed(() => {
+  if (planningSnapshot.value?.status !== 'failed') return null
+  const description = planningSnapshot.value.verification_result?.issues?.[0]?.description
+  const preferences = store.trip?.request?.preferences ?? []
+  const hint = preferences.length
+    ? `已保留你的偏好：${preferences.slice(0, 3).join('、')}。可先放宽时间窗口或减少连续移动，再重新规划。`
+    : '可以先放宽时间窗口、减少连续移动，或补充明确的交通方式后重新规划。'
+  return { description: description || '当前时间、地点或交通安排无法同时满足。', hint }
+})
 
 const filteredActivities = computed(() => {
   const typeMap: Record<string, string[]> = {
@@ -128,7 +137,7 @@ async function refreshPlanning() {
       return
     }
     if (snapshot.status === 'failed') {
-      planningError.value = snapshot.verification_result?.issues?.[0]?.description || '规划失败，请修改需求后重试。'
+      planningError.value = ''
       return
     }
     if (snapshot.status !== 'clarification_required') {
@@ -669,5 +678,22 @@ watch(
       </details>
     </template>
     <div v-else class="page-state error">{{ planningError || '行程加载失败，请稍后重试。' }}</div>
+    <Transition name="failure-modal">
+      <div v-if="planningFailure" class="failure-dialog-backdrop" role="presentation">
+        <section class="failure-dialog glass-card" role="alertdialog" aria-modal="true" aria-labelledby="planning-failure-title">
+          <div class="failure-dialog-icon" aria-hidden="true">!</div>
+          <div>
+            <span class="failure-dialog-kicker">规划校验未通过</span>
+            <h2 id="planning-failure-title">这次安排需要调整</h2>
+            <p>{{ planningFailure.description }}</p>
+            <div class="failure-dialog-hint">{{ planningFailure.hint }}</div>
+          </div>
+          <div class="failure-dialog-actions">
+            <button class="secondary-button" @click="router.push('/home')">返回修改需求</button>
+            <button class="primary-button" @click="retryPlanning">重新规划</button>
+          </div>
+        </section>
+      </div>
+    </Transition>
   </main>
 </template>

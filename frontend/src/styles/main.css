@@ -574,6 +574,34 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .planning-recovery { margin-top: 18px; padding: 14px 16px; border: 1px solid #f0c3bd; border-radius: 16px; background: #fff8f6; }
 .planning-error-detail { margin: 0; color: #a84b43; font-size: 14px; }
 
+.failure-dialog-backdrop {
+  position: fixed; z-index: 80; inset: 0; display: grid; place-items: center;
+  padding: 24px; background: rgba(25, 43, 68, .18); backdrop-filter: blur(3px);
+}
+.failure-dialog {
+  width: min(560px, 100%); display: grid; grid-template-columns: auto 1fr; gap: 14px 16px;
+  padding: 24px; border: 1px solid #d3dce8; border-radius: 22px;
+  background: #f4f6f9; box-shadow: 0 24px 60px rgba(31, 52, 84, .22);
+}
+.failure-dialog-icon {
+  width: 34px; height: 34px; display: grid; place-items: center; border-radius: 50%;
+  color: #65758b; background: #dce3ec; font-weight: 800; font-size: 20px;
+}
+.failure-dialog-kicker { color: #708197; font-size: 13px; font-weight: 800; letter-spacing: .04em; }
+.failure-dialog h2 { margin: 5px 0 7px; color: #2a3b52; font-size: 21px; }
+.failure-dialog p { margin: 0; color: #586a80; line-height: 1.6; }
+.failure-dialog-hint {
+  margin-top: 13px; padding: 11px 13px; border-radius: 12px;
+  color: #68788c; background: #e9edf2; font-size: 13px; line-height: 1.55;
+}
+.failure-dialog-actions { grid-column: 2; display: flex; justify-content: flex-end; gap: 10px; margin-top: 2px; }
+.failure-dialog-actions .primary-button { min-height: 42px; padding: 10px 17px; border-radius: 12px; }
+.failure-dialog-actions .secondary-button { min-height: 42px; padding: 9px 15px; border: 1px solid #c5d0dd; border-radius: 12px; color: #536983; background: white; }
+.failure-modal-enter-active, .failure-modal-leave-active { transition: opacity .22s ease; }
+.failure-modal-enter-active .failure-dialog, .failure-modal-leave-active .failure-dialog { transition: transform .26s cubic-bezier(.22,.8,.28,1), opacity .22s ease; }
+.failure-modal-enter-from, .failure-modal-leave-to { opacity: 0; }
+.failure-modal-enter-from .failure-dialog, .failure-modal-leave-to .failure-dialog { transform: translateY(12px) scale(.98); opacity: 0; }
+
 .clarification-form {
   display: flex;
   gap: 10px;
