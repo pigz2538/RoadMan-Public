@@ -174,13 +174,16 @@ function stagePath(stage: NonNullable<typeof props.day>['stages'][number]): Prom
   const persistedPath = stage.route_segments.flatMap((segment) =>
     segment.coordinates.map((point) => [point.longitude, point.latitude]),
   )
-  if (persistedPath.length > 2) {
+  if (persistedPath.length >= 2) {
     return Promise.resolve({
       path: persistedPath,
       mode: (['driving', 'riding', 'walking', 'transit'].includes(stage.mode)
         ? stage.mode
         : 'driving') as TravelMode,
-      fallback: false,
+      // A two-point estimated segment is the explicit direct-line fallback;
+      // never ask JSAPI to redraw it and accidentally create another long
+      // cross-city dashed connector.
+      fallback: persistedPath.length === 2 && stage.route_segments.every((segment) => segment.estimated),
     })
   }
   const sameCity = stage.origin.city && stage.origin.city === stage.destination.city
@@ -234,6 +237,7 @@ function itineraryConnectors() {
     start: { longitude: number; latitude: number }
     end: { longitude: number; latitude: number }
     city?: string
+    distanceKm: number
   }> = []
   for (let index = 1; index < timeline.length; index += 1) {
     const previous = timeline[index - 1]
@@ -249,6 +253,15 @@ function itineraryConnectors() {
       previous.coordinates.latitude - current.coordinates.latitude,
     )
     if (distance <= 0.0001) continue
+    const distanceKm = distance * 92
+    // A connector is only a local transfer between an activity and a stage.
+    // A long gap is a missing stage route, not something to draw as a dashed
+    // straight line across the whole trip.
+    // Keep dashed fallbacks only for a short local transfer. A failed
+    // cross-city lookup must not become a misleading diagonal across the
+    // whole map; the corresponding stage card still explains that routing
+    // data is unavailable.
+    if (distanceKm > 12) continue
     const id = `connector-${previous.id}-${current.id}`
     if (pairs.some((item) => item.id === id)) continue
     pairs.push({
@@ -256,6 +269,7 @@ function itineraryConnectors() {
       start: previous.coordinates,
       end: current.coordinates,
       city: previous.city === current.city ? current.city : undefined,
+      distanceKm,
     })
   }
   return pairs
@@ -299,6 +313,7 @@ async function renderRoutes() {
   const inactiveRouteColor = '#98a3b2'
   for (const { stage, route } of plannedPaths) {
     const unavailable = route.mode === 'direct'
+    if (unavailable && stage.distance_km > 35) continue
     const start = stage.origin.coordinates
     const end = stage.destination.coordinates
     const displayPath = unavailable && start && end && route.path.length < 2
@@ -515,7 +530,7 @@ onBeforeUnmount(() => {
     <div v-if="loading" class="map-loading"><i />正在加载高德地图…</div>
     <div v-if="failed" class="map-fallback-badge">高德地图不可用 · 已切换 Mock 地图</div>
     <div v-else-if="!loading" class="map-live-badge" :class="{ warning: routeUnavailable }">
-      {{ routeLoading ? '高德驾车路线计算中…' : routeUnavailable ? '部分路线不可用 · 灰色虚线直连' : '高德 JSAPI · 真实道路轨迹' }}
+      {{ routeLoading ? '高德道路点列计算中…' : routeUnavailable ? '部分路段未返回道路点列 · 仅局部虚线直连' : '高德 JSAPI · 真实道路轨迹' }}
     </div>
   </div>
 </template>

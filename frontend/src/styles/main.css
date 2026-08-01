@@ -508,7 +508,7 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .planning-live-layout .planning-state { width: auto; min-height: 560px; margin: 0; }
 .planning-live-layout .agent-panel { min-height: 560px; }
 .planning-event-list { width: min(720px, 92%); margin: 24px auto; display: grid; gap: 0; text-align: left; }
-.planning-event-list article { position: relative; display: flex; gap: 14px; min-height: 66px; animation: planning-item-in .38s ease both; }
+.planning-event-list article { position: relative; display: flex; gap: 14px; min-height: 66px; animation: planning-item-in .72s cubic-bezier(.22,.8,.28,1) both; }
 .planning-event-list article:not(:last-child)::before { content: ''; position: absolute; left: 7px; top: 19px; bottom: -2px; width: 2px; background: #d9e7f8; }
 .planning-event-list i { z-index: 1; width: 16px; height: 16px; margin-top: 3px; border-radius: 50%; background: #8ab6f5; box-shadow: 0 0 0 5px #edf5ff; }
 .planning-event-list i.active { background: #28b9dc; box-shadow: 0 0 0 6px rgba(40,185,220,.15); animation: planning-pulse 1.4s ease-in-out infinite; }
@@ -521,9 +521,9 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .planning-live-strip small { color: #7489a6; }
 .planning-live-strip b { color: #216fea; font-size: 17px; }
 .planning-pulse { width: 12px; height: 12px; border-radius: 50%; background: #26b7da; box-shadow: 0 0 0 6px rgba(38,183,218,.14); animation: planning-pulse 1.4s ease-in-out infinite; }
-.stage-card { animation: planning-item-in .42s ease both; }
-.activity-card { animation: planning-item-in .42s ease both; }
-@keyframes planning-item-in { from { opacity: 0; transform: translateY(12px) scale(.985); } to { opacity: 1; transform: none; } }
+.stage-card { animation: planning-item-in .72s cubic-bezier(.22,.8,.28,1) both; }
+.activity-card { animation: planning-item-in .72s cubic-bezier(.22,.8,.28,1) both; }
+@keyframes planning-item-in { from { opacity: 0; transform: translateY(16px) scale(.97); filter: blur(2px); } to { opacity: 1; transform: none; filter: blur(0); } }
 @keyframes planning-pulse { 50% { transform: scale(.76); opacity: .62; } }
 @media (max-width: 980px) {
   .planning-live-layout { grid-template-columns: 1fr; padding: 14px; }

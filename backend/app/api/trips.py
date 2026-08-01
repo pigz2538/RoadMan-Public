@@ -713,6 +713,7 @@ async def _export_snapshot(trip_id: str, repo: TripRepository, kind: str) -> Res
         "pdf": ("application/pdf", "pdf"),
         "pptx": ("application/vnd.openxmlformats-officedocument.presentationml.presentation", "pptx"),
         "png": ("image/png", "png"),
+        "html": ("text/html; charset=utf-8", "html"),
     }
     media_type, extension = formats[kind]
     return Response(
@@ -735,6 +736,11 @@ async def get_roadbook_pptx(trip_id: str, repo: TripRepository = Depends(get_rep
 @router.get("/{trip_id}/roadbook.png")
 async def get_roadbook_image(trip_id: str, repo: TripRepository = Depends(get_repo)) -> Response:
     return await _export_snapshot(trip_id, repo, "png")
+
+
+@router.get("/{trip_id}/roadbook.html")
+async def get_roadbook_html(trip_id: str, repo: TripRepository = Depends(get_repo)) -> Response:
+    return await _export_snapshot(trip_id, repo, "html")
 
 
 @router.get("/{trip_id}/risks")

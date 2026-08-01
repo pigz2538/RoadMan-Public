@@ -59,7 +59,8 @@ const { connect } = useTripSSE((event) => {
 })
 
 const planningComplete = computed(() =>
-  planningSnapshot.value?.status === 'completed' || store.trip?.status === 'completed',
+  (planningSnapshot.value?.status === 'completed' || store.trip?.status === 'completed')
+  && store.planningPresentationIdle,
 )
 
 const filteredActivities = computed(() => {
@@ -203,7 +204,7 @@ function exportMarkdown() {
   downloadTripMarkdown(store.trip.id)
 }
 
-function exportSnapshot(format: 'pdf' | 'pptx' | 'png') {
+function exportSnapshot(format: 'pdf' | 'pptx' | 'png' | 'html') {
   if (!store.trip || store.trip.id === 'trip_wuhan_lushan_demo') return
   downloadTripExport(store.trip.id, format)
 }
@@ -270,6 +271,52 @@ function formatTime(value: string) {
     minute: '2-digit',
     hour12: false,
   }).format(new Date(value))
+}
+
+function planningAgentName(event: { tool?: string; node?: string }) {
+  const tools: Record<string, string> = {
+    'amap.route': '高德路线 Agent',
+    'amap.poi': '高德地点 Agent',
+    'amap.poi/amap.route': '地图路线 Agent',
+    'baidu.baike': '百科详情 Agent',
+    'ollama.poi_curator': 'POI 策展 Agent',
+    'open_meteo.forecast': '天气 Agent',
+  }
+  const nodes: Record<string, string> = {
+    load_context: '上下文 Agent',
+    extract_trip_request: '需求 Agent',
+    apply_defaults: '需求校验 Agent',
+    build_base_route: '路线 Agent',
+    split_into_days: '日程拆分 Agent',
+    discover_tourism: 'POI 策展 Agent',
+    enrich_poi_details: '百科详情 Agent',
+    build_local_routes: '接驳路线 Agent',
+    discover_services: '补能服务 Agent',
+    enrich_deep_drive: '驾驶安全 Agent',
+    schedule_tourism: '行程编排 Agent',
+    verify_plan: '验证 Agent',
+    render_markdown: '报告 Agent',
+    persist_trip: '报告 Agent',
+  }
+  return (event.tool && tools[event.tool]) || (event.node && nodes[event.node]) || '规划 Agent'
+}
+
+function planningEventLabel(event: { label?: string; tool?: string; node?: string }) {
+  const label = String(event.label || '').trim()
+  // Older persisted events may contain the raw graph node (for example
+  // "render markdown"). Keep those labels readable even when the backend
+  // event was emitted before the localized label map was introduced.
+  const normalized = label.toLowerCase().replace(/[_-]+/g, ' ')
+  if (normalized.includes('render markdown')) return '报告 Agent 正在整理最终行程安排'
+  if (normalized.includes('persist trip')) return '报告 Agent 正在保存并核对行程安排'
+  if (normalized.includes('build base route')) return '路线 Agent 已完成跨城主路线'
+  if (normalized.includes('discover tourism')) return 'POI 策展 Agent 已完成景点、餐饮与住宿候选'
+  if (normalized.includes('build local routes')) return '接驳路线 Agent 正在补齐本地交通'
+  if (normalized.includes('verify plan')) return '验证 Agent 正在核验时间、闭环与安全'
+  if (normalized.includes('agent') && /[a-z]{3,}/i.test(label)) {
+    return `${planningAgentName(event)} 正在处理当前步骤`
+  }
+  return label || `${planningAgentName(event)} 正在处理当前步骤`
 }
 
 function formatDuration(minutes: number) {
@@ -380,6 +427,7 @@ watch(
           <button class="ghost-button export-small" @click="exportSnapshot('pdf')">PDF</button>
           <button class="ghost-button export-small" @click="exportSnapshot('pptx')">PPT</button>
           <button class="ghost-button export-small" @click="exportSnapshot('png')">长图</button>
+          <button class="ghost-button export-small" @click="exportSnapshot('html')">HTML</button>
         </template>
         <button class="ghost-button export-small" @click="openAttachmentPicker"><Paperclip />附件</button>
         <input ref="attachmentInput" class="sr-only" type="file" accept=".png,.jpg,.jpeg,.webp,.pdf,.docx,.md,.xlsx" @change="onAttachmentSelected">
@@ -405,10 +453,10 @@ watch(
       <div v-if="planningSnapshot.status !== 'failed'" class="planning-event-list">
         <article v-for="(event, index) in store.planningEvents.slice(-7)" :key="`${event.event}-${index}`">
           <i :class="{ active: index === store.planningEvents.slice(-7).length - 1 }" />
-          <div><strong>{{ event.label }}</strong><span>{{ event.progress }}% · {{ event.tool || event.node || '规划 Agent' }}</span></div>
+          <div><strong>{{ planningEventLabel(event) }}</strong><span>{{ event.progress }}% · {{ planningAgentName(event) }}</span></div>
         </article>
         <article v-if="!store.planningEvents.length">
-          <i class="active" /><div><strong>正在建立行程上下文</strong><span>Requirement Agent</span></div>
+          <i class="active" /><div><strong>正在建立行程上下文</strong><span>需求 Agent</span></div>
         </article>
       </div>
       <div v-if="planningSnapshot.defaults_applied.length" class="visible-defaults">
@@ -489,7 +537,7 @@ watch(
               <button type="button" role="tab" :class="{ selected: mapPickCategory === 'meals' }" :aria-selected="mapPickCategory === 'meals'" @click="mapPickCategory = 'meals'">餐饮</button>
             </div>
             <button type="button" :class="{ active: mapPickMode }" @click="mapPickMode = !mapPickMode">
-              <Crosshair />{{ mapPickMode ? '请点击地图位置' : '地图选点加入' }}
+              <Crosshair />{{ mapPickMode ? '请点击地图位置' : '地图点选' }}
             </button>
             <span v-if="mapPickMessage">{{ mapPickMessage }}</span>
           </div>

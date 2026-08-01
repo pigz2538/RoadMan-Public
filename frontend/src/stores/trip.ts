@@ -11,6 +11,9 @@ export const useTripStore = defineStore('trip', () => {
   const category = ref<Category>('景点')
   const planningEvent = ref<PlanningEvent | null>(null)
   const planningEvents = ref<PlanningEvent[]>([])
+  const queuedPlanningEvents = ref<PlanningEvent[]>([])
+  const planningAnimationActive = ref(false)
+  let planningAnimationTimer: ReturnType<typeof setTimeout> | undefined
   const patchVisible = ref(false)
   const pendingPatch = ref<PlanPatch | null>(null)
   const lastAppliedPatchId = ref<string | null>(null)
@@ -42,20 +45,39 @@ export const useTripStore = defineStore('trip', () => {
   }
 
   function addPlanningEvent(event: PlanningEvent) {
-    planningEvent.value = event
     const previous = planningEvents.value.at(-1)
-    if (
-      previous?.event === event.event
-      && previous?.node === event.node
-      && previous?.label === event.label
-      && previous?.progress === event.progress
-    ) return
-    planningEvents.value = [...planningEvents.value, event].slice(-40)
+    const duplicate = (item: PlanningEvent | undefined) => Boolean(
+      item?.event === event.event
+      && item?.node === event.node
+      && item?.label === event.label
+      && item?.progress === event.progress,
+    )
+    if (duplicate(previous) || duplicate(queuedPlanningEvents.value.at(-1))) return
+    queuedPlanningEvents.value = [...queuedPlanningEvents.value, event]
+    playNextPlanningEvent()
+  }
+
+  function playNextPlanningEvent() {
+    if (planningAnimationActive.value || !queuedPlanningEvents.value.length) return
+    const [next, ...rest] = queuedPlanningEvents.value
+    queuedPlanningEvents.value = rest
+    planningAnimationActive.value = true
+    planningEvent.value = next
+    planningEvents.value = [...planningEvents.value, next].slice(-40)
+    planningAnimationTimer = setTimeout(() => {
+      planningAnimationActive.value = false
+      planningAnimationTimer = undefined
+      playNextPlanningEvent()
+    }, 680)
   }
 
   function resetPlanningEvents() {
+    if (planningAnimationTimer) clearTimeout(planningAnimationTimer)
+    planningAnimationTimer = undefined
     planningEvent.value = null
     planningEvents.value = []
+    queuedPlanningEvents.value = []
+    planningAnimationActive.value = false
   }
 
   return {
@@ -68,6 +90,8 @@ export const useTripStore = defineStore('trip', () => {
     category,
     planningEvent,
     planningEvents,
+    planningAnimationActive,
+    planningPresentationIdle: computed(() => !planningAnimationActive.value && !queuedPlanningEvents.value.length),
     patchVisible,
     pendingPatch,
     lastAppliedPatchId,

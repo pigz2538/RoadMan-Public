@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from copy import deepcopy
 from datetime import date
 from typing import Any
@@ -369,7 +368,6 @@ async def _reveal_stages(
             "plan_updated",
             None,
         )
-        await asyncio.sleep(0.12)
     return True
 
 
@@ -403,7 +401,6 @@ async def _reveal_activities(
             "plan_updated",
             None,
         )
-        await asyncio.sleep(0.12)
     return True
 
 
@@ -458,6 +455,12 @@ def _partial_update_label(node: str, result: dict[str, Any]) -> str:
         "sample_weather": "Agent 已按计划时间补充逐段天气",
         "enrich_deep_drive": "Agent 已补充休息、补能与安全余量",
         "verify_plan": "Agent 正在逐段核验时间、闭环与驾驶安全",
+        "enrich_poi_details": "POI Agent 已完成景点详情与图片补充",
+        "render_markdown": "报告 Agent 正在整理最终行程安排",
+        "persist_trip": "报告 Agent 正在保存并核对行程安排",
         "generate_plan": "Agent 正在整理最终行程安排",
     }
-    return labels.get(node, f"Agent 已完成：{node.replace('_', ' ')}")
+    # Never expose internal graph node names (e.g. ``render markdown``) in
+    # the user-facing progress stream. Unknown future nodes get a generic
+    # localized label until they are added to the map above.
+    return labels.get(node, "Agent 已完成当前规划步骤")

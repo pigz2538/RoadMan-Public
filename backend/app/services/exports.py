@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+from html import escape
 from io import BytesIO
 from pathlib import Path
 from typing import Iterable
@@ -12,6 +14,7 @@ from pptx.util import Inches, Pt
 from reportlab.lib.utils import ImageReader
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.cidfonts import UnicodeCIDFont
+from reportlab.pdfbase.ttfonts import TTFError, TTFont
 from reportlab.pdfgen import canvas
 
 from ..domain.models import Trip
@@ -27,9 +30,123 @@ class ReportAgent:
             "pptx": render_pptx,
             "png": render_long_image,
         }.get(kind)
+        if kind == "html":
+            return build_report_html(trip, markdown).encode("utf-8")
         if renderer is None:
             raise ValueError(f"unsupported report format: {kind}")
         return renderer(lines, trip)
+
+
+def build_report_html(trip: Trip, markdown: str = "") -> str:
+    """Create the single visual report template shared by export consumers.
+
+    PDF/PPTX/PNG keep native rendering for offline reliability, while this
+    template is also available as a standalone HTML export and defines the
+    same hierarchy: cover route, curated cards, then day-by-day details.
+    """
+    route_uri = _png_data_uri(_render_route_map(trip, 1440, 560).getvalue())
+    all_activities = [
+        activity
+        for day in trip.days
+        for activity in day.activities
+        if activity.type in {"attraction", "meal", "hotel"}
+    ]
+
+    def card(activity) -> str:
+        image = _download_activity_image(activity.image_url)
+        image_markup = (
+            f'<img src="{_image_data_uri(_image_bytes(image))}" alt="{escape(activity.place.name)}">'
+            if image else "<div class=\"report-card-placeholder\">RoadMan 精选</div>"
+        )
+        description = escape(activity.description or activity.user_note or "详情见来源链接")
+        detail = escape(activity.detail_url or "")
+        link = f'<a href="{detail}" target="_blank" rel="noreferrer">查看详情与来源</a>' if detail else ""
+        return (
+            f'<article class="report-card"><div class="report-card-media">{image_markup}'
+            f'<span class="report-card-type">{escape(_activity_label(activity.type))}</span></div>'
+            f'<h3>{escape(activity.place.name)}</h3>'
+            f'<time>{activity.planned_start:%m月%d日 %H:%M}–{activity.planned_end:%H:%M}</time>'
+            f'<p>{description[:180]}</p>{link}</article>'
+        )
+
+    day_sections = []
+    for day in trip.days:
+        stages = "".join(
+            f'<li><b>{stage.planned_start:%H:%M}–{stage.planned_end:%H:%M}</b> '
+            f'{escape(stage.origin.name)} → {escape(stage.destination.name)} · '
+            f'{stage.distance_km:g} km · {_mode_label(stage.mode)}</li>'
+            for stage in day.stages
+        )
+        cards = "".join(card(activity) for activity in day.activities if activity.type in {"attraction", "meal", "hotel"})
+        day_sections.append(
+            f'<section class="report-day"><div class="report-day-heading"><span>第 {day.day_index} 天</span>'
+            f'<h2>{escape(day.title)}</h2><small>{day.date} · {day.total_distance_km:g} km · '
+            f'{_format_duration(day.total_drive_minutes)}驾驶</small></div>'
+            f'<ol class="report-stages">{stages}</ol><div class="report-cards">{cards}</div></section>'
+        )
+    cards = "".join(card(activity) for activity in all_activities[:4])
+    return f"""<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{escape(trip.title)} · RoadMan 行程报告</title>
+<style>
+:root {{ color-scheme: light; font-family: Inter,"Microsoft YaHei",sans-serif; color:#10213e; background:#edf4fc; }}
+* {{ box-sizing:border-box; }} body {{ margin:0; padding:36px; }}
+.report {{ max-width:1180px; margin:auto; }}
+.cover {{ padding:42px; border-radius:30px; color:white; background:linear-gradient(135deg,#10213e,#1e5faa); box-shadow:0 20px 50px #183d7040; }}
+.eyebrow {{ letter-spacing:.16em; text-transform:uppercase; color:#8ee4f4; font-size:13px; font-weight:800; }}
+h1 {{ margin:16px 0 8px; font-size:42px; }} .subtitle {{ color:#d7e8fb; font-size:17px; }}
+.route {{ width:100%; margin-top:28px; border-radius:20px; background:#f3f8ff; }}
+.section {{ margin-top:28px; padding:30px; border-radius:26px; background:#fff; box-shadow:0 12px 34px #1b47701c; }}
+.section h2 {{ margin:0 0 18px; font-size:24px; }} .report-cards {{ display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:18px; }}
+.report-card {{ overflow:hidden; border:1px solid #d9e6f4; border-radius:18px; background:#fff; }}
+.report-card-media {{ position:relative; height:170px; background:#edf4ff; }} .report-card-media img {{ width:100%; height:100%; object-fit:cover; }}
+.report-card-placeholder {{ display:grid; place-items:center; height:100%; color:#2377e8; font-weight:800; font-size:20px; }}
+.report-card-type {{ position:absolute; left:12px; top:12px; padding:5px 9px; border-radius:999px; color:#fff; background:#2377e8dd; font-size:12px; font-weight:800; }}
+.report-card h3 {{ margin:14px 14px 5px; font-size:17px; }} .report-card time,.report-card p,.report-card a {{ display:block; margin:0 14px 9px; color:#657b98; font-size:13px; line-height:1.5; }} .report-card a {{ color:#176fe1; text-decoration:none; font-weight:700; }}
+.report-day {{ margin-top:28px; padding:26px; border:1px solid #d9e6f4; border-radius:24px; background:#f8fbff; }}
+.report-day-heading {{ display:flex; align-items:baseline; gap:12px; flex-wrap:wrap; }} .report-day-heading span {{ color:#176fe1; font-weight:800; }} .report-day-heading h2 {{ margin:0; font-size:25px; }} .report-day-heading small {{ color:#7186a0; }}
+.report-stages {{ margin:18px 0; padding-left:25px; color:#385a80; }} .report-stages li {{ margin:8px 0; }} .report-stages b {{ color:#10213e; margin-right:10px; }}
+@media(max-width:800px) {{ body {{ padding:16px; }} .report-cards {{ grid-template-columns:repeat(2,minmax(0,1fr)); }} h1 {{ font-size:30px; }} }}
+</style></head><body><main class="report">
+<header class="cover"><div class="eyebrow">ROADMAN · 智能行程报告</div><h1>{escape(trip.title)}</h1>
+<div class="subtitle">{escape(str(trip.start_date or "待定"))} – {escape(str(trip.end_date or "待定"))} · {escape(trip.origin.name if trip.origin else "待定")} → {escape(trip.destination.name if trip.destination else "待定")}</div>
+<img class="route" src="{route_uri}" alt="行程路线图"></header>
+<section class="section"><h2>景点、餐饮与住宿</h2><div class="report-cards">{cards}</div></section>
+{"".join(day_sections)}
+</main></body></html>"""
+
+
+def _png_data_uri(data: bytes) -> str:
+    return "data:image/png;base64," + base64.b64encode(data).decode("ascii")
+
+
+def _image_data_uri(data: bytes) -> str:
+    return "data:image/jpeg;base64," + base64.b64encode(data).decode("ascii")
+
+
+def _image_bytes(image: Image.Image | None) -> bytes:
+    output = BytesIO()
+    if image is None:
+        return b""
+    image = image.copy()
+    image.thumbnail((960, 640), Image.Resampling.LANCZOS)
+    image.save(output, format="JPEG", quality=82, optimize=True)
+    return output.getvalue()
+
+
+def _activity_label(value: str) -> str:
+    return {"attraction": "景点", "hotel": "住宿", "meal": "餐饮"}.get(value, "安排")
+
+
+def _mode_label(value: str) -> str:
+    return {"driving": "驾车", "transit": "公共交通", "walking": "步行", "riding": "骑行"}.get(value, value)
+
+
+def _format_duration(minutes: int) -> str:
+    hours, rest = divmod(max(0, int(minutes)), 60)
+    if hours and rest:
+        return f"{hours}小时{rest}分钟"
+    return f"{hours}小时" if hours else f"{rest}分钟"
 
 
 def export_lines(trip: Trip, markdown: str) -> list[str]:
@@ -60,9 +177,35 @@ def export_lines(trip: Trip, markdown: str) -> list[str]:
     return lines
 
 
+def _register_report_font() -> str:
+    """Register a real CJK TrueType font for PDF text.
+
+    ReportLab's CID fallback can render Chinese inconsistently in browser PDF
+    viewers (missing glyphs or blank headings). Prefer the fonts installed in
+    the container/Windows host and keep the CID font as a last-resort fallback.
+    """
+    candidates = (
+        "/usr/share/fonts/truetype/arphic/ukai.ttc",
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "C:/Windows/Fonts/msyh.ttc",
+        "C:/Windows/Fonts/msyh.ttf",
+    )
+    for index, candidate in enumerate(candidates):
+        if not Path(candidate).is_file():
+            continue
+        try:
+            name = f"RoadManCJK{index}"
+            pdfmetrics.registerFont(TTFont(name, candidate, subfontIndex=0))
+            return name
+        except (OSError, TTFError, ValueError, IndexError):
+            continue
+    pdfmetrics.registerFont(UnicodeCIDFont("STSong-Light"))
+    return "STSong-Light"
+
+
 def render_pdf(lines: Iterable[str], trip: Trip | None = None) -> bytes:
     output = BytesIO()
-    pdfmetrics.registerFont(UnicodeCIDFont("STSong-Light"))
+    font_name = _register_report_font()
     document = canvas.Canvas(output, pagesize=(595, 842))
     document.setTitle("RoadMan 行程安排")
     y = 800
@@ -71,12 +214,12 @@ def render_pdf(lines: Iterable[str], trip: Trip | None = None) -> bytes:
         document.setFillColorRGB(0.06, 0.13, 0.25)
         document.rect(0, 0, 595, 842, fill=1, stroke=0)
         document.setFillColorRGB(0.25, 0.60, 0.96)
-        document.setFont("STSong-Light", 11)
+        document.setFont(font_name, 11)
         document.drawString(42, 778, "ROADMAN  ·  智能行程报告")
         document.setFillColorRGB(1, 1, 1)
-        document.setFont("STSong-Light", 27)
+        document.setFont(font_name, 27)
         document.drawString(42, 730, trip.title[:25])
-        document.setFont("STSong-Light", 12)
+        document.setFont(font_name, 12)
         document.setFillColorRGB(0.76, 0.85, 0.95)
         document.drawString(
             42,
@@ -92,10 +235,10 @@ def render_pdf(lines: Iterable[str], trip: Trip | None = None) -> bytes:
             document.setFillColorRGB(0.96, 0.98, 1)
             document.rect(0, 0, 595, 842, fill=1, stroke=0)
             document.setFillColorRGB(0.06, 0.13, 0.25)
-            document.setFont("STSong-Light", 21)
+            document.setFont(font_name, 21)
             document.drawString(42, 790, f"第 {day.day_index} 天  ·  {day.date}  {day.title}")
             document.setFillColorRGB(0.28, 0.39, 0.55)
-            document.setFont("STSong-Light", 11)
+            document.setFont(font_name, 11)
             document.drawString(42, 766, f"总里程 {day.total_distance_km:g} km   ·   驾驶 {day.total_drive_minutes // 60}h{day.total_drive_minutes % 60}m")
             day_image = _render_activity_board(trip, 1200, 500, activities=day.activities)
             document.drawImage(ImageReader(day_image), 42, 395, width=511, height=213, preserveAspectRatio=True)
@@ -113,11 +256,11 @@ def render_pdf(lines: Iterable[str], trip: Trip | None = None) -> bytes:
         document.save()
         return output.getvalue()
     for index, line in enumerate(lines):
-        document.setFont("STSong-Light", 18 if index == 0 else 10)
+        document.setFont(font_name, 18 if index == 0 else 10)
         for wrapped in _wrap(line, 28 if index == 0 else 48):
             if y < 45:
                 document.showPage()
-                document.setFont("STSong-Light", 10)
+                document.setFont(font_name, 10)
                 y = 800
             document.drawString(42, y, wrapped)
             y -= 18 if index == 0 else 15
@@ -330,11 +473,11 @@ def _render_activity_board(
             if activity.type in {"attraction", "hotel", "meal"}
         ],
         key=lambda item: ({"attraction": 0, "hotel": 1, "meal": 2}.get(item.type, 3), item.planned_start),
-    )[:6]
+    )[:4]
     if not activities:
         draw.text((28, 78), "暂无可展示的景点、餐饮或住宿安排", fill="#66758f", font=body_font)
     else:
-        gap = 18
+        gap = 24
         card_width = (width - 56 - gap * (len(activities) - 1)) // len(activities)
         card_top, card_bottom = 72, height - 24
         colors = {"attraction": "#2377e8", "hotel": "#7457e8", "meal": "#e79424"}
@@ -354,19 +497,25 @@ def _render_activity_board(
             else:
                 draw.rounded_rectangle(
                     (left + 2, card_top + 2, right - 2, card_top + photo_height),
-                    radius=15, fill=colors.get(activity.type, "#70839e"),
+                    radius=15, fill="#edf4ff", outline="#d8e7f7", width=2,
                 )
                 draw.text(
-                    (left + 18, card_top + 24), labels.get(activity.type, "安排"),
-                    fill="#ffffff", font=title_font,
+                    (left + 18, card_top + 22), labels.get(activity.type, "安排"),
+                    fill=colors.get(activity.type, "#70839e"), font=title_font,
+                )
+                draw.text(
+                    (left + 18, card_top + 62),
+                    "RoadMan 精选安排",
+                    fill="#7890ad",
+                    font=small_font,
                 )
             text_y = card_top + photo_height + 14
-            draw.text((left + 14, text_y), activity.place.name[:18], fill="#10213e", font=body_font)
+            draw.text((left + 14, text_y), activity.place.name[:16], fill="#10213e", font=body_font)
             text_y += max(24, width // 60)
-            time_text = f"{activity.planned_start:%m-%d %H:%M}–{activity.planned_end:%H:%M}"
+            time_text = f"{activity.planned_start:%m月%d日 %H:%M}–{activity.planned_end:%H:%M}"
             draw.text((left + 14, text_y), time_text, fill="#3e5c82", font=small_font)
             text_y += max(20, width // 78)
-            note = activity.user_note or next(
+            note = activity.description or activity.user_note or next(
                 (source.title for source in activity.source_records if source.title),
                 "详情见来源链接",
             )

@@ -315,6 +315,6 @@ export function downloadTripMarkdown(tripId: string) {
   window.location.href = `${API_BASE}/api/v1/trips/${tripId}/roadbook`
 }
 
-export function downloadTripExport(tripId: string, format: 'pdf' | 'pptx' | 'png') {
+export function downloadTripExport(tripId: string, format: 'pdf' | 'pptx' | 'png' | 'html') {
   window.location.href = `${API_BASE}/api/v1/trips/${tripId}/roadbook.${format}`
 }

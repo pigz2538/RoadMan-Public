@@ -5,7 +5,7 @@ RUN xargs npm install -g < /tmp/node-requirements.txt
 
 FROM python:3.11-slim
 
-RUN apt-get update && apt-get install -y --no-install-recommends fonts-noto-cjk \
+RUN apt-get update && apt-get install -y --no-install-recommends fonts-noto-cjk fonts-arphic-ukai \
     && rm -rf /var/lib/apt/lists/*
 
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1

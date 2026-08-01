@@ -49,6 +49,7 @@ export interface Stage {
   route_segments: Array<{
     coordinates: Array<{ longitude: number; latitude: number }>
     road_name?: string
+    estimated?: boolean
   }>
   planned_start: string
   planned_end: string
