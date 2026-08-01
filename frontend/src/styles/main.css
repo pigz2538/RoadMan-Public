@@ -72,6 +72,23 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .top-stats svg { width: 29px; height: 29px; }
 .top-stats small { padding: 3px 7px; border-radius: 20px; background: #ebf4ff; color: var(--blue); font-size: 10px; }
 .sun-icon { color: #f7b41b; }.mint-icon { color: #24c9aa; }
+.history-button {
+  display: inline-flex; align-items: center; gap: 7px; border: 1px solid #d6e3f4; border-radius: 999px;
+  padding: 10px 14px; background: rgba(255,255,255,.75); color: #31547d; cursor: pointer; font-size: 14px; font-weight: 700;
+}
+.history-button:hover { color: var(--blue); border-color: #9fc4fb; background: #f1f7ff; }
+.history-button > span { min-width: 20px; padding: 2px 6px; border-radius: 999px; color: #2b6fe7; background: #eaf3ff; font-size: 11px; text-align: center; }
+.history-popover {
+  position: absolute; z-index: 35; top: 118px; right: 5vw; width: min(380px, calc(100vw - 32px));
+  max-height: min(520px, 65vh); overflow: auto; padding: 14px; border-radius: 20px;
+}
+.history-popover header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; color: #173458; }
+.history-popover header button { border: 0; border-radius: 999px; padding: 5px 9px; color: #3472d6; background: #eef5ff; cursor: pointer; font-size: 12px; }
+.history-empty { margin: 18px 5px; color: #8796aa; font-size: 13px; line-height: 1.6; }
+.history-item { width: 100%; display: grid; gap: 4px; margin-top: 7px; padding: 10px 11px; border: 1px solid #e0e9f5; border-radius: 12px; background: rgba(255,255,255,.75); text-align: left; cursor: pointer; }
+.history-item:hover { border-color: #9ec5ff; background: #f2f7ff; }
+.history-item strong { overflow: hidden; color: #24496f; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.history-item span { color: #8191a6; font-size: 11px; }
 .notification { position: relative; width: 48px; height: 48px; }
 .notification i { position: absolute; width: 9px; height: 9px; border-radius: 50%; background: #ff4d58; top: 7px; right: 7px; box-shadow: 0 0 0 3px white; }
 .account-dropdown {

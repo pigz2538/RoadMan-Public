@@ -136,3 +136,7 @@ SSE 使用命名事件，每条事件包含单调递增的 `id:`。客户端断�
 - `TripRequest` / `PreflightResponse.summary` 支持可选 `departure_time`、`return_time`（`HH:MM`）。需求中明确的点号/斜杠日期优先于模型输出；“中午/下午”等自然语言时间会标准化后传给阶段编排。
 - 规划编排会优先填充每日 2–4 个景点（受候选数据和时间窗口约束），并为每天生成三餐与住宿活动。餐饮活动的 `user_note` 使用早餐/午餐/晚餐标记，前端按全天时间线展示。
 - 详情页的最终数据采用渐进 hydration：后台持久化阶段和活动后，客户端按阶段、活动顺序逐项加入视图；这只是展示节奏，不改变服务端 canonical Trip。
+- 详情页在 `plan_updated` SSE 后会重新读取 canonical Trip；客户端轮询带并发保护，避免重复请求导致阶段/活动显示停滞。
+- `GET /api/v1/trips` 返回已持久化的历史规划，首页历史规划下拉可直接恢复进行中或已完成行程。
+- `POST /api/v1/skills/weather/forecast` 接受浏览器定位或武汉回退坐标，首页展示当前温度、天气和位置来源。
+- LangGraph 的 `review_daily_schedule` 节点是首轮旅游编排后的第二次日程检查；它核验每日时间覆盖和三餐住宿，并在没有可安全插入候选时写入可调整的 `rest` 活动。

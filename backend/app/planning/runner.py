@@ -319,8 +319,8 @@ async def _persist_partial_result(
             revealed = False
             if node in {"build_stages", "enrich_deep_drive", "repair_plan"}:
                 revealed = await _reveal_stages(repo, trip, result, raw_days)
-            elif node == "schedule_tourism":
-                revealed = await _reveal_activities(repo, trip, result, raw_days)
+            elif node in {"schedule_tourism", "review_daily_schedule"}:
+                revealed = await _reveal_activities(repo, trip, result, raw_days, node)
             if not revealed:
                 trip.days = full_days
         except (TypeError, ValueError):
@@ -376,6 +376,7 @@ async def _reveal_activities(
     trip: Any,
     result: dict[str, Any],
     raw_days: list[dict[str, Any]],
+    node: str = "schedule_tourism",
 ) -> bool:
     current_count = sum(len(day.activities) for day in trip.days)
     target_count = sum(len(day.get("activities", [])) for day in raw_days)
@@ -395,7 +396,7 @@ async def _reveal_activities(
         label = f"Agent 已加入：{activity.place.name}" if activity else f"Agent 已加入第 {visible_count} 项停留安排"
         await _publish_progress(
             trip.id,
-            "schedule_tourism",
+            node,
             label,
             int(result.get("progress", {}).get("value") or 1),
             "plan_updated",
@@ -452,6 +453,7 @@ def _partial_update_label(node: str, result: dict[str, Any]) -> str:
         "build_stages": f"已加入 {stage_count} 个行程阶段",
         "discover_services": "Agent 已检查沿途休息与补能设施",
         "schedule_tourism": f"已加入 {activity_count} 项景点、用餐与住宿安排",
+        "review_daily_schedule": "每日复核 Agent 已检查上午、下午、晚间与三餐住宿",
         "sample_weather": "Agent 已按计划时间补充逐段天气",
         "enrich_deep_drive": "Agent 已补充休息、补能与安全余量",
         "verify_plan": "Agent 正在逐段核验时间、闭环与驾驶安全",

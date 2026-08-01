@@ -32,7 +32,7 @@ from .llm import OllamaPoiCurator, OllamaRequirementExtractor
 from .recommendations import rank_tourism_candidates
 from .poi_enrichment import enrich_tourism_candidates
 from .state import RoadManState
-from .tourism import schedule_tourism_activities, verify_tourism_plan
+from .tourism import review_daily_schedule, schedule_tourism_activities, verify_tourism_plan
 
 ProgressCallback = Callable[[str, str, str, int, str, str | None], Awaitable[None]]
 SHANGHAI = ZoneInfo("Asia/Shanghai")
@@ -1161,8 +1161,25 @@ def build_planning_graph(
             "progress": {"node": "schedule_tourism", "value": 88},
         }
 
+    async def review_daily_schedule_node(state: RoadManState) -> dict[str, Any]:
+        await emit(
+            state,
+            "review_daily_schedule",
+            "每日复核 Agent 正在检查上午、下午、晚间与三餐住宿",
+            90,
+        )
+        plans, review_notes = review_daily_schedule(
+            state.get("day_plans", []),
+            state.get("tourism_candidates", {}),
+        )
+        return {
+            "day_plans": plans,
+            "warnings": [*state.get("warnings", []), *review_notes],
+            "progress": {"node": "review_daily_schedule", "value": 90},
+        }
+
     async def verify_plan(state: RoadManState) -> dict[str, Any]:
-        await emit(state, "verify_plan", "正在校验路线、交通方式、天气与时间约束", 89)
+        await emit(state, "verify_plan", "正在校验路线、交通方式、天气与时间约束", 92)
         # Normalize provider timestamps before enforcing hard constraints.
         # A service or meal can be returned at the exact start of the next
         # movement segment; move that segment forward to avoid a false blocker.
@@ -1204,7 +1221,7 @@ def build_planning_graph(
                 "passed": not any(item["severity"] == "blocker" for item in issues),
                 "issues": issues,
             },
-            "progress": {"node": "verify_plan", "value": 89},
+            "progress": {"node": "verify_plan", "value": 92},
         }
 
     async def repair_plan(state: RoadManState) -> dict[str, Any]:
@@ -1296,6 +1313,7 @@ def build_planning_graph(
     builder.add_node("discover_services", discover_services)
     builder.add_node("enrich_deep_drive", enrich_deep_drive)
     builder.add_node("schedule_tourism", schedule_tourism)
+    builder.add_node("review_daily_schedule", review_daily_schedule_node)
     builder.add_node("verify_plan", verify_plan)
     builder.add_node("repair_plan", repair_plan)
     builder.add_node("render_markdown", render_markdown)
@@ -1319,7 +1337,8 @@ def build_planning_graph(
     builder.add_edge("discover_services", "sample_weather")
     builder.add_edge("sample_weather", "enrich_deep_drive")
     builder.add_edge("enrich_deep_drive", "schedule_tourism")
-    builder.add_edge("schedule_tourism", "verify_plan")
+    builder.add_edge("schedule_tourism", "review_daily_schedule")
+    builder.add_edge("review_daily_schedule", "verify_plan")
     builder.add_conditional_edges(
         "verify_plan",
         after_verification,

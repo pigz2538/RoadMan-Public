@@ -3,19 +3,25 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   Bell, ChevronDown, CircleUserRound, CloudSun, Grid2X2, Paperclip,
-  Mic, Route, Send, Settings, SlidersHorizontal, UserRound, CarFront,
+  History, Mic, Route, Send, Settings, SlidersHorizontal, UserRound, CarFront,
 } from '@lucide/vue'
 import {
   createTrip,
+  fetchWeatherForecast,
+  listTrips,
   preflightTrip,
   startPlanning as startPlanningRequest,
   type PreflightResult,
 } from '../api/trips'
+import type { Trip } from '../types/trip'
 
 const router = useRouter()
 const PROMPT_STORAGE_KEY = 'roadman:last-trip-prompt'
 const promptSuggestion = '周六早上从武汉出发，去庐山两天一夜，周日晚八点前回来，喜欢自然景观'
 const prompt = ref('')
+const historyOpen = ref(false)
+const historyTrips = ref<Trip[]>([])
+const weather = ref({ temperature: '--', condition: '晴', location: '武汉' })
 const activeMenu = ref('账户设置')
 const drawerOpen = ref(false)
 const accountMenuOpen = ref(false)
@@ -54,6 +60,8 @@ const quickActions = [
 onMounted(() => {
   prompt.value = window.sessionStorage.getItem(PROMPT_STORAGE_KEY) || ''
   isFirefox.value = /firefox/i.test(navigator.userAgent)
+  void loadHistory()
+  void loadHomeWeather()
   void import('@google/model-viewer').then(({ ModelViewerElement }) => {
     // The model is intentionally loaded, but keep adaptive rendering bounded.
     // model-viewer clamps this value to a safe minimum of 0.25.
@@ -62,6 +70,83 @@ onMounted(() => {
     modelError.value = true
   })
 })
+
+async function loadHistory() {
+  try {
+    const trips = await listTrips()
+    historyTrips.value = trips
+      .filter((trip) => trip.id !== 'trip_wuhan_lushan_demo')
+      .sort((left, right) => right.id.localeCompare(left.id))
+      .slice(0, 12)
+  } catch {
+    historyTrips.value = []
+  }
+}
+
+function weatherCondition(code: number | null | undefined) {
+  if (code === undefined || code === null) return '晴'
+  if ([1, 2, 3].includes(code)) return '多云'
+  if ([45, 48].includes(code)) return '雾'
+  if (code >= 51 && code <= 67) return '小雨'
+  if (code >= 71 && code <= 86) return '降雪'
+  if (code >= 95) return '雷雨'
+  return '晴'
+}
+
+function browserCoordinates() {
+  const fallback = { latitude: 30.5928, longitude: 114.3055, location: '武汉' }
+  if (!navigator.geolocation) return Promise.resolve(fallback)
+  return new Promise<typeof fallback>((resolve) => {
+    let settled = false
+    const finish = (value: typeof fallback) => {
+      if (settled) return
+      settled = true
+      resolve(value)
+    }
+    const timer = window.setTimeout(() => finish(fallback), 1400)
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        window.clearTimeout(timer)
+        finish({
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+          location: '当前位置',
+        })
+      },
+      () => {
+        window.clearTimeout(timer)
+        finish(fallback)
+      },
+      { enableHighAccuracy: false, maximumAge: 10 * 60 * 1000, timeout: 1200 },
+    )
+  })
+}
+
+async function loadHomeWeather() {
+  const coordinates = await browserCoordinates()
+  try {
+    const result = await fetchWeatherForecast(coordinates.latitude, coordinates.longitude)
+    const current = result.data?.current
+    const temperature = current?.temperature_2m
+    const code = current?.weather_code
+    weather.value = {
+      temperature: typeof temperature === 'number' ? String(Math.round(temperature)) : '--',
+      condition: weatherCondition(typeof code === 'number' ? code : null),
+      location: coordinates.location,
+    }
+  } catch {
+    weather.value = { temperature: '--', condition: '天气待更新', location: coordinates.location }
+  }
+}
+
+function openHistoryTrip(trip: Trip) {
+  historyOpen.value = false
+  if (trip.status === 'collecting' || trip.status === 'planning') {
+    router.push(`/trips/${trip.id}/plan?planning=1`)
+  } else {
+    router.push(`/trips/${trip.id}/plan`)
+  }
+}
 
 watch(prompt, (value) => {
   if (typeof window === 'undefined') return
@@ -162,11 +247,31 @@ function activate(label: string) {
         <ChevronDown :size="20" :class="{ rotated: accountMenuOpen }" />
       </button>
       <div class="top-stats">
-        <span><CloudSun class="sun-icon" /> 22°C&nbsp; 晴</span>
+        <span><CloudSun class="sun-icon" /> {{ weather.temperature }}°C&nbsp; {{ weather.condition }} <small>{{ weather.location }}</small></span>
         <span><CarFront class="mint-icon" /> <strong>450</strong> km <small>估算</small></span>
+        <button class="history-button" type="button" @click="historyOpen = !historyOpen">
+          <History :size="20" />历史规划<span>{{ historyTrips.length }}</span>
+        </button>
         <button class="icon-button notification" aria-label="通知"><Bell /><i /></button>
       </div>
     </header>
+
+    <Transition name="menu">
+      <aside v-if="historyOpen" class="history-popover glass-card" aria-label="历史规划">
+        <header><strong>历史规划</strong><button type="button" @click="loadHistory">刷新</button></header>
+        <p v-if="!historyTrips.length" class="history-empty">还没有保存的规划，完成一次规划后会自动保存在这里。</p>
+        <button
+          v-for="trip in historyTrips"
+          :key="trip.id"
+          type="button"
+          class="history-item"
+          @click="openHistoryTrip(trip)"
+        >
+          <strong>{{ trip.title }}</strong>
+          <span>{{ trip.status === 'completed' ? '规划完成' : trip.status === 'planning' ? '正在规划' : '待继续' }} · {{ trip.days.length }} 天</span>
+        </button>
+      </aside>
+    </Transition>
 
     <Transition name="menu">
       <nav v-if="accountMenuOpen" class="account-dropdown glass-card" aria-label="账户菜单">

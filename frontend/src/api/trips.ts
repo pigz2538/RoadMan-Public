@@ -118,6 +118,21 @@ export async function createTrip(
   }))
 }
 
+export async function listTrips(): Promise<Trip[]> {
+  return json(await fetch(`${API_BASE}/api/v1/trips`))
+}
+
+export async function fetchWeatherForecast(
+  latitude: number,
+  longitude: number,
+): Promise<{ success: boolean; data?: { current?: Record<string, number | string | null> } }> {
+  return json(await fetch(`${API_BASE}/api/v1/skills/weather/forecast`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ latitude, longitude, forecast_days: 1, timezone: 'Asia/Shanghai' }),
+  }))
+}
+
 export async function preflightTrip(
   rawText: string,
   answers: Record<string, string> = {},

@@ -157,7 +157,11 @@ def schedule_tourism_activities(
                 scheduled_attractions.append(activities[-1])
                 existing_names.add(name)
 
-        if day_index < len(day_plans) - 1 and hotels:
+        if (
+            day_index < len(day_plans) - 1
+            and hotels
+            and not any(item.get("type") == "hotel" for item in activities)
+        ):
             hotel = hotels[day_index % len(hotels)]
             day_date = datetime.fromisoformat(f"{day['date']}T00:00:00+08:00").date()
             last_end = max(
@@ -218,6 +222,95 @@ def schedule_tourism_activities(
             *[{"type": "activity", "id": item["id"]} for item in activities],
         ]
     return day_plans
+
+
+def review_daily_schedule(
+    day_plans: list[dict[str, Any]],
+    candidates: dict[str, list[dict[str, Any]]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Run a second pass over every day and phase after the first schedule.
+
+    The first pass is intentionally conservative while route/weather data is
+    still being assembled.  This review pass is idempotent and can safely add
+    a missed attraction or overnight stay once all stage times are known.
+    It returns non-blocking review notes for days that still have a large free
+    window, so the UI can explain that the window is intentional instead of
+    looking like an unfinished itinerary.
+    """
+    reviewed = schedule_tourism_activities(day_plans, candidates)
+    notes: list[dict[str, Any]] = []
+    for day in reviewed:
+        stages = day.get("stages", [])
+        if not stages:
+            continue
+        activities = day.get("activities", [])
+        meals = [item for item in activities if item.get("type") == "meal"]
+        if len(meals) < 3:
+            notes.append(
+                {
+                    "code": "DAILY_MEAL_REVIEW",
+                    "severity": "warning",
+                    "message": f"{day.get('date')} 的三餐仍需临近出发复核",
+                }
+            )
+        last_stage_end = max(
+            datetime.fromisoformat(stage["planned_end"]) for stage in stages
+        )
+        later_activities = [
+            item
+            for item in activities
+            if item.get("planned_start")
+            and datetime.fromisoformat(item["planned_start"]) >= last_stage_end
+            and item.get("type") in {"attraction", "meal", "hotel", "rest"}
+        ]
+        if last_stage_end.hour < 17 and not later_activities:
+            # Keep the afternoon/evening visible in the itinerary even when
+            # no additional POI can be safely placed. This is an explicit,
+            # adjustable free-time block rather than an invented attraction.
+            day_date = last_stage_end.date()
+            rest_start = max(
+                last_stage_end + timedelta(minutes=30),
+                datetime.combine(day_date, time(14, 0), tzinfo=SHANGHAI),
+            )
+            rest_end = datetime.combine(day_date, time(17, 30), tzinfo=SHANGHAI)
+            if rest_start < rest_end:
+                destination = next(
+                    (
+                        stage.get("destination")
+                        for stage in reversed(stages)
+                        if stage.get("destination")
+                    ),
+                    {"name": "目的地周边"},
+                )
+                activities.append(
+                    _activity(
+                        day=day,
+                        sequence=len(activities),
+                        activity_type="rest",
+                        place=destination,
+                        start_at=rest_start,
+                        duration_minutes=int((rest_end - rest_start).total_seconds() // 60),
+                        sources=[],
+                        opening_text="可按体力与天气灵活调整",
+                        user_note="自由活动 / 休息时段，可按体力调整；晚餐仍按当天窗口安排",
+                    )
+                )
+                activities.sort(key=lambda item: item["planned_start"])
+                for sequence, activity in enumerate(activities):
+                    activity["sequence"] = sequence
+                day["activities"] = activities
+                day["items"] = [
+                    *[{"type": "stage", "id": stage["id"]} for stage in stages],
+                    *[{"type": "activity", "id": item["id"]} for item in activities],
+                ]
+            notes.append(
+                {
+                    "code": "DAILY_FREE_WINDOW",
+                    "severity": "info",
+                    "message": f"{day.get('date')} 到达后保留了下午/晚间自由时间",
+                }
+            )
+    return reviewed, notes
 
 
 def _reschedule_meals(

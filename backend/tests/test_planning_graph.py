@@ -38,6 +38,8 @@ def test_deterministic_extractor_understands_midday_departure_without_defaulting
     assert extracted["departure_time"] == "12:00"
     assert extracted["start_date"] == "2026-08-11"
     assert extracted["end_date"] == "2026-08-14"
+    assert extracted["origin_name"] == "湖州南浔站"
+    assert extracted["destination_name"] == "乌镇"
 
 
 def test_daily_meals_follow_a_late_departure_and_avoid_stage_overlap():

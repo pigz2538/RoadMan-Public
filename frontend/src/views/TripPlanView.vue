@@ -46,6 +46,8 @@ const mapPickMode = ref(false)
 const mapPickCategory = ref<'attractions' | 'hotels' | 'meals'>('attractions')
 const mapPickMessage = ref('')
 let pollingTimer: number | undefined
+let refreshInFlight = false
+let refreshQueued = false
 const stageDrag = { active: false, moved: false, startX: 0, startScrollLeft: 0, pointerId: -1 }
 const categories = ['景点', '住宿', '餐饮', '服务'] as const
 const { connect } = useTripSSE((event) => {
@@ -101,10 +103,22 @@ const dayTimeline = computed(() => {
       id: activity.id,
       kind: 'activity' as const,
       title: activity.place.name,
-      label: activity.type === 'hotel' ? '住宿' : activity.type === 'meal' ? '用餐' : '景点停留',
+      label: activity.type === 'hotel'
+        ? '住宿'
+        : activity.type === 'meal'
+          ? '用餐'
+          : activity.type === 'rest'
+            ? '自由活动 / 休息'
+            : '景点停留',
       start: activity.planned_start || '',
       end: activity.planned_end || '',
-      icon: activity.type === 'hotel' ? '🏨' : activity.type === 'meal' ? '🍜' : '🏞️',
+      icon: activity.type === 'hotel'
+        ? '🏨'
+        : activity.type === 'meal'
+          ? '🍜'
+          : activity.type === 'rest'
+            ? '☕'
+            : '🏞️',
     })),
   ].filter((item) => item.start).sort((left, right) => left.start.localeCompare(right.start))
 })
@@ -153,6 +167,11 @@ async function load() {
 async function refreshPlanning() {
   const tripId = String(route.params.tripId)
   if (tripId === 'trip_wuhan_lushan_demo') return
+  if (refreshInFlight) {
+    refreshQueued = true
+    return
+  }
+  refreshInFlight = true
   if (pollingTimer) window.clearTimeout(pollingTimer)
   try {
     const snapshot = await fetchPlanning(tripId)
@@ -170,13 +189,20 @@ async function refreshPlanning() {
     }
     if (snapshot.status !== 'clarification_required') {
       const partialTrip = await fetchTrip(tripId)
-      const hadNoDay = !store.currentDay
       store.trip = partialTrip
-      if (hadNoDay && partialTrip.days.length) store.setDay(0)
+      ensureCurrentSelection()
+      await nextTick()
+      centerCurrentStage('smooth')
       pollingTimer = window.setTimeout(() => void refreshPlanning(), 900)
     }
   } catch (error) {
     planningError.value = error instanceof Error ? error.message : '无法读取规划进度'
+  } finally {
+    refreshInFlight = false
+    if (refreshQueued && planningSnapshot.value?.status !== 'completed' && planningSnapshot.value?.status !== 'failed') {
+      refreshQueued = false
+      pollingTimer = window.setTimeout(() => void refreshPlanning(), 120)
+    }
   }
 }
 
@@ -399,6 +425,7 @@ function planningAgentName(event: { tool?: string; node?: string }) {
     discover_services: '补能服务 Agent',
     enrich_deep_drive: '驾驶安全 Agent',
     schedule_tourism: '行程编排 Agent',
+    review_daily_schedule: '每日复核 Agent',
     verify_plan: '验证 Agent',
     render_markdown: '报告 Agent',
     persist_trip: '报告 Agent',
@@ -417,6 +444,7 @@ function planningEventLabel(event: { label?: string; tool?: string; node?: strin
   if (normalized.includes('build base route')) return '路线 Agent 已完成跨城主路线'
   if (normalized.includes('discover tourism')) return 'POI 策展 Agent 已完成景点、餐饮与住宿候选'
   if (normalized.includes('build local routes')) return '接驳路线 Agent 正在补齐本地交通'
+  if (normalized.includes('review daily schedule')) return '每日复核 Agent 正在检查全天时间覆盖'
   if (normalized.includes('verify plan')) return '验证 Agent 正在核验时间、闭环与安全'
   if (normalized.includes('agent') && /[a-z]{3,}/i.test(label)) {
     return `${planningAgentName(event)} 正在处理当前步骤`
@@ -527,6 +555,7 @@ function selectStageFromCard(item: (typeof allStages.value)[number]) {
 onMounted(load)
 onUnmounted(() => {
   if (pollingTimer) window.clearTimeout(pollingTimer)
+  refreshQueued = false
 })
 watch(
   () => store.currentStageId,

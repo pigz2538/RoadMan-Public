@@ -20,15 +20,16 @@ class OllamaRequirementExtractor:
         ):
             return deterministic
         prompt = (
-            "你是 RoadMan Requirement Agent，只抽取需求，禁止规划路线。"
-            f"今天是 {today.isoformat()}。将用户文本转成单个 JSON 对象，字段仅允许："
-            "origin_name,destination_name,start_date,end_date,departure_time,return_time,travelers,preferences。"
-            "日期必须 YYYY-MM-DD；未知字段用 null 或空数组。"
-            "departure_time/return_time 使用 HH:MM；如‘中午出发’应理解为 12:00，"
-            "如未说明时间就填 null。"
-            "travelers 必须根据语义判断同行人数：例如情侣/夫妻通常是 2 人，"
-            "一家三口是 3 人；如果文本没有足够依据就填 null，绝不要机械默认 1。"
-            "如果用户明确说了人数，以明确人数为准。不要 Markdown。用户文本："
+            "You are RoadMan Requirement Agent. Extract requirements only; never plan a route. "
+            f"Today is {today.isoformat()}. Return ONLY one valid JSON object (no markdown, no explanation) "
+            "with exactly these keys: origin_name, destination_name, start_date, end_date, "
+            "departure_time, return_time, travelers, preferences. "
+            "Dates must be YYYY-MM-DD; unknown scalar fields must be null and preferences must be an array. "
+            "Normalize Chinese time phrases: 中午=12:00, 下午=14:00, 晚上=19:00. "
+            "Infer travelers semantically (情侣/夫妻=2, 一家三口=3); do not default to 1 when evidence is absent. "
+            "请根据语义判断同行人数，不要机械默认 1。"
+            "For text like 从A出发，在B及其周边旅游, use A as origin and B as destination. "
+            "User text: "
             + raw_text
         )
         try:
@@ -41,6 +42,7 @@ class OllamaRequirementExtractor:
                         "prompt": prompt,
                         "stream": False,
                         "think": False,
+                        "format": "json",
                     },
                 )
                 response.raise_for_status()
@@ -52,6 +54,9 @@ class OllamaRequirementExtractor:
                 for date_field in ("start_date", "end_date"):
                     if deterministic.get(date_field):
                         merged[date_field] = deterministic[date_field]
+                for place_field in ("origin_name", "destination_name"):
+                    if deterministic.get(place_field):
+                        merged[place_field] = deterministic[place_field]
                 for clock_field in ("departure_time", "return_time"):
                     if deterministic.get(clock_field):
                         merged[clock_field] = deterministic[clock_field]
@@ -352,6 +357,16 @@ def deterministic_extract(raw_text: str, today: date) -> dict[str, Any]:
             result["origin_name"] = origin_match.group("origin")
         if destination_matches:
             result["destination_name"] = _normalize_place_name(destination_matches[-1])
+    local_destination = re.search(
+        r"在(?P<destination>[\u4e00-\u9fffA-Za-z0-9·]{2,30}?)(?=及其周边|周边地区|周边|附近|一带)",
+        raw_text,
+    )
+    if local_destination:
+        # A local “在 B 及其周边游览” clause is more specific than a later
+        # “到 A 返程” clause, which otherwise looks like the destination.
+        result["destination_name"] = _normalize_place_name(
+            local_destination.group("destination")
+        )
     if any(qualifier in raw_text for qualifier in ("及其周边", "周边地区", "周边", "附近", "一带")):
         result["preferences"].append("目的地周边")
 

@@ -1,7 +1,7 @@
 import pytest
 
 from app.planning.recommendations import rank_tourism_candidates
-from app.planning.tourism import schedule_tourism_activities, verify_tourism_plan
+from app.planning.tourism import review_daily_schedule, schedule_tourism_activities, verify_tourism_plan
 from app.skills.base import SkillContext
 from app.skills.flyai import FlyAIHotelAdapter, FlyAIPoiAdapter, _parse_price
 
@@ -100,6 +100,40 @@ def test_tourism_verifier_blocks_missing_hotel_when_candidates_exist():
 
     assert issues[0]["code"] == "OVERNIGHT_HOTEL_MISSING"
     assert issues[0]["severity"] == "blocker"
+
+
+def test_daily_review_is_idempotent_and_does_not_duplicate_hotels():
+    days = [
+        {
+            "id": "day_review_1",
+            "date": "2026-08-02",
+            "items": [],
+            "activities": [],
+            "stages": [
+                {
+                    "id": "stage_review_1",
+                    "sequence": 0,
+                    "origin": {"name": "乌镇"},
+                    "destination": {"name": "西栅景区"},
+                    "planned_start": "2026-08-02T12:00:00+08:00",
+                    "planned_end": "2026-08-02T13:00:00+08:00",
+                }
+            ],
+        },
+        {"id": "day_review_2", "date": "2026-08-03", "items": [], "activities": [], "stages": []},
+    ]
+    candidates = {
+        "attractions": [
+            {"place": {"name": "西栅景区"}},
+            {"place": {"name": "乌镇老药铺"}},
+        ],
+        "hotels": [{"place": {"name": "乌镇民宿"}}],
+        "meals": [],
+    }
+    first, _ = review_daily_schedule(days, candidates)
+    second, _ = review_daily_schedule(first, candidates)
+    assert sum(item["type"] == "hotel" for item in second[0]["activities"]) == 1
+    assert sum(item["type"] == "attraction" for item in second[0]["activities"]) >= 2
 
 
 @pytest.mark.asyncio
