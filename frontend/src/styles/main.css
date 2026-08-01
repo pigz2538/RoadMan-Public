@@ -103,7 +103,7 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .settings-menu button svg { color: #1768dc; }
 .settings-menu button.active, .settings-menu button:hover { background: linear-gradient(105deg, #e9f3ff, #f3f7ff); color: #125ac8; }
 .vehicle-stage {
-  width: 100%; height: clamp(380px, 46vh, 560px); min-height: 380px;
+  width: 100%; height: clamp(420px, 50vh, 640px); min-height: 420px;
   position: relative; overflow: hidden;
   display: flex; justify-content: center; align-items: center;
   background: transparent;
@@ -150,6 +150,14 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
   min-width: 0; flex: 1; border: 0; background: transparent; outline: 0;
   padding: 10px 0; color: #30415d; font-size: 17px;
 }
+.prompt-suggestion {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 7px 10px;
+  margin-top: 1px; padding: 8px 12px; border-radius: 11px;
+  color: #7b8798; background: #f1f4f7; font-size: 12px; line-height: 1.5;
+}
+.prompt-suggestion em { flex: 1 1 100%; min-width: 0; color: #9aa5b3; font-style: normal; }
+.prompt-suggestion button { border: 0; border-radius: 999px; padding: 4px 9px; color: #617188; background: #e2e7ed; cursor: pointer; font-size: 12px; }
+.prompt-suggestion button:hover { color: #245e9d; background: #d9e8f8; }
 .composer-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 5px; }
 .composer-icon {
   width: 42px; height: 42px; border: 0; border-radius: 13px; background: transparent;
@@ -204,6 +212,19 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .trip-sidebar select { width: 100%; padding: 13px; background: white; border: 1px solid #d9e4f3; border-radius: 13px; font-weight: 700; }
 .day-summary { padding: 13px 4px 8px; display: grid; gap: 5px; }
 .day-summary strong { font-size: 18px; }.day-summary span { color: var(--muted); font-size: 15px; line-height: 1.45; }
+.day-timeline { margin: 3px 0 10px; padding: 10px 10px 8px; border: 1px solid #e0e7f0; border-radius: 14px; background: #f7f9fc; }
+.day-timeline > header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; color: #37516f; font-size: 13px; }
+.day-timeline > header span { color: #8a99ab; font-size: 11px; }
+.day-timeline-list { max-height: 182px; overflow-y: auto; display: grid; gap: 2px; }
+.day-timeline-list button { display: grid; grid-template-columns: 38px 25px minmax(0, 1fr); align-items: center; gap: 6px; padding: 5px 3px; border: 0; border-radius: 8px; color: #405976; background: transparent; text-align: left; cursor: pointer; }
+.day-timeline-list button:hover { background: #eaf2ff; }
+.day-timeline-list time { color: #7589a3; font-size: 11px; font-variant-numeric: tabular-nums; }
+.day-timeline-list i { font-style: normal; font-size: 16px; text-align: center; }
+.day-timeline-list span { min-width: 0; display: grid; gap: 1px; }
+.day-timeline-list b, .day-timeline-list small { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.day-timeline-list b { color: #31557c; font-size: 12px; }
+.day-timeline-list small { color: #7e8fa4; font-size: 11px; }
+.day-timeline p { margin: 8px 2px 3px; color: #8393a7; font-size: 12px; }
 .category-tabs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; margin: 5px 0 14px; }
 .category-tabs button {
   padding: 10px 4px; border: 1px solid #dfe7f2; border-radius: 10px; background: white; cursor: pointer; font-size: 15px;
@@ -508,7 +529,7 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .planning-live-layout .planning-state { width: auto; min-height: 560px; margin: 0; }
 .planning-live-layout .agent-panel { min-height: 560px; }
 .planning-event-list { width: min(720px, 92%); margin: 24px auto; display: grid; gap: 0; text-align: left; }
-.planning-event-list article { position: relative; display: flex; gap: 14px; min-height: 66px; animation: planning-item-in .72s cubic-bezier(.22,.8,.28,1) both; }
+.planning-event-list article { position: relative; display: flex; gap: 14px; min-height: 66px; animation: planning-item-in .72s cubic-bezier(.22,.8,.28,1) both; animation-delay: calc(var(--item-index, 0) * 90ms); }
 .planning-event-list article:not(:last-child)::before { content: ''; position: absolute; left: 7px; top: 19px; bottom: -2px; width: 2px; background: #d9e7f8; }
 .planning-event-list i { z-index: 1; width: 16px; height: 16px; margin-top: 3px; border-radius: 50%; background: #8ab6f5; box-shadow: 0 0 0 5px #edf5ff; }
 .planning-event-list i.active { background: #28b9dc; box-shadow: 0 0 0 6px rgba(40,185,220,.15); animation: planning-pulse 1.4s ease-in-out infinite; }
@@ -521,8 +542,8 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .planning-live-strip small { color: #7489a6; }
 .planning-live-strip b { color: #216fea; font-size: 17px; }
 .planning-pulse { width: 12px; height: 12px; border-radius: 50%; background: #26b7da; box-shadow: 0 0 0 6px rgba(38,183,218,.14); animation: planning-pulse 1.4s ease-in-out infinite; }
-.stage-card { animation: planning-item-in .72s cubic-bezier(.22,.8,.28,1) both; }
-.activity-card { animation: planning-item-in .72s cubic-bezier(.22,.8,.28,1) both; }
+.stage-card { animation: planning-item-in .72s cubic-bezier(.22,.8,.28,1) both; animation-delay: calc(var(--item-index, 0) * 85ms); }
+.activity-list article { animation: planning-item-in .62s cubic-bezier(.22,.8,.28,1) both; animation-delay: calc(var(--item-index, 0) * 75ms); }
 @keyframes planning-item-in { from { opacity: 0; transform: translateY(16px) scale(.97); filter: blur(2px); } to { opacity: 1; transform: none; filter: blur(0); } }
 @keyframes planning-pulse { 50% { transform: scale(.76); opacity: .62; } }
 @media (max-width: 980px) {

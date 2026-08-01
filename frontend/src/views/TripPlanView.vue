@@ -24,6 +24,7 @@ import { useTripSSE } from '../composables/useTripSSE'
 import AmapRouteMap from '../components/map/AmapRouteMap.vue'
 import ActivityList from '../components/trip/ActivityList.vue'
 import AgentPanel from '../components/agent/AgentPanel.vue'
+import type { Trip } from '../types/trip'
 import mockTrip from '../../../shared/examples/wuhan-lushan-trip.json'
 
 const router = useRouter()
@@ -33,6 +34,7 @@ const loading = ref(true)
 const degraded = ref(false)
 const stageTrack = ref<HTMLElement | null>(null)
 const planningSnapshot = ref<PlanningSnapshot | null>(null)
+const contentHydrating = ref(false)
 const clarificationAnswer = ref('')
 const planningError = ref('')
 const versionMessage = ref('')
@@ -60,7 +62,8 @@ const { connect } = useTripSSE((event) => {
 
 const planningComplete = computed(() =>
   (planningSnapshot.value?.status === 'completed' || store.trip?.status === 'completed')
-  && store.planningPresentationIdle,
+  && store.planningPresentationIdle
+  && !contentHydrating.value,
 )
 const planningFailure = computed(() => {
   if (planningSnapshot.value?.status !== 'failed') return null
@@ -80,6 +83,30 @@ const filteredActivities = computed(() => {
     服务: ['rest', 'charging', 'fueling', 'parking', 'service'],
   }
   return (store.currentDay?.activities ?? []).filter((item) => typeMap[store.category].includes(item.type))
+})
+const dayTimeline = computed(() => {
+  const day = store.currentDay
+  if (!day) return []
+  return [
+    ...day.stages.map((stage) => ({
+      id: stage.id,
+      kind: 'stage' as const,
+      title: `${stage.origin.name} → ${stage.destination.name}`,
+      label: stage.title,
+      start: stage.planned_start,
+      end: stage.planned_end,
+      icon: stage.mode === 'driving' ? '🚙' : stage.mode === 'walking' ? '🚶' : stage.mode === 'riding' ? '🚲' : '🚌',
+    })),
+    ...day.activities.map((activity) => ({
+      id: activity.id,
+      kind: 'activity' as const,
+      title: activity.place.name,
+      label: activity.type === 'hotel' ? '住宿' : activity.type === 'meal' ? '用餐' : '景点停留',
+      start: activity.planned_start || '',
+      end: activity.planned_end || '',
+      icon: activity.type === 'hotel' ? '🏨' : activity.type === 'meal' ? '🍜' : '🏞️',
+    })),
+  ].filter((item) => item.start).sort((left, right) => left.start.localeCompare(right.start))
 })
 const allStages = computed(() =>
   (store.trip?.days ?? []).flatMap((day, dayIndex) =>
@@ -108,6 +135,7 @@ async function load() {
       connect(tripId)
       await refreshPlanning()
     }
+    ensureCurrentSelection()
   } catch {
     if (tripId === 'trip_wuhan_lushan_demo') {
       store.trip = mockTrip as unknown as typeof store.trip
@@ -130,8 +158,8 @@ async function refreshPlanning() {
     const snapshot = await fetchPlanning(tripId)
     planningSnapshot.value = snapshot
     if (snapshot.status === 'completed') {
-      store.trip = await fetchTrip(tripId)
-      if (!store.currentDay) store.setDay(0)
+      await hydrateTripProgressively(await fetchTrip(tripId))
+      ensureCurrentSelection()
       await nextTick()
       centerCurrentStage('auto')
       return
@@ -150,6 +178,74 @@ async function refreshPlanning() {
   } catch (error) {
     planningError.value = error instanceof Error ? error.message : '无法读取规划进度'
   }
+}
+
+function ensureCurrentSelection() {
+  if (!store.trip?.days.length) return
+  const day = store.currentDay
+  if (!day) {
+    store.setDay(0)
+    return
+  }
+  if (!day.stages.some((stage) => stage.id === store.currentStageId)) {
+    store.setStage(day.stages[0])
+  }
+}
+
+function pause(ms: number) {
+  return new Promise<void>((resolve) => window.setTimeout(resolve, ms))
+}
+
+async function hydrateTripProgressively(nextTrip: Trip) {
+  const existing = store.trip
+  const currentDays = nextTrip.days.map((day) => {
+    const previous = existing?.days.find((item) => item.id === day.id)
+    return previous
+      ? { ...day, stages: [...previous.stages], activities: [...previous.activities], items: [...previous.items] }
+      : { ...day, stages: [], activities: [], items: [] }
+  })
+  const stageIds = new Set(currentDays.flatMap((day) => day.stages.map((stage) => stage.id)))
+  const activityIds = new Set(currentDays.flatMap((day) => day.activities.map((activity) => activity.id)))
+  const missing = nextTrip.days.reduce(
+    (count, day) => count
+      + day.stages.filter((stage) => !stageIds.has(stage.id)).length
+      + day.activities.filter((activity) => !activityIds.has(activity.id)).length,
+    0,
+  )
+  if (!missing) {
+    store.trip = nextTrip
+    return
+  }
+  contentHydrating.value = true
+  let working: Trip = { ...nextTrip, days: currentDays }
+  store.trip = working
+  for (let dayIndex = 0; dayIndex < nextTrip.days.length; dayIndex += 1) {
+    const target = nextTrip.days[dayIndex]
+    for (const stage of target.stages) {
+      if (working.days[dayIndex].stages.some((item) => item.id === stage.id)) continue
+      working = {
+        ...working,
+        days: working.days.map((item, index) => index === dayIndex
+          ? { ...item, stages: [...item.stages, stage], items: [...item.items, { type: 'stage', id: stage.id }] }
+          : item),
+      }
+      store.trip = working
+      await pause(105)
+    }
+    for (const activity of target.activities) {
+      if (working.days[dayIndex].activities.some((item) => item.id === activity.id)) continue
+      working = {
+        ...working,
+        days: working.days.map((item, index) => index === dayIndex
+          ? { ...item, activities: [...item.activities, activity], items: [...item.items, { type: 'activity', id: activity.id }] }
+          : item),
+      }
+      store.trip = working
+      await pause(115)
+    }
+  }
+  store.trip = nextTrip
+  contentHydrating.value = false
 }
 
 async function handleMapPoint(point: { name: string; address?: string; longitude: number; latitude: number }) {
@@ -477,7 +573,7 @@ watch(
       <span class="eyebrow">ROADMAN AGENTS 正在协作</span>
       <h2>{{ planningSnapshot.status === 'failed' ? '这次行程需要调整后再规划' : planningSnapshot.clarification_question || '正在把行程一项一项加入详情页' }}</h2>
       <div v-if="planningSnapshot.status !== 'failed'" class="planning-event-list">
-        <article v-for="(event, index) in store.planningEvents.slice(-7)" :key="`${event.event}-${index}`">
+        <article v-for="(event, index) in store.planningEvents.slice(-7)" :key="`${event.event}-${index}`" :style="{ '--item-index': index }">
           <i :class="{ active: index === store.planningEvents.slice(-7).length - 1 }" />
           <div><strong>{{ planningEventLabel(event) }}</strong><span>{{ event.progress }}% · {{ planningAgentName(event) }}</span></div>
         </article>
@@ -532,6 +628,17 @@ watch(
             <span>{{ store.currentDay.total_distance_km }} km · {{ formatDuration(store.currentDay.total_drive_minutes) }}</span>
             <span>{{ store.currentDay.weather_summary }}</span>
           </div>
+          <section class="day-timeline" aria-label="全天时间线">
+            <header><strong>全天安排</strong><span>{{ dayTimeline.length }} 项</span></header>
+            <div v-if="dayTimeline.length" class="day-timeline-list">
+              <button v-for="item in dayTimeline" :key="item.id" type="button" @click="item.kind === 'stage' ? selectStageById(item.id) : selectActivityById(item.id)">
+                <time>{{ item.start.slice(11, 16) }}</time>
+                <i>{{ item.icon }}</i>
+                <span><b>{{ item.label }}</b><small>{{ item.title }}</small></span>
+              </button>
+            </div>
+            <p v-else>Agent 正在补齐当天安排…</p>
+          </section>
           <div class="category-tabs">
             <button
               v-for="item in categories"
@@ -595,6 +702,7 @@ watch(
                 :key="item.stage.id"
                 :data-stage-id="item.stage.id"
                 :class="['stage-card', { active: item.stage.id === store.currentStageId }]"
+                :style="{ '--item-index': item.stage.sequence }"
                 @click="selectStageFromCard(item)"
               >
                 <header>

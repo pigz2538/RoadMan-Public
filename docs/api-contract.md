@@ -130,3 +130,9 @@ SSE 使用命名事件，每条事件包含单调递增的 `id:`。客户端断�
 - `GET /api/v1/trips/{trip_id}/roadbook.html`：统一 HTML 报告模板，包含路线图、景点/餐饮/住宿图片卡片和逐日阶段详情。
 - `MovementStage` 与 `RouteSegment` 支持可选 `elevation_gain_m`；步行/骑行阶段可展示路线总爬升。Docker 默认开启 `ENABLE_ROUTE_ELEVATION`，高程服务失败时降级为“高程数据暂不可用”。
 - 配置 Ollama Agent 后，`POST /api/v1/trips/preflight` 会始终经过 Requirement Agent，由 Agent 语义判断同行人数；确定性解析器只负责离线兜底和明确数字，不对“情侣”等关系词做本地人数推断。
+
+### 近期字段与展示约定
+
+- `TripRequest` / `PreflightResponse.summary` 支持可选 `departure_time`、`return_time`（`HH:MM`）。需求中明确的点号/斜杠日期优先于模型输出；“中午/下午”等自然语言时间会标准化后传给阶段编排。
+- 规划编排会优先填充每日 2–4 个景点（受候选数据和时间窗口约束），并为每天生成三餐与住宿活动。餐饮活动的 `user_note` 使用早餐/午餐/晚餐标记，前端按全天时间线展示。
+- 详情页的最终数据采用渐进 hydration：后台持久化阶段和活动后，客户端按阶段、活动顺序逐项加入视图；这只是展示节奏，不改变服务端 canonical Trip。

@@ -84,7 +84,11 @@ def schedule_tourism_activities(
         scheduled_attractions = [
             item for item in activities if item.get("type") == "attraction"
         ]
-        target_attractions = min(3, max(1, len(stages)))
+        # A multi-day stay should not collapse into one transfer plus a
+        # single attraction. Keep enough breathing room for a comfortable
+        # morning/afternoon/evening plan while never exceeding four curated
+        # attractions per day.
+        target_attractions = min(4, max(2, len(stages) + 1))
         if len(scheduled_attractions) < target_attractions:
             stage_ranges = [
                 (

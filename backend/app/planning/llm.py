@@ -22,8 +22,10 @@ class OllamaRequirementExtractor:
         prompt = (
             "你是 RoadMan Requirement Agent，只抽取需求，禁止规划路线。"
             f"今天是 {today.isoformat()}。将用户文本转成单个 JSON 对象，字段仅允许："
-            "origin_name,destination_name,start_date,end_date,travelers,preferences。"
+            "origin_name,destination_name,start_date,end_date,departure_time,return_time,travelers,preferences。"
             "日期必须 YYYY-MM-DD；未知字段用 null 或空数组。"
+            "departure_time/return_time 使用 HH:MM；如‘中午出发’应理解为 12:00，"
+            "如未说明时间就填 null。"
             "travelers 必须根据语义判断同行人数：例如情侣/夫妻通常是 2 人，"
             "一家三口是 3 人；如果文本没有足够依据就填 null，绝不要机械默认 1。"
             "如果用户明确说了人数，以明确人数为准。不要 Markdown。用户文本："
@@ -44,10 +46,25 @@ class OllamaRequirementExtractor:
                 response.raise_for_status()
                 parsed = _parse_json_object(response.json().get("response", ""))
                 merged = _merge_extraction(deterministic, parsed)
+                # Calendar tokens and explicit clock hints are deterministic
+                # user constraints. Do not let an Agent hallucinate another
+                # year while still allowing it to infer semantic fields.
+                for date_field in ("start_date", "end_date"):
+                    if deterministic.get(date_field):
+                        merged[date_field] = deterministic[date_field]
+                for clock_field in ("departure_time", "return_time"):
+                    if deterministic.get(clock_field):
+                        merged[clock_field] = deterministic[clock_field]
                 if merged.get("destination_name"):
                     merged["destination_name"] = _normalize_place_name(
                         str(merged["destination_name"])
                     )
+                for clock_field in ("departure_time", "return_time"):
+                    normalized_clock = _normalize_clock(merged.get(clock_field))
+                    if normalized_clock:
+                        merged[clock_field] = normalized_clock
+                    else:
+                        merged.pop(clock_field, None)
                 has_explicit_travelers = bool(
                     re.search(r"[一二三四五六七八九十两\d]+\s*(?:人|位|口)", raw_text)
                 )
@@ -209,6 +226,8 @@ def _parse_json_object(text: str) -> dict[str, Any]:
         "destination_name",
         "start_date",
         "end_date",
+        "departure_time",
+        "return_time",
         "travelers",
         "preferences",
         "issues",
@@ -272,6 +291,11 @@ def deterministic_extract(raw_text: str, today: date) -> dict[str, Any]:
         date.fromisoformat(value).isoformat()
         for value in re.findall(r"\b\d{4}-\d{2}-\d{2}\b", raw_text)
     ]
+    for month, day_value in re.findall(r"(?<!\d)(\d{1,2})[./](\d{1,2})(?!\d)", raw_text):
+        try:
+            explicit_dates.append(date(today.year, int(month), int(day_value)).isoformat())
+        except ValueError:
+            continue
     if not explicit_dates:
         for year, month, day_value in re.findall(
             r"(?:(\d{4})年)?(\d{1,2})月(\d{1,2})日",
@@ -299,6 +323,11 @@ def deterministic_extract(raw_text: str, today: date) -> dict[str, Any]:
         result["start_date"] = (today + timedelta(days=2)).isoformat()
     if "昨天" in raw_text and any(word in raw_text for word in ("回", "返", "抵达", "到达")):
         result["end_date"] = (today - timedelta(days=1)).isoformat()
+    departure_time, return_time = _extract_clock_preferences(raw_text)
+    if departure_time:
+        result["departure_time"] = departure_time
+    if return_time:
+        result["return_time"] = return_time
     route_match = re.search(
         r"从(?P<origin>[\u4e00-\u9fffA-Za-z0-9·]+?)(?:出发)?(?:去|到|前往)"
         r"(?P<destination>[\u4e00-\u9fffA-Za-z0-9·]+?)(?=，|,|。|；|;|两天|一日|周[一二三四五六日天]|$)",
@@ -381,3 +410,66 @@ def _coerce_travelers(value: Any) -> int | None:
         if match:
             return _cn_number(match.group(1))
     return None
+
+
+def _normalize_clock(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    match = re.fullmatch(r"\s*(\d{1,2}):(\d{2})\s*", value)
+    if not match:
+        return None
+    hour, minute = int(match.group(1)), int(match.group(2))
+    if hour > 23 or minute > 59:
+        return None
+    return f"{hour:02d}:{minute:02d}"
+
+
+def _extract_clock_preferences(raw_text: str) -> tuple[str | None, str | None]:
+    """Extract explicit day-boundary hints for the offline fallback only."""
+    marker_hours = {
+        "凌晨": 5,
+        "清晨": 6,
+        "早上": 8,
+        "上午": 9,
+        "中午": 12,
+        "下午": 14,
+        "傍晚": 17,
+        "晚上": 19,
+    }
+    departure: str | None = None
+    return_time: str | None = None
+    for marker, hour in marker_hours.items():
+        if re.search(rf"{marker}[^，。；,;]{{0,8}}(?:从|出发|启程)", raw_text):
+            departure = f"{hour:02d}:00"
+        if re.search(rf"(?:返程|返回|回到|回来)[^，。；,;]{{0,8}}{marker}", raw_text):
+            return_time = f"{hour:02d}:00"
+    prefix_departure = re.search(
+        r"(早上|上午|中午|下午|傍晚|晚上)\s*(\d{1,2})(?:[:：点时](\d{1,2}))?"
+        r"[^，。；,;]{0,8}(?:从|出发|启程)",
+        raw_text,
+    )
+    if prefix_departure:
+        marker = prefix_departure.group(1)
+        hour = int(prefix_departure.group(2))
+        minute = int(prefix_departure.group(3) or 0)
+        if marker in {"下午", "傍晚", "晚上"} and hour < 12:
+            hour += 12
+        if marker == "中午" and hour < 11:
+            hour += 12
+        departure = f"{hour:02d}:{minute:02d}"
+    explicit_departure = re.search(
+        r"(?:从|出发|启程)[^，。；,;]{0,12}?(早上|上午|中午|下午|傍晚|晚上)?"
+        r"\s*(\d{1,2})(?:[:：点时](\d{1,2}))?",
+        raw_text,
+    )
+    if explicit_departure:
+        marker = explicit_departure.group(1)
+        hour = int(explicit_departure.group(2))
+        minute = int(explicit_departure.group(3) or 0)
+        if marker in {"下午", "傍晚", "晚上"} and hour < 12:
+            hour += 12
+        if marker == "中午" and hour < 11:
+            hour += 12
+        if 0 <= hour <= 23 and 0 <= minute <= 59:
+            departure = f"{hour:02d}:{minute:02d}"
+    return departure, return_time

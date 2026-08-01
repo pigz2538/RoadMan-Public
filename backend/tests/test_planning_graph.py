@@ -8,6 +8,7 @@ from app.api.trips import get_trip_risks, get_trip_services
 from app.db import SessionLocal, create_tables
 from app.domain.models import SkillResult, TripCreate, TripRequest, VehicleProfile
 from app.planning.graph import _ensure_coordinates, _movement_stage, build_planning_graph
+from app.planning.deep_drive import _ensure_daily_meals
 from app.planning.llm import OllamaRequirementExtractor, deterministic_extract
 from app.planning.runner import run_planning
 from app.repositories import TripRepository, VehicleRepository
@@ -24,7 +25,42 @@ def test_requirement_extractor_handles_departure_and_later_arrival_time():
 
     assert extracted["origin_name"] == "武汉"
     assert extracted["destination_name"] == "北京"
+    assert extracted["departure_time"] == "15:00"
     assert "travelers" not in extracted
+
+
+def test_deterministic_extractor_understands_midday_departure_without_defaulting_to_eight():
+    extracted = deterministic_extract(
+        "8.11中午从湖州南浔站出发，8.14返程回到南浔站，在乌镇及其周边转转",
+        date(2026, 8, 1),
+    )
+
+    assert extracted["departure_time"] == "12:00"
+    assert extracted["start_date"] == "2026-08-11"
+    assert extracted["end_date"] == "2026-08-14"
+
+
+def test_daily_meals_follow_a_late_departure_and_avoid_stage_overlap():
+    day = {
+        "id": "day_late",
+        "date": "2026-08-11",
+        "stages": [
+            {
+                "id": "stage_late",
+                "planned_start": "2026-08-11T12:00:00+08:00",
+                "planned_end": "2026-08-11T12:30:00+08:00",
+                "origin": {"name": "南浔站"},
+                "destination": {"name": "乌镇"},
+            }
+        ],
+    }
+
+    activities = _ensure_daily_meals(day, [], {})
+    meals = {item["user_note"]: item for item in activities}
+
+    assert len(meals) == 3
+    assert meals["每日早餐安排"]["planned_start"].startswith("2026-08-11T09:00")
+    assert meals["每日午餐安排"]["planned_start"].startswith("2026-08-11T13:00")
 
 
 def test_deterministic_extractor_does_not_guess_relationship_based_party_size():

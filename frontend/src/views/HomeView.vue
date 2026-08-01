@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   Bell, ChevronDown, CircleUserRound, CloudSun, Grid2X2, Paperclip,
@@ -13,7 +13,9 @@ import {
 } from '../api/trips'
 
 const router = useRouter()
-const prompt = ref('周六早上从武汉出发，去庐山两天一夜，周日晚八点前回来，喜欢自然景观')
+const PROMPT_STORAGE_KEY = 'roadman:last-trip-prompt'
+const promptSuggestion = '周六早上从武汉出发，去庐山两天一夜，周日晚八点前回来，喜欢自然景观'
+const prompt = ref('')
 const activeMenu = ref('账户设置')
 const drawerOpen = ref(false)
 const accountMenuOpen = ref(false)
@@ -50,6 +52,7 @@ const quickActions = [
 ]
 
 onMounted(() => {
+  prompt.value = window.sessionStorage.getItem(PROMPT_STORAGE_KEY) || ''
   isFirefox.value = /firefox/i.test(navigator.userAgent)
   void import('@google/model-viewer').then(({ ModelViewerElement }) => {
     // The model is intentionally loaded, but keep adaptive rendering bounded.
@@ -58,6 +61,12 @@ onMounted(() => {
   }).catch(() => {
     modelError.value = true
   })
+})
+
+watch(prompt, (value) => {
+  if (typeof window === 'undefined') return
+  if (value.trim()) window.sessionStorage.setItem(PROMPT_STORAGE_KEY, value)
+  else window.sessionStorage.removeItem(PROMPT_STORAGE_KEY)
 })
 
 function handleModelLoad(event: Event) {
@@ -184,9 +193,9 @@ function activate(label: string) {
           alt="可旋转的 RoadMan 3D 车辆模型"
           camera-controls
           v-bind="vehicleMotionAttributes"
-          camera-orbit="35deg 70deg 170%"
-          min-camera-orbit="auto auto 115%"
-          max-camera-orbit="auto auto 300%"
+          camera-orbit="35deg 70deg 85%"
+          min-camera-orbit="auto auto 60%"
+          max-camera-orbit="auto auto 260%"
           field-of-view="28deg"
           min-field-of-view="26deg"
           max-field-of-view="38deg"
@@ -308,7 +317,7 @@ function activate(label: string) {
               v-model="prompt"
               @input="resetPreflight"
               @keyup.enter="startPlanning"
-              placeholder="输入目的地，或描述您的旅行设想…"
+              aria-label="旅行需求"
             />
             <div class="composer-actions">
               <button class="composer-icon" aria-label="添加附件" title="添加附件（预留）">
@@ -326,13 +335,18 @@ function activate(label: string) {
               </button>
               <button
                 class="primary-button"
-                :disabled="planning || preflightChecking || Boolean(preflight && !preflight.ready)"
+                :disabled="planning || preflightChecking || !prompt.trim() || Boolean(preflight && !preflight.ready)"
                 @click="startPlanning"
               >
                 <Send :size="20" />
                 {{ planning ? '正在启动…' : preflightChecking ? '正在检查…' : preflight && !preflight.ready ? '请先完成确认' : '开始规划' }}
               </button>
             </div>
+          </div>
+          <div v-if="!prompt.trim()" class="prompt-suggestion">
+            <span>可以这样描述你的出行时间、目的地、同行人和偏好：</span>
+            <button type="button" @click="prompt = promptSuggestion">使用示例</button>
+            <em>{{ promptSuggestion }}</em>
           </div>
         </div>
       </div>

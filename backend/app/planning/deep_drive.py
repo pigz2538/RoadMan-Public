@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 from math import ceil
 from typing import Any
 
@@ -639,13 +639,31 @@ def _ensure_daily_meals(
     ]
     base_place = stages[0]["origin"]
     destination_place = stages[-1]["destination"]
-    day_date = datetime.fromisoformat(stages[0]["planned_start"])
+    first_start = datetime.fromisoformat(stages[0]["planned_start"])
+    day_date = first_start
+    breakfast_hour = 9 if first_start.hour >= 11 else 7
+    lunch_hour = 13 if first_start.hour >= 11 else 12
     meal_slots = [
-        ("早餐", 7, 30),
-        ("午餐", 12, 0),
-        ("晚餐", 18, 30),
+        ("早餐", time(hour=breakfast_hour, minute=0 if breakfast_hour == 9 else 30), time(6, 0), time(11, 0)),
+        ("午餐", time(hour=lunch_hour), time(11, 0), time(15, 0)),
+        ("晚餐", time(18, 30), time(17, 0), time(22, 0)),
     ]
-    for slot_index, (label, hour, minute) in enumerate(meal_slots):
+    stage_ranges = [
+        (
+            datetime.fromisoformat(stage["planned_start"]),
+            datetime.fromisoformat(stage["planned_end"]),
+        )
+        for stage in stages
+    ]
+    occupied = [
+        *stage_ranges,
+        *[
+            (datetime.fromisoformat(item["planned_start"]), datetime.fromisoformat(item["planned_end"]))
+            for item in activities
+            if item.get("planned_start") and item.get("planned_end")
+        ],
+    ]
+    for slot_index, (label, preferred_time, window_start_time, window_end_time) in enumerate(meal_slots):
         if any(
             datetime.fromisoformat(item["planned_start"]).hour
             in (
@@ -667,7 +685,12 @@ def _ensure_daily_meals(
             place = deepcopy(base_place)
         if label != "午餐" or not meal_places:
             place["name"] = f"{place['name']}附近{label}"
-        start = day_date.replace(hour=hour, minute=minute)
+        preferred = day_date.replace(hour=preferred_time.hour, minute=preferred_time.minute)
+        window_start = day_date.replace(hour=window_start_time.hour, minute=window_start_time.minute)
+        window_end = day_date.replace(hour=window_end_time.hour, minute=window_end_time.minute)
+        start = _find_meal_slot(preferred, window_start, window_end, occupied)
+        if start is None:
+            continue
         activities.append(
             _activity(
                 day["id"],
@@ -680,7 +703,27 @@ def _ensure_daily_meals(
                 required=True,
             )
         )
+        occupied.append((start, start + timedelta(minutes=45)))
     return _dedupe_activities(activities)
+
+
+def _find_meal_slot(
+    preferred: datetime,
+    window_start: datetime,
+    window_end: datetime,
+    occupied: list[tuple[datetime, datetime]],
+) -> datetime | None:
+    duration = timedelta(minutes=45)
+    candidates = [
+        preferred + timedelta(minutes=15 * offset)
+        for offset in range(-12, 13)
+    ]
+    for candidate in sorted(candidates, key=lambda value: abs((value - preferred).total_seconds())):
+        if candidate < window_start or candidate + duration > window_end:
+            continue
+        if all(candidate + duration <= start or candidate >= end for start, end in occupied):
+            return candidate
+    return None
 
 
 def _dedupe_activities(items: list[dict[str, Any]]) -> list[dict[str, Any]]:

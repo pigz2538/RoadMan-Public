@@ -56,6 +56,16 @@ test('首页 3D 车辆保留滚轮缩放和大画布缓冲', async ({ page }) =>
   expect(afterRadius).toBeLessThan(beforeRadius)
 })
 
+test('首页空输入显示外置灰色提示并保留上次需求', async ({ page }) => {
+  await page.goto('/home')
+  const input = page.locator('#trip-prompt')
+  await expect(input).toHaveValue('')
+  await expect(page.locator('.prompt-suggestion')).toContainText('可以这样描述')
+  await input.fill('8月11日中午从南浔出发去乌镇，情侣舒适出游')
+  await page.reload()
+  await expect(input).toHaveValue('8月11日中午从南浔出发去乌镇，情侣舒适出游')
+})
+
 test('规划页支持天、阶段和节点选择', async ({ page }) => {
   page.on('console', (message) => {
     if (message.type() === 'warning') console.warn(message.text())
@@ -63,7 +73,7 @@ test('规划页支持天、阶段和节点选择', async ({ page }) => {
   await page.goto('/trips/trip_wuhan_lushan_demo/plan')
   await expect(page.getByText('武汉—庐山两天一夜自然之旅')).toBeVisible()
   await expect(page.getByText('高德 JSAPI · 真实道路轨迹')).toBeVisible({ timeout: 25_000 })
-  await page.getByRole('button', { name: /高速转盘山公路/ }).click()
+  await page.locator('.stage-card').filter({ hasText: '高速转盘山公路' }).click()
   await expect(page.getByText(/当前阶段：高速转盘山公路/)).toBeVisible()
   const stageCards = page.locator('.stage-card')
   expect(await stageCards.count()).toBe(6)

@@ -74,7 +74,7 @@ def build_planning_graph(
             current["origin"] = {"name": extracted["origin_name"]}
         if extracted.get("destination_name") and not current.get("destination"):
             current["destination"] = {"name": extracted["destination_name"]}
-        for field in ("start_date", "end_date", "travelers"):
+        for field in ("start_date", "end_date", "departure_time", "return_time", "travelers"):
             if extracted.get(field) is not None and current.get(field) is None:
                 current[field] = extracted[field]
         current["raw_text"] = state["raw_input"]
@@ -794,7 +794,11 @@ def build_planning_graph(
                         origin=request["origin"],
                         destination=request["destination"],
                         route=outbound,
-                        start_at=datetime.combine(day_date, time(8, 0), tzinfo=SHANGHAI),
+                        start_at=_request_clock(
+                            day_date,
+                            request.get("departure_time"),
+                            default=time(8, 0),
+                        ),
                     )
                 )
             local_start = (
@@ -829,7 +833,11 @@ def build_planning_graph(
                 inbound = await prepare_route(inbound)
                 return_start = max(
                     local_start,
-                    datetime.combine(day_date, time(14, 30), tzinfo=SHANGHAI),
+                    _request_clock(
+                        day_date,
+                        request.get("return_time"),
+                        default=time(14, 30),
+                    ),
                 )
                 stages.append(
                     _movement_stage(
@@ -1612,6 +1620,19 @@ def _movement_stage(
             for item in route.get("sources", [])
         ],
     )
+
+
+def _request_clock(day: date, value: Any, *, default: time) -> datetime:
+    if isinstance(value, time):
+        selected = value
+    else:
+        selected = default
+        if isinstance(value, str):
+            try:
+                selected = time.fromisoformat(value)
+            except ValueError:
+                selected = default
+    return datetime.combine(day, selected, tzinfo=SHANGHAI)
 
 
 def _fallback_local_route(

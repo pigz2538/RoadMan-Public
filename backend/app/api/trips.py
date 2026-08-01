@@ -365,6 +365,8 @@ async def preflight_trip(
         "destination_name": extracted.get("destination_name"),
         "start_date": extracted.get("start_date"),
         "end_date": extracted.get("end_date"),
+        "departure_time": extracted.get("departure_time"),
+        "return_time": extracted.get("return_time"),
         "travelers": extracted.get("travelers") or 1,
         "preferences": extracted.get("preferences", []),
         "clarifications": [

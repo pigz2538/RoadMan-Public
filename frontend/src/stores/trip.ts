@@ -63,6 +63,8 @@ export const useTripStore = defineStore('trip', () => {
     queuedPlanningEvents.value = rest
     planningAnimationActive.value = true
     planningEvent.value = next
+    // Only commit an event to the visible timeline when its turn starts.
+    // Incoming SSE bursts stay queued instead of repainting the whole list at once.
     planningEvents.value = [...planningEvents.value, next].slice(-40)
     planningAnimationTimer = setTimeout(() => {
       planningAnimationActive.value = false

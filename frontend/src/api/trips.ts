@@ -33,6 +33,8 @@ export interface PreflightResult {
     destination_name?: string
     start_date?: string
     end_date?: string
+    departure_time?: string
+    return_time?: string
     travelers?: number
     preferences?: string[]
     clarifications?: string[]
@@ -107,6 +109,8 @@ export async function createTrip(
         destination: extracted.destination_name ? { name: extracted.destination_name } : undefined,
         start_date: extracted.start_date,
         end_date: extracted.end_date,
+        departure_time: extracted.departure_time,
+        return_time: extracted.return_time,
         travelers: extracted.travelers,
         preferences: extracted.preferences,
       },

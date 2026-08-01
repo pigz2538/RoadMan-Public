@@ -178,6 +178,32 @@
       "default": null,
       "title": "End Date"
     },
+    "departure_time": {
+      "anyOf": [
+        {
+          "format": "time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Departure Time"
+    },
+    "return_time": {
+      "anyOf": [
+        {
+          "format": "time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Return Time"
+    },
     "return_before": {
       "anyOf": [
         {

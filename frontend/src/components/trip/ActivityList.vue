@@ -25,6 +25,13 @@ function formatStayDuration(minutes: number) {
   if (hours) return `${hours}小时`
   return `${rest}分钟`
 }
+
+function activityKindLabel(activity: Activity) {
+  const meal = activity.user_note?.match(/每日(早餐|午餐|晚餐)安排/)
+  if (meal) return meal[1]
+  if (activity.type === 'hotel') return '住宿'
+  return `停留 ${formatStayDuration(activity.duration_minutes)}`
+}
 </script>
 
 <template>
@@ -33,6 +40,7 @@ function formatStayDuration(minutes: number) {
       v-for="(activity, index) in activities"
       :key="activity.id"
       :class="{ selected: selectedId === activity.id }"
+      :style="{ '--item-index': index }"
       @click="$emit('select', activity)"
     >
       <div class="activity-visual" :class="{ photo: activity.image_url }">
@@ -42,7 +50,7 @@ function formatStayDuration(minutes: number) {
       <div class="activity-copy">
         <strong><b>{{ index + 1 }}</b>{{ activity.place.name }}</strong>
         <span>
-          {{ activity.type === 'hotel' ? '住宿' : `停留 ${formatStayDuration(activity.duration_minutes)}` }}
+          {{ activityKindLabel(activity) }}
           · {{ activity.place.city }}
         </span>
         <span v-if="activity.planned_start && activity.planned_end" class="activity-meta">
