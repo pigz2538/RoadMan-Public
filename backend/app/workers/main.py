@@ -1,16 +1,44 @@
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import structlog
 from arq.connections import RedisSettings
+from arq import cron
+from sqlalchemy import select
 
 from ..core.config import get_settings
-from ..db import JobRow, SessionLocal
-from ..domain.models import JobStatus
+from ..db import FileRow, JobRow, SessionLocal
+from ..domain.models import FileStatus, JobStatus
 from ..planning import pause_planning, run_planning
 from ..repositories import TripRepository
 
 logger = structlog.get_logger()
+
+
+async def cleanup_expired_files(_: dict) -> dict:
+    settings = get_settings()
+    upload_root = Path(settings.upload_dir).resolve()
+    cutoff = datetime.now(timezone.utc) - timedelta(days=settings.file_retention_days)
+    removed = 0
+    async with SessionLocal() as session:
+        rows = list((await session.scalars(
+            select(FileRow).where(
+                FileRow.created_at < cutoff,
+                FileRow.status != FileStatus.deleted,
+            )
+        )).all())
+        for row in rows:
+            candidate = Path(row.storage_path).resolve()
+            if candidate != upload_root and upload_root not in candidate.parents:
+                logger.warning("file_cleanup_skipped_outside_upload_root", file_id=row.id)
+                continue
+            candidate.unlink(missing_ok=True)
+            row.status = FileStatus.deleted
+            removed += 1
+        await session.commit()
+    logger.info("file_retention_cleanup_completed", removed=removed)
+    return {"removed": removed, "retention_days": settings.file_retention_days}
 
 
 async def execute_job(_: dict, job_id: str) -> dict:
@@ -97,5 +125,6 @@ async def execute_job(_: dict, job_id: str) -> dict:
 
 class WorkerSettings:
     functions = [execute_job]
+    cron_jobs = [cron(cleanup_expired_files, hour=3, minute=15)]
     queue_name = "roadman"
     redis_settings = RedisSettings.from_dsn(get_settings().redis_url)

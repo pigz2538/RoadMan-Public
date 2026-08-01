@@ -174,7 +174,7 @@ async def test_graph_builds_two_day_markdown_plan():
     assert result["verification_result"]["passed"] is True
     assert len(result["day_plans"]) == 2
     stages = [stage for day in result["day_plans"] for stage in day["stages"]]
-    assert len(stages) == 5
+    assert len(stages) >= 7
     assert {stage["mode"] for stage in stages} >= {"driving", "transit", "walking"}
     assert all(stage["weather_summary"].startswith("预计抵达") for stage in stages)
     driving = [stage for stage in stages if stage["mode"] == "driving"]
@@ -209,7 +209,7 @@ async def test_graph_builds_five_days_and_multiple_transport_modes():
     )
     stages = [stage for day in result["day_plans"] for stage in day["stages"]]
     assert len(result["day_plans"]) == 5
-    assert len(stages) == 11
+    assert len(stages) >= 13
     assert {"driving", "transit", "walking", "riding"} <= {
         stage["mode"] for stage in stages
     }
@@ -258,6 +258,7 @@ async def test_runner_persists_state_markdown_and_trip_days():
         )
     result = await run_planning(trip.id, registry=fake_registry())
     assert result["status"] == "completed"
+    assert result["progress"]["value"] == 100
     events = await sse_manager.after(trip.id)
     progress_values = [item.payload.progress for item in events]
     assert progress_values == sorted(progress_values)

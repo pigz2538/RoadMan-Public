@@ -33,8 +33,10 @@ from ..planning.editing import (
     CandidatePatchRequest,
     DeleteActivityPatchRequest,
     EditIntentRequest,
+    MapPointPatchRequest,
     create_candidate_patch,
     create_delete_activity_patch,
+    create_map_point_patch,
     decide_candidate_patch,
     interpret_edit_intent,
     recompute_and_verify_patch,
@@ -42,7 +44,7 @@ from ..planning.editing import (
 )
 from ..repositories import JobRepository, TripRepository
 from ..services.job_queue import enqueue_job
-from ..services.exports import export_lines, render_long_image, render_pdf, render_pptx
+from ..services.exports import ReportAgent
 from ..services.sse import sse_manager
 from ..skills.base import SkillContext
 from ..skills.registry import SkillRegistry
@@ -424,6 +426,22 @@ async def preview_candidate_patch(
     return patch
 
 
+@router.post("/{trip_id}/patches/preview-map-point", response_model=PlanPatch)
+async def preview_map_point_patch(
+    trip_id: str,
+    payload: MapPointPatchRequest,
+    repo: TripRepository = Depends(get_repo),
+) -> PlanPatch:
+    trip = await repo.get(trip_id)
+    if not trip:
+        raise AppError("TRIP_NOT_FOUND", "行程不存在", 404, {"trip_id": trip_id})
+    state, markdown = await repo.get_planning_snapshot(trip_id)
+    state = state or {}
+    patch = create_map_point_patch(trip, state, payload)
+    await repo.save_planning_result(trip, state, markdown)
+    return patch
+
+
 @router.post("/{trip_id}/editing/interpret")
 async def interpret_trip_edit(
     trip_id: str,
@@ -645,6 +663,8 @@ async def get_roadbook(
     trip = await repo.get(trip_id)
     if not trip:
         raise AppError("TRIP_NOT_FOUND", "行程不存在", 404, {"trip_id": trip_id})
+    if trip.status != TripStatus.completed:
+        raise AppError("PLANNING_NOT_COMPLETED", "规划完成后才可导出行程安排", 409)
     _, markdown = await repo.get_planning_snapshot(trip_id)
     if not markdown:
         raise AppError("ROADBOOK_NOT_READY", "行程安排尚未生成", 409)
@@ -663,18 +683,19 @@ async def _export_snapshot(trip_id: str, repo: TripRepository, kind: str) -> Res
     trip = await repo.get(trip_id)
     if not trip:
         raise AppError("TRIP_NOT_FOUND", "行程不存在", 404, {"trip_id": trip_id})
+    if trip.status != TripStatus.completed:
+        raise AppError("PLANNING_NOT_COMPLETED", "规划完成后才可导出行程安排", 409)
     _, markdown = await repo.get_planning_snapshot(trip_id)
     if not markdown and not trip.days:
         raise AppError("ROADBOOK_NOT_READY", "行程安排尚未生成", 409)
-    lines = export_lines(trip, markdown or "")
-    renderers = {
-        "pdf": (render_pdf, "application/pdf", "pdf"),
-        "pptx": (render_pptx, "application/vnd.openxmlformats-officedocument.presentationml.presentation", "pptx"),
-        "png": (render_long_image, "image/png", "png"),
+    formats = {
+        "pdf": ("application/pdf", "pdf"),
+        "pptx": ("application/vnd.openxmlformats-officedocument.presentationml.presentation", "pptx"),
+        "png": ("image/png", "png"),
     }
-    renderer, media_type, extension = renderers[kind]
+    media_type, extension = formats[kind]
     return Response(
-        renderer(lines),
+        ReportAgent().render(trip, markdown or "", kind),
         media_type=media_type,
         headers={"Content-Disposition": f'attachment; filename="roadman-{trip_id}.{extension}"'},
     )

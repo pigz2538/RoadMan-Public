@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     enable_llm_requirement_extraction: bool = True
     max_clarification_rounds: int = 3
     planning_state_ttl_seconds: int = 24 * 60 * 60
+    file_retention_days: int = 30
     enable_rate_limit: bool = True
     rate_limit_per_minute: int = 600
 

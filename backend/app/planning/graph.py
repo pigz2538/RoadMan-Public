@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from datetime import date, datetime, time, timedelta
 from typing import Any, Literal
+from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 from langgraph.graph import END, START, StateGraph
@@ -26,7 +27,7 @@ from .deep_drive import (
     enrich_deep_drive_plan,
     verify_deep_drive_plan,
 )
-from .llm import OllamaRequirementExtractor
+from .llm import OllamaPoiCurator, OllamaRequirementExtractor
 from .recommendations import rank_tourism_candidates
 from .state import RoadManState
 from .tourism import schedule_tourism_activities, verify_tourism_plan
@@ -41,6 +42,7 @@ def build_planning_graph(
     progress_callback: ProgressCallback | None = None,
 ):
     extractor = OllamaRequirementExtractor(settings)
+    poi_curator = OllamaPoiCurator(settings)
 
     async def emit(
         state: RoadManState,
@@ -222,9 +224,9 @@ def build_planning_graph(
         destination = state["trip_request"]["destination"]
         coordinates = destination.get("coordinates")
         categories = {
-            "attractions": ("景点", 12),
-            "meals": ("餐厅", 10),
-            "hotels": ("酒店", 10),
+            "attractions": ("景点", 25),
+            "meals": ("餐厅", 20),
+            "hotels": ("酒店", 20),
         }
         candidates: dict[str, list[dict[str, Any]]] = {
             key: [] for key in categories
@@ -278,6 +280,8 @@ def build_planning_graph(
                         },
                         "source_records": flyai_sources,
                         "provider": flyai_hotels.provider,
+                        "image_url": item.get("image_url"),
+                        "detail_url": item.get("detail_url"),
                         "rating": item.get("rating"),
                         "ticket_or_price": (
                             {
@@ -337,7 +341,15 @@ def build_planning_graph(
                 candidates[category].append(
                     {
                         "place": place,
-                        "source_records": source_records,
+                        "detail_url": f"https://www.amap.com/search?query={quote(item['name'])}",
+                        "source_records": [
+                            *source_records,
+                            {
+                                "provider": "高德地图",
+                                "title": f"{item['name']} 地点详情",
+                                "url": f"https://www.amap.com/search?query={quote(item['name'])}",
+                            },
+                        ],
                         "provider": result.provider,
                     }
                 )
@@ -348,7 +360,7 @@ def build_planning_graph(
                     "longitude": coordinates["longitude"],
                     "latitude": coordinates["latitude"],
                     "radius_m": 25000,
-                    "limit": 12,
+                    "limit": 30,
                     "language": "en",
                 },
                 SkillContext(trip_id=state["trip_id"]),
@@ -358,23 +370,63 @@ def build_planning_graph(
                     item.model_dump(mode="json") for item in open_trip_map.sources
                 ]
                 tourism_sources.extend(source_records)
-                known_names = {
-                    item["place"]["name"].strip().lower()
-                    for item in candidates["attractions"]
+                osm_items = list(open_trip_map.data.get("items", []))
+                await emit(
+                    state,
+                    "discover_tourism",
+                    "Agent 正在比对高德与 OpenStreetMap 景点、合并同地点并生成中文显示名",
+                    66,
+                    event="tool_started",
+                    tool="ollama.poi_curator",
+                )
+                decisions = await poi_curator.curate(
+                    destination.get("city") or destination["name"],
+                    candidates["attractions"],
+                    osm_items,
+                )
+                decision_by_id = {
+                    str(item.get("source_id")): item for item in decisions
                 }
-                for item in open_trip_map.data.get("items", []):
+                merged_count = 0
+                translated_count = 0
+                added_count = 0
+                for item in osm_items:
                     name = str(item.get("name") or "").strip()
-                    # OpenTripMap is backed by OSM and its English endpoint
-                    # frequently returns Latin-only names in China. Do not
-                    # leak those labels into the Chinese itinerary; AMap and
-                    # FlyAI remain the authoritative local-name sources.
-                    if not name or not _contains_cjk(name) or name.lower() in known_names:
+                    decision = decision_by_id.get(str(item.get("id")), {})
+                    action = decision.get("action", "skip")
+                    if not name or action == "skip":
+                        continue
+                    if action == "merge":
+                        target_name = str(decision.get("merge_target_name") or "").replace(" ", "").lower()
+                        target = next(
+                            (
+                                candidate
+                                for candidate in candidates["attractions"]
+                                if target_name
+                                and (
+                                    target_name in candidate["place"]["name"].replace(" ", "").lower()
+                                    or candidate["place"]["name"].replace(" ", "").lower() in target_name
+                                )
+                            ),
+                            None,
+                        )
+                        if target:
+                            target["source_records"] = [
+                                *target.get("source_records", []),
+                                *source_records,
+                            ]
+                            target.setdefault("alternate_names", []).append(name)
+                            target.setdefault("agent_merge_reasons", []).append(decision.get("reason"))
+                            merged_count += 1
+                        continue
+                    display_name = str(decision.get("display_name_zh") or "").strip()
+                    if not display_name or not _contains_cjk(display_name):
                         continue
                     candidates["attractions"].append(
                         {
                             "place": {
                                 "id": item.get("id"),
-                                "name": name,
+                                "name": display_name,
                                 "name_en": item.get("name_en") or name,
                                 "name_local": item.get("name_local") or name,
                                 "city": destination.get("city"),
@@ -386,11 +438,33 @@ def build_planning_graph(
                             },
                             "categories": item.get("kinds"),
                             "rating": item.get("rating"),
-                            "source_records": source_records,
+                            "detail_url": item.get("detail_url"),
+                            "source_records": [
+                                *source_records,
+                                {
+                                    "provider": "OpenTripMap / OpenStreetMap",
+                                    "title": f"{display_name} 景点详情",
+                                    "url": item.get("detail_url"),
+                                },
+                            ],
                             "provider": open_trip_map.provider,
+                            "agent_reason": decision.get("reason"),
                         }
                     )
-                    known_names.add(name.lower())
+                    added_count += 1
+                    if display_name != name:
+                        translated_count += 1
+                await emit(
+                    state,
+                    "discover_tourism",
+                    (
+                        f"Agent 已合并 {merged_count} 个同地点，翻译 {translated_count} 个名称，"
+                        f"从 OSM 保留 {added_count} 个独立景点"
+                    ),
+                    67,
+                    event="tool_completed",
+                    tool="ollama.poi_curator",
+                )
         if flyai_ticket_items:
             for candidate in candidates["attractions"]:
                 candidate_name = candidate["place"]["name"].replace(" ", "").lower()
@@ -410,6 +484,8 @@ def build_planning_graph(
                     continue
                 candidate["ticket_name"] = match.get("ticket_name")
                 candidate["ticket_date"] = match.get("ticket_date")
+                candidate["image_url"] = match.get("image_url")
+                candidate["detail_url"] = match.get("detail_url")
                 if match.get("price_min_cny") is not None:
                     candidate["ticket_or_price"] = {
                         "currency": "CNY",
@@ -417,6 +493,62 @@ def build_planning_graph(
                         "maximum": match["price_max_cny"],
                         "estimated": match.get("price_estimated", False),
                     }
+            # Keep FlyAI-only attractions when the CLI returns coordinates;
+            # previously FlyAI could only enrich an existing AMap name match,
+            # making most of its recommendations invisible to the user.
+            existing_names = {
+                item.get("place", {}).get("name", "").replace(" ", "").lower()
+                for item in candidates["attractions"]
+            }
+            for item in flyai_ticket_items:
+                name = str(item.get("name") or "").strip()
+                longitude, latitude = item.get("longitude"), item.get("latitude")
+                if not name or longitude is None or latitude is None:
+                    continue
+                normalized = name.replace(" ", "").lower()
+                if any(
+                    normalized in existing or existing in normalized
+                    for existing in existing_names
+                    if existing
+                ):
+                    continue
+                candidates["attractions"].append(
+                    {
+                        "place": {
+                            "id": item.get("id"),
+                            "name": name,
+                            "address": item.get("address"),
+                            "city": destination.get("city"),
+                            "coordinates": {
+                                "longitude": float(longitude),
+                                "latitude": float(latitude),
+                            },
+                            "source_id": item.get("id") or name,
+                        },
+                        "detail_url": item.get("detail_url"),
+                        "image_url": item.get("image_url"),
+                        "source_records": [
+                            {
+                                "provider": "FlyAI / 飞猪",
+                                "title": f"{name} 景点详情",
+                                "url": item.get("detail_url") or "https://www.fliggy.com/",
+                            }
+                        ],
+                        "provider": "FlyAI / 飞猪",
+                        "rating": item.get("rating"),
+                        "ticket_or_price": (
+                            {
+                                "currency": "CNY",
+                                "minimum": item.get("price_min_cny"),
+                                "maximum": item.get("price_max_cny"),
+                                "estimated": item.get("price_estimated", False),
+                            }
+                            if item.get("price_min_cny") is not None
+                            else None
+                        ),
+                    }
+                )
+                existing_names.add(normalized)
         candidates = rank_tourism_candidates(
             candidates,
             destination,
@@ -469,7 +601,11 @@ def build_planning_graph(
                     },
                 ],
             }
-        places = [item["place"] for item in attraction_candidates]
+        places = _select_itinerary_places(
+            attraction_candidates,
+            destination,
+            max(2, len(state["day_plans"]) * 2),
+        )
         if not places:
             return {"local_routes": []}
 
@@ -483,18 +619,24 @@ def build_planning_graph(
         for day_index in local_day_indexes:
             anchor = destination
             for sequence in range(2):
-                target = places[cursor % len(places)]
-                cursor += 1
-                mode = modes[(day_index * 2 + sequence) % len(modes)]
-                route = await _route(
-                    registry,
-                    anchor,
-                    target,
-                    state["trip_id"],
-                    preferred_mode=mode,
-                    fallback_modes=["walking", "riding", "transit", "driving"],
-                )
-                if route.get("success"):
+                route = None
+                target = None
+                for _ in range(min(6, len(places))):
+                    target = places[cursor % len(places)]
+                    cursor += 1
+                    mode = modes[(day_index * 2 + sequence) % len(modes)]
+                    candidate_route = await _route(
+                        registry,
+                        anchor,
+                        target,
+                        state["trip_id"],
+                        preferred_mode=mode,
+                        fallback_modes=["walking", "riding", "transit", "driving"],
+                    )
+                    if candidate_route.get("success") and _local_route_reasonable(candidate_route.get("data", {})):
+                        route = candidate_route
+                        break
+                if route and target:
                     local_routes.append(
                         {
                             "day_index": day_index,
@@ -1135,12 +1277,19 @@ async def _route(
         },
         SkillContext(trip_id=trip_id),
     )
-    if result.success and isinstance(result.data, dict) and not _route_mode_feasible(result.data):
-        retry_modes = [
-            mode
-            for mode in ["transit", "driving", "riding"]
-            if mode != result.data.get("selected_mode")
-        ]
+    attempted = {result.data.get("selected_mode")} if result.success and isinstance(result.data, dict) else set()
+    retry_modes = [
+        mode
+        for mode in ["transit", "driving", "riding", "walking"]
+        if mode not in attempted
+    ]
+    while (
+        result.success
+        and isinstance(result.data, dict)
+        and not _route_mode_feasible(result.data)
+        and retry_modes
+    ):
+        retry_mode = retry_modes.pop(0)
         result = await registry.execute(
             "amap.route",
             {
@@ -1149,11 +1298,14 @@ async def _route(
                     **destination["coordinates"],
                     "city": destination.get("city"),
                 },
-                "preferred_mode": retry_modes[0],
-                "allowed_fallback_modes": retry_modes[1:],
+                "preferred_mode": retry_mode,
+                "allowed_fallback_modes": retry_modes,
             },
             SkillContext(trip_id=trip_id),
         )
+        if result.success and isinstance(result.data, dict):
+            selected_mode = result.data.get("selected_mode")
+            retry_modes = [mode for mode in retry_modes if mode != selected_mode]
     return {
         "success": result.success,
         "data": result.data,
@@ -1168,12 +1320,74 @@ def _route_mode_feasible(data: dict[str, Any]) -> bool:
     duration = int(data.get("duration_minutes") or 0)
     distance = float(data.get("distance_km") or 0)
     if mode == "walking":
-        return duration <= 180 and distance <= 20
+        return duration <= 45 and distance <= 3.5
     if mode == "riding":
-        return duration <= 240 and distance <= 60
+        return duration <= 75 and distance <= 15
     if mode == "transit":
-        return duration <= 360
+        return duration <= 120
     return True
+
+
+def _local_route_reasonable(data: dict[str, Any]) -> bool:
+    """A sightseeing transfer should not consume most of a half-day."""
+    duration = int(data.get("duration_minutes") or 0)
+    distance = float(data.get("distance_km") or 0)
+    return 0.05 <= distance <= 30 and 1 <= duration <= 75
+
+
+def _select_itinerary_places(
+    candidates: list[dict[str, Any]],
+    anchor: dict[str, Any],
+    limit: int,
+) -> list[dict[str, Any]]:
+    """Greedily balance Agent score with transfer distance to avoid scattered POIs."""
+    remaining: list[dict[str, Any]] = []
+    seen_names: set[str] = set()
+    seen_coordinates: list[tuple[float, float]] = []
+    for candidate in candidates:
+        place = candidate.get("place") or {}
+        normalized_name = str(place.get("name") or "").replace(" ", "").lower()
+        coordinates = place.get("coordinates") or {}
+        try:
+            point = (float(coordinates["longitude"]), float(coordinates["latitude"]))
+        except (KeyError, TypeError, ValueError):
+            point = None
+        duplicate_coordinate = bool(
+            point and any(abs(point[0] - existing[0]) < 0.001 and abs(point[1] - existing[1]) < 0.001 for existing in seen_coordinates)
+        )
+        if not normalized_name or normalized_name in seen_names or duplicate_coordinate:
+            continue
+        seen_names.add(normalized_name)
+        if point:
+            seen_coordinates.append(point)
+        remaining.append(candidate)
+    selected: list[dict[str, Any]] = []
+    current = anchor
+    while remaining and len(selected) < limit:
+        current_coordinates = current.get("coordinates") or {}
+
+        def utility(item: dict[str, Any]) -> float:
+            place = item.get("place") or {}
+            try:
+                distance = _haversine_km(
+                    RoutePoint(
+                        longitude=float(current_coordinates["longitude"]),
+                        latitude=float(current_coordinates["latitude"]),
+                    ),
+                    RoutePoint(
+                        longitude=float(place["coordinates"]["longitude"]),
+                        latitude=float(place["coordinates"]["latitude"]),
+                    ),
+                )
+            except (KeyError, TypeError, ValueError):
+                distance = 25.0
+            return float(item.get("score") or 0) - distance * 1.5
+
+        chosen = max(remaining, key=utility)
+        selected.append(chosen["place"])
+        current = chosen["place"]
+        remaining.remove(chosen)
+    return selected
 
 
 def _movement_stage(

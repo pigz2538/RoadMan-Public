@@ -5,6 +5,9 @@ RUN xargs npm install -g < /tmp/node-requirements.txt
 
 FROM python:3.11-slim
 
+RUN apt-get update && apt-get install -y --no-install-recommends fonts-noto-cjk \
+    && rm -rf /var/lib/apt/lists/*
+
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 WORKDIR /app
 COPY --from=flyai-runtime /usr/local/bin/node /usr/local/bin/node

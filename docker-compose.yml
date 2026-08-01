@@ -39,6 +39,7 @@ services:
       LOAD_LOCAL_SKILL_CREDENTIALS: "true"
       CORS_ORIGINS: http://localhost:8080
       UPLOAD_DIR: /app/data/uploads
+      FILE_RETENTION_DAYS: ${FILE_RETENTION_DAYS:-30}
     volumes:
       - roadman_uploads:/app/data/uploads
       - ./Skills/amap-lbs/apipkey.txt:/Skills/amap-lbs/apipkey.txt:ro
@@ -69,6 +70,7 @@ services:
       OLLAMA_MODEL: ${OLLAMA_MODEL:-deepseek-v4-flash:cloud}
       LOAD_LOCAL_SKILL_CREDENTIALS: "true"
       UPLOAD_DIR: /app/data/uploads
+      FILE_RETENTION_DAYS: ${FILE_RETENTION_DAYS:-30}
     volumes:
       - roadman_uploads:/app/data/uploads
       - ./Skills/amap-lbs/apipkey.txt:/Skills/amap-lbs/apipkey.txt:ro

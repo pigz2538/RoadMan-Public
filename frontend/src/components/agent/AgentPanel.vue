@@ -14,9 +14,7 @@ import { useTripStore } from '../../stores/trip'
 
 const store = useTripStore()
 const message = ref('')
-const messages = ref([
-  { side: 'ai', text: '行程安排已经生成。您可以选择地图、阶段或活动，再让我查看相关备选。' },
-])
+const messages = ref<{ side: 'ai' | 'user', text: string }[]>([])
 const recommendationOpen = ref(false)
 const recommendationLoading = ref(false)
 const recommendationError = ref('')
@@ -28,6 +26,8 @@ const categoryMap = {
   餐饮: 'meals',
 } as const
 const currentCategory = computed(() => categoryMap[store.category as keyof typeof categoryMap])
+const planningActive = computed(() => store.trip?.status === 'planning')
+const recentPlanningEvents = computed(() => store.planningEvents.slice(-10))
 const selectedActivity = computed(() =>
   store.currentDay?.activities.find((item) => item.id === store.selectedNodeId),
 )
@@ -44,6 +44,12 @@ const contextText = computed(() => {
   if (store.currentStage) return `当前阶段：${store.currentStage.title}`
   return '请先在地图或阶段栏选择目标'
 })
+
+const editExamples = [
+  '第2天加一家酒店',
+  '在返程服务区安排午饭',
+  '第1天再加一个景点，少逛一会也可以',
+]
 
 function candidatePrice(candidate: RecommendationCandidate) {
   const price = candidate.ticket_or_price
@@ -178,11 +184,25 @@ watch(() => store.pendingPatch?.id, (patchId) => {
       <div v-else-if="!recommendations.length" class="recommendation-state">暂时没有可用备选</div>
       <div v-else class="recommendation-list">
         <article v-for="candidate in recommendations" :key="candidate.candidate_id">
+          <img
+            v-if="candidate.image_url"
+            class="recommendation-photo"
+            :src="candidate.image_url"
+            :alt="candidate.place.name"
+            loading="lazy"
+          />
           <header>
             <b>#{{ candidate.rank }} {{ candidate.place.name }}</b>
             <span>{{ candidate.score.toFixed(1) }} 分</span>
           </header>
-          <p>{{ candidate.recommendation_reasons?.join(' · ') || candidate.place.address || '综合距离与偏好排序' }}</p>
+          <p>{{ candidate.agent_reason || candidate.recommendation_reasons?.join(' · ') || candidate.place.address || '综合距离与偏好排序' }}</p>
+          <a
+            v-if="candidate.detail_url || candidate.source_records?.find((item) => item.url)"
+            class="recommendation-detail"
+            :href="candidate.detail_url || candidate.source_records?.find((item) => item.url)?.url"
+            target="_blank"
+            rel="noreferrer"
+          >查看详细介绍与数据来源</a>
           <footer>
             <span>{{ candidatePrice(candidate) }}</span>
             <button @click="preview(candidate, 'add')">加入</button>
@@ -209,11 +229,17 @@ watch(() => store.pendingPatch?.id, (patchId) => {
     </div>
 
     <div v-else class="chat-stream">
-      <div v-if="store.planningEvent" class="message ai">
-        {{ store.planningEvent.label }}（{{ store.planningEvent.progress }}%）
+      <div v-if="planningActive && !recentPlanningEvents.length" class="message ai">
+        我正在拆解路线、核对真实道路，并为每天安排景点、用餐、住宿、休息和补能。
+      </div>
+      <div v-for="(event, index) in recentPlanningEvents" :key="`${event.event}-${event.node}-${index}`" class="message ai planning-message">
+        <strong>{{ event.progress }}%</strong>{{ event.label }}
       </div>
       <div v-for="(item, index) in messages" :key="index" :class="['message', item.side]">
         {{ item.text }}
+      </div>
+      <div v-if="!planningActive && !recentPlanningEvents.length && !messages.length" class="message ai">
+        行程安排已经生成。选择地图、阶段或活动后，我可以继续为您比较和调整方案。
       </div>
     </div>
     <div class="suggestions">
@@ -221,6 +247,7 @@ watch(() => store.pendingPatch?.id, (patchId) => {
       <button @click="recommendationOpen = false">行程对话</button>
       <button v-if="store.lastAppliedPatchId" @click="undoLastPatch">撤销上次修改</button>
       <button @click="message = '当前阶段有什么需要注意的？'">阶段提示</button>
+      <button v-for="example in editExamples" :key="example" @click="message = example">{{ example }}</button>
     </div>
     <form class="chat-input" @submit.prevent="send">
       <input v-model="message" placeholder="输入调整需求…" />

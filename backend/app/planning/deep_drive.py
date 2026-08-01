@@ -186,10 +186,15 @@ def enrich_deep_drive_plan(
         )
         day["stages"] = expanded_stages
         if break_activities:
+            replacement_keys = {
+                (item.get("type"), item.get("place", {}).get("name"))
+                for item in break_activities
+            }
             activities = [
                 item
                 for item in activities
-                if item.get("type") not in {"rest", "charging", "fueling"}
+                if item.get("type") != "rest"
+                and (item.get("type"), item.get("place", {}).get("name")) not in replacement_keys
             ]
         activities = _dedupe_activities([*activities, *break_activities])
         activities = _ensure_daily_meals(day, activities, service_pois)
@@ -216,11 +221,17 @@ def verify_deep_drive_plan(
     for day in plans:
         for stage in day.get("stages", []):
             codes = {item["code"] for item in stage.get("warnings", [])}
+            movement_minutes = int(
+                stage.get("route_segments", [{}])[0].get(
+                    "duration_minutes",
+                    stage.get("duration_minutes", 0),
+                )
+            )
             if "ENERGY_STOP_UNAVAILABLE" in codes:
                 issues.append(_issue("ENERGY_UNSAFE", "blocker", f"{stage['title']} 未找到必要补能点"))
             if (
                 stage["mode"] == "driving"
-                and stage["duration_minutes"] > max_continuous_drive_minutes
+                and movement_minutes > max_continuous_drive_minutes
                 and "REST_STOP_SCHEDULED" not in codes
             ):
                 issues.append(_issue("CONTINUOUS_DRIVE", "blocker", f"{stage['title']} 缺少驾驶休息"))
@@ -238,13 +249,23 @@ def verify_deep_drive_plan(
                     )
                 )
             if stage["mode"] == "walking" and (
-                stage["duration_minutes"] > 180 or stage["distance_km"] > 20
+                movement_minutes > 60 or stage["distance_km"] > 4
             ):
                 issues.append(
                     _issue(
                         "WALKING_STAGE_TOO_LONG",
                         "blocker",
                         f"{stage['title']} 步行 {stage['duration_minutes']} 分钟，必须改用公共交通或拆段",
+                    )
+                )
+            if stage["mode"] == "riding" and (
+                movement_minutes > 90 or stage["distance_km"] > 18
+            ):
+                issues.append(
+                    _issue(
+                        "RIDING_STAGE_TOO_LONG",
+                        "blocker",
+                        f"{stage['title']} 骑行 {movement_minutes} 分钟，必须改用公共交通或拆段",
                     )
                 )
             if stage["mode"] == "riding" and (
@@ -401,6 +422,13 @@ def _split_long_driving_stages(
             expanded.append(stage)
             continue
         part_count = ceil(movement_duration / max_minutes)
+        geometry = stage["route_segments"][0].get("coordinates", [])
+        if len(geometry) < part_count + 1:
+            geometry = _densify_geometry(geometry, part_count + 1)
+            stage["route_segments"][0]["coordinates"] = geometry
+        if len(geometry) < 2:
+            expanded.append(stage)
+            continue
         services = service_pois.get(stage["id"], {})
         candidates: list[tuple[str, dict[str, Any]]] = []
         energy_kind = "charging" if power_type == "electric" else "fueling"
@@ -408,12 +436,26 @@ def _split_long_driving_stages(
             for place in services.get(kind, []):
                 if place.get("coordinates"):
                     candidates.append((kind, place))
-        selected = _select_break_places(stage, candidates, part_count - 1)
+        warning_codes = {item.get("code") for item in stage.get("warnings", [])}
+        energy_candidates = [item for item in candidates if item[0] == energy_kind]
+        selected = (
+            _select_break_places(stage, energy_candidates, 1)
+            if "ENERGY_STOP_SCHEDULED" in warning_codes and energy_candidates
+            else []
+        )
         if len(selected) < part_count - 1:
-            expanded.append(stage)
-            continue
+            selected_names = {item[1].get("name") for item in selected}
+            remaining = [item for item in candidates if item[1].get("name") not in selected_names]
+            selected.extend(
+                _select_break_places(stage, remaining, part_count - 1 - len(selected))
+            )
+        if len(selected) < part_count - 1:
+            selected = _fill_planned_rest_points(
+                stage,
+                selected,
+                part_count - 1,
+            )
 
-        geometry = stage["route_segments"][0]["coordinates"]
         split_indexes = [
             _nearest_geometry_index(geometry, place["coordinates"])
             for _, place in selected
@@ -482,6 +524,61 @@ def _split_long_driving_stages(
     for sequence, piece in enumerate(expanded):
         piece["sequence"] = sequence
     return expanded, breaks
+
+
+def _fill_planned_rest_points(
+    stage: dict[str, Any],
+    selected: list[tuple[str, dict[str, Any]]],
+    count: int,
+) -> list[tuple[str, dict[str, Any]]]:
+    """Use route-bound safety break nodes when providers return too few facilities."""
+    geometry = stage.get("route_segments", [{}])[0].get("coordinates", [])
+    indexed = [
+        (_nearest_geometry_index(geometry, place["coordinates"]), kind, place)
+        for kind, place in selected
+    ]
+    used_indexes = {item[0] for item in indexed}
+    for number in range(1, count + 1):
+        if len(indexed) >= count:
+            break
+        target = round((len(geometry) - 1) * number / (count + 1))
+        if target in used_indexes:
+            continue
+        point = geometry[target]
+        place = {
+            "id": f"rest_{stage['id']}_{number}",
+            "name": f"沿途计划休息点 {number}",
+            "address": "按实时导航选择附近服务区或可安全停车区域",
+            "city": stage.get("origin", {}).get("city") or stage.get("destination", {}).get("city"),
+            "coordinates": {
+                "longitude": float(point["longitude"]),
+                "latitude": float(point["latitude"]),
+            },
+            "source_id": f"route-derived:{stage['id']}:{number}",
+        }
+        indexed.append((target, "rest", place))
+        used_indexes.add(target)
+    return [(kind, place) for _, kind, place in sorted(indexed)[:count]]
+
+
+def _densify_geometry(
+    geometry: list[dict[str, Any]],
+    minimum_points: int,
+) -> list[dict[str, float]]:
+    if len(geometry) != 2:
+        return geometry
+    start, end = geometry
+    return [
+        {
+            "longitude": float(start["longitude"]) + (
+                float(end["longitude"]) - float(start["longitude"])
+            ) * index / (minimum_points - 1),
+            "latitude": float(start["latitude"]) + (
+                float(end["latitude"]) - float(start["latitude"])
+            ) * index / (minimum_points - 1),
+        }
+        for index in range(minimum_points)
+    ]
 
 
 def _select_break_places(

@@ -36,11 +36,15 @@ def rank_tourism_candidates(
                 score += max(-10, 8 - price_mid / 80)
                 reasons.append(f"价格约 ¥{price_mid:.0f}")
             name_text = f"{place.get('name', '')} {item.get('categories', '')}".lower()
-            if preference_text and any(
+            nature_preferred = any(token in preference_text for token in ("自然", "风景", "山水"))
+            nature_match = any(
                 token in name_text
-                for token in ("自然", "山", "湖", "公园", "博物馆", "古迹", "亲子")
-                if token in preference_text
-            ):
+                for token in ("山", "湖", "公园", "瀑布", "峡", "峰", "景区", "自然")
+            )
+            family_match = "亲子" in preference_text and any(
+                token in name_text for token in ("公园", "乐园", "动物", "博物馆")
+            )
+            if (nature_preferred and nature_match) or family_match:
                 score += 10
                 reasons.append("符合旅行偏好")
             if item.get("provider") in {"FlyAI / 飞猪", "OpenTripMap"}:

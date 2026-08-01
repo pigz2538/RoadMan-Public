@@ -13,8 +13,12 @@ from app.domain.models import (
 )
 from app.planning.editing import (
     CandidatePatchRequest,
+    EditIntentRequest,
+    MapPointPatchRequest,
     create_candidate_patch,
+    create_map_point_patch,
     decide_candidate_patch,
+    interpret_edit_intent,
     recompute_and_verify_patch,
 )
 from app.skills.base import SkillAdapter, SkillContext
@@ -149,3 +153,144 @@ async def test_replacing_attraction_recomputes_both_adjacent_routes():
         "stage_out",
         "stage_back",
     ]
+
+
+def test_semantic_edit_adds_meal_near_selected_stage_without_activity_selection():
+    origin = {"name": "庐山", "coordinates": {"longitude": 115.98, "latitude": 29.57}}
+    destination = {"name": "阳新服务区", "coordinates": {"longitude": 115.21, "latitude": 29.89}}
+    base = datetime(2026, 8, 2, 10, tzinfo=timezone.utc)
+    selected = stage("stage_return", 0, origin, destination, base)
+    selected.title = "返程高速阶段"
+    trip = Trip(
+        title="语义编辑",
+        request=TripRequest(raw_text="测试"),
+        days=[DayPlan(id="day_2", day_index=2, date=date(2026, 8, 2), title="返程", stages=[selected])],
+    )
+    meal = {
+        "id": "meal_service",
+        "name": "阳新服务区餐厅",
+        "coordinates": {"longitude": 115.21, "latitude": 29.89},
+    }
+    state = {"tourism_candidates": {"meals": []}, "service_pois": {"stage_return": {"meal": [meal]}}}
+
+    message, patch, global_replan = interpret_edit_intent(
+        trip,
+        state,
+        EditIntentRequest(
+            message="从庐山返程到服务区吃个饭",
+            current_day_id="day_2",
+            current_target_id="stage_return",
+        ),
+    )
+
+    assert global_replan is False
+    assert patch is not None and patch.operation == "add"
+    assert patch.proposed_value["candidate"]["place"]["name"] == "阳新服务区餐厅"
+    assert "请确认修改预览" in message
+
+
+def test_map_point_creates_preview_without_mutating_trip():
+    trip = Trip(
+        title="地图选点",
+        request=TripRequest(raw_text="测试"),
+        days=[DayPlan(id="day_1", day_index=1, date=date(2026, 8, 2), title="第 1 天")],
+    )
+    state = {}
+
+    patch = create_map_point_patch(
+        trip,
+        state,
+        MapPointPatchRequest(
+            day_id="day_1",
+            category="attractions",
+            name="地图选择的观景台",
+            address="庐山风景区",
+            longitude=115.982,
+            latitude=29.57,
+        ),
+    )
+
+    assert trip.days[0].activities == []
+    assert patch.status == "preview"
+    assert patch.proposed_value["candidate"]["place"]["name"] == "地图选择的观景台"
+    assert state["plan_patches"][patch.id]["operation"] == "add"
+
+
+def test_semantic_add_prefers_named_candidate_over_first_candidate():
+    trip = Trip(
+        title="语义添加",
+        request=TripRequest(raw_text="测试"),
+        days=[DayPlan(id="day_1", day_index=1, date=date(2026, 8, 2), title="第 1 天")],
+    )
+    state = {
+        "tourism_candidates": {
+            "attractions": [
+                {"candidate_id": "first", "place": {"name": "第一个景点"}},
+                {"candidate_id": "target", "place": {"name": "花径公园"}},
+            ]
+        }
+    }
+
+    _, patch, _ = interpret_edit_intent(
+        trip,
+        state,
+        EditIntentRequest(message="第 1 天添加花径公园", current_day_id="day_1"),
+    )
+
+    assert patch is not None
+    assert patch.proposed_value["candidate_id"] == "target"
+
+
+def test_semantic_meal_request_can_use_route_service_without_selected_stage():
+    origin = {"name": "武汉", "coordinates": {"longitude": 114.3, "latitude": 30.5}}
+    destination = {"name": "庐山", "coordinates": {"longitude": 115.98, "latitude": 29.57}}
+    trip = Trip(
+        title="服务区用餐",
+        request=TripRequest(raw_text="测试"),
+        days=[
+            DayPlan(
+                id="day_1",
+                day_index=1,
+                date=date(2026, 8, 2),
+                title="第 1 天",
+                stages=[stage("stage_drive", 0, origin, destination, datetime(2026, 8, 2, 8, tzinfo=timezone.utc))],
+            )
+        ],
+    )
+    state = {
+        "tourism_candidates": {"meals": []},
+        "service_pois": {"stage_drive": {"meal": [{"name": "阳新服务区餐厅", "coordinates": {"longitude": 115.2, "latitude": 29.8}}]}},
+    }
+
+    message, patch, _ = interpret_edit_intent(
+        trip,
+        state,
+        EditIntentRequest(message="在返程服务区安排午饭", current_day_id="day_1"),
+    )
+
+    assert patch is not None
+    assert patch.proposed_value["candidate"]["place"]["name"] == "阳新服务区餐厅"
+    assert "修改预览" in message
+
+
+def test_semantic_duration_can_shrink_for_more_attractions():
+    trip = Trip(
+        title="弹性停留",
+        request=TripRequest(raw_text="测试"),
+        days=[DayPlan(id="day_1", day_index=1, date=date(2026, 8, 2), title="第 1 天")],
+    )
+    state = {
+        "tourism_candidates": {
+            "attractions": [{"candidate_id": "a", "place": {"name": "新景点"}}],
+        }
+    }
+
+    _, patch, _ = interpret_edit_intent(
+        trip,
+        state,
+        EditIntentRequest(message="第1天多加一个景点，顺路短停", current_day_id="day_1"),
+    )
+
+    assert patch is not None
+    assert patch.proposed_value["duration_minutes"] == 60
+    assert patch.time_delta_minutes == 60

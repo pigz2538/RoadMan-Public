@@ -9,6 +9,7 @@ export function useTripSSE(onEvent: (event: PlanningEvent) => void) {
     'tool_started',
     'tool_completed',
     'progress',
+    'plan_updated',
     'planning_completed',
     'planning_failed',
     'planning_paused',
@@ -21,7 +22,9 @@ export function useTripSSE(onEvent: (event: PlanningEvent) => void) {
     eventNames.forEach((name) => {
       source?.addEventListener(name, (event) => onEvent(JSON.parse((event as MessageEvent).data)))
     })
-    source.onerror = () => source?.close()
+    // EventSource reconnects automatically after transient network failures.
+    // Closing it here made the progressive plan appear permanently stalled.
+    source.onerror = () => undefined
   }
 
   onBeforeUnmount(() => source?.close())

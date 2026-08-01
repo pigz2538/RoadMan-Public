@@ -287,6 +287,8 @@ class Activity(BaseModel):
     required: bool = False
     backup: bool = False
     user_note: str | None = None
+    image_url: str | None = None
+    detail_url: str | None = None
     ticket_or_price: MoneyRange | None = None
     opening_hours: OpeningHours | None = None
     source_records: list[SourceRecord] = Field(default_factory=list)
@@ -431,6 +433,7 @@ class SSEEvent(BaseModel):
     event: Literal[
         "planning_started", "node_started", "tool_started", "tool_completed",
         "node_completed", "clarification_required", "progress", "warning",
+        "plan_updated",
         "patch_preview_ready", "planning_paused", "planning_resumed",
         "planning_completed", "planning_failed"
     ]

@@ -52,6 +52,20 @@ async def test_trip_crud(client):
 
 
 @pytest.mark.asyncio
+async def test_exports_are_hidden_server_side_until_planning_completes(client):
+    created = await client.post(
+        "/api/v1/trips",
+        json={"title": "规划中行程", "request": {"raw_text": "周六从武汉去庐山"}},
+    )
+    trip_id = created.json()["id"]
+
+    for suffix in ("roadbook", "roadbook.pdf", "roadbook.pptx", "roadbook.png"):
+        response = await client.get(f"/api/v1/trips/{trip_id}/{suffix}")
+        assert response.status_code == 409
+        assert response.json()["error"]["code"] == "PLANNING_NOT_COMPLETED"
+
+
+@pytest.mark.asyncio
 async def test_trip_version_save_and_restore(client):
     created = await client.post(
         "/api/v1/trips",
@@ -115,6 +129,42 @@ async def test_trip_recommendations_returns_ranked_persisted_candidates(client):
     )
     assert response.status_code == 200
     assert response.json()["items"][0]["rank"] == 1
+
+
+@pytest.mark.asyncio
+async def test_map_point_endpoint_creates_preview_only(client):
+    created = await client.post(
+        "/api/v1/trips",
+        json={"title": "地图选点", "request": {"raw_text": "武汉周末游"}},
+    )
+    trip = Trip.model_validate(created.json())
+    trip.days = [
+        DayPlan(
+            id="day_map",
+            day_index=1,
+            date=date(2026, 8, 2),
+            title="第 1 天",
+        )
+    ]
+    async with SessionLocal() as session:
+        await TripRepository(session).save_planning_result(trip, {}, None)
+
+    response = await client.post(
+        f"/api/v1/trips/{trip.id}/patches/preview-map-point",
+        json={
+            "day_id": "day_map",
+            "category": "attractions",
+            "name": "地图选择的观景台",
+            "address": "庐山风景区",
+            "longitude": 115.982,
+            "latitude": 29.57,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "preview"
+    unchanged = await client.get(f"/api/v1/trips/{trip.id}")
+    assert unchanged.json()["days"][0]["activities"] == []
 
 
 @pytest.mark.asyncio

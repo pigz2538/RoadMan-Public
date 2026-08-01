@@ -10,6 +10,7 @@ export const useTripStore = defineStore('trip', () => {
   const selectedNodeId = ref<string | null>(null)
   const category = ref<Category>('景点')
   const planningEvent = ref<PlanningEvent | null>(null)
+  const planningEvents = ref<PlanningEvent[]>([])
   const patchVisible = ref(false)
   const pendingPatch = ref<PlanPatch | null>(null)
   const lastAppliedPatchId = ref<string | null>(null)
@@ -40,6 +41,23 @@ export const useTripStore = defineStore('trip', () => {
     if (selectedNodeId.value === id) selectedNodeId.value = null
   }
 
+  function addPlanningEvent(event: PlanningEvent) {
+    planningEvent.value = event
+    const previous = planningEvents.value.at(-1)
+    if (
+      previous?.event === event.event
+      && previous?.node === event.node
+      && previous?.label === event.label
+      && previous?.progress === event.progress
+    ) return
+    planningEvents.value = [...planningEvents.value, event].slice(-40)
+  }
+
+  function resetPlanningEvents() {
+    planningEvent.value = null
+    planningEvents.value = []
+  }
+
   return {
     trip,
     currentDayIndex,
@@ -49,6 +67,7 @@ export const useTripStore = defineStore('trip', () => {
     selectedNodeId,
     category,
     planningEvent,
+    planningEvents,
     patchVisible,
     pendingPatch,
     lastAppliedPatchId,
@@ -56,5 +75,7 @@ export const useTripStore = defineStore('trip', () => {
     setStage,
     selectActivity,
     removeActivity,
+    addPlanningEvent,
+    resetPlanningEvents,
   }
 })

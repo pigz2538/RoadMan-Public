@@ -29,6 +29,7 @@
 | GET | `/api/v1/trips/{trip_id}/recommendations` | 景点/住宿/餐饮排序备选 |
 | POST | `/api/v1/trips/{trip_id}/editing/interpret` | 结合当前选择理解局部修改意图 |
 | POST | `/api/v1/trips/{trip_id}/patches/preview` | 预览加入/替换，不修改 Trip |
+| POST | `/api/v1/trips/{trip_id}/patches/preview-map-point` | 将地图选点转为加入活动的预览补丁，不修改 Trip |
 | POST | `/api/v1/trips/{trip_id}/patches/preview-delete` | 预览删除活动，不修改 Trip |
 | GET | `/api/v1/trips/{trip_id}/patches/{patch_id}` | 查询修改预览 |
 | POST | `/api/v1/trips/{trip_id}/patches/{patch_id}/apply` | 确认并应用修改 |
@@ -110,6 +111,11 @@ SSE 使用命名事件，每条事件包含单调递增的 `id:`。客户端断�
 候选修改遵循 `PlanPatch` 两阶段契约：`preview` 只保存原值、建议值、影响范围、
 时间/费用变化和是否需要重规划；正式 Trip 保持不变。只有 `apply` 会写入，
 `reject` 仅把补丁标记为拒绝。已处理的补丁不可重复应用。
+地图选点请求携带 `day_id`、`category`、名称、地址和经纬度；服务端将点位写入候选池并
+生成 `add` 类型预览。地图点击本身不直接修改行程。Editing Agent 会优先识别消息中明确
+提到的候选地点名称；选择既有活动后可用“删除这个”生成删除预览。
+`CandidatePatchRequest.duration_minutes` 可选，用于 Agent 根据“短停/多逛/深度”等语义
+调整新增景点或餐饮的停留长度；未提供时使用分类默认值。
 替换地点会重算匹配的相邻路线；删除活动会提前后续安排。应用后重新检查活动冲突和
 路线闭环，失败时不持久化。成功应用保存恢复快照，允许一次明确回滚。
 

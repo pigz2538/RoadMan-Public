@@ -45,6 +45,9 @@ export interface RecommendationCandidate {
   score: number
   backup?: boolean
   recommendation_reasons?: string[]
+  agent_reason?: string
+  image_url?: string
+  detail_url?: string
   place: {
     name: string
     address?: string
@@ -179,6 +182,24 @@ export async function previewCandidatePatch(
   },
 ): Promise<PlanPatch> {
   return json(await fetch(`${API_BASE}/api/v1/trips/${tripId}/patches/preview`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  }))
+}
+
+export async function previewMapPointPatch(
+  tripId: string,
+  payload: {
+    day_id: string
+    category: 'attractions' | 'hotels' | 'meals'
+    name: string
+    address?: string
+    longitude: number
+    latitude: number
+  },
+): Promise<PlanPatch> {
+  return json(await fetch(`${API_BASE}/api/v1/trips/${tripId}/patches/preview-map-point`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),

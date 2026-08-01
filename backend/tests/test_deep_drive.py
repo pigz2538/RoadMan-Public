@@ -86,12 +86,16 @@ def test_vehicle_weather_and_schedule_agents_insert_required_stops_and_risks():
     }
 
     enriched, warnings = enrich_deep_drive_plan(plans, _vehicle(), services, 120)
-    stage = enriched[0]["stages"][0]
+    driving_stages = enriched[0]["stages"]
+    stage = driving_stages[0]
 
     assert stage["energy_estimate"]["unit"] == "kWh"
     assert stage["energy_estimate"]["estimated"] is True
-    assert len(stage["waypoints"]) == 2
-    assert {item["type"] for item in enriched[0]["activities"]} == {"charging", "meal"}
+    assert len(driving_stages) >= 2
+    assert all(item["duration_minutes"] <= 120 for item in driving_stages)
+    assert {"charging", "meal"} <= {
+        item["type"] for item in enriched[0]["activities"]
+    }
     assert {"补能", "连续驾驶", "强降水", "低能见度", "大风", "极端温度", "限高"} <= set(
         stage["risk_tags"]
     )
@@ -117,7 +121,8 @@ def test_verification_blocks_when_required_energy_stop_is_unavailable():
     issues = verify_deep_drive_plan(enriched, _vehicle(), 120)
 
     assert any(item["code"] == "ENERGY_UNSAFE" and item["severity"] == "blocker" for item in issues)
-    assert any(item["code"] == "CONTINUOUS_DRIVE" for item in issues)
+    assert not any(item["code"] == "CONTINUOUS_DRIVE" for item in issues)
+    assert any(item["type"] == "rest" for item in enriched[0]["activities"])
 
 
 def test_noncritical_service_and_weather_failures_degrade_without_blocking():
@@ -194,6 +199,12 @@ def test_long_drive_is_split_into_rest_segments_and_day_has_three_meals():
     assert len(
         [item for item in activities if item["type"] in {"rest", "charging", "fueling"}]
     ) >= 2
+    stop_keys = [
+        (item["type"], item["place"]["name"])
+        for item in activities
+        if item["type"] in {"rest", "charging", "fueling"}
+    ]
+    assert len(stop_keys) == len(set(stop_keys))
     assert not any(
         item["severity"] == "blocker"
         for item in verify_deep_drive_plan(enriched, _vehicle(), 120)

@@ -95,9 +95,7 @@ class OllamaRequirementValidator:
                             if item.get("answer_type") in {"text", "date", "choice", "time"}
                             else "text"
                         ),
-                        "options": [
-                            str(option) for option in item.get("options", [])
-                        ][:5],
+                        "options": [str(option) for option in item.get("options", [])][:5],
                     }
                     for item in issues[:5]
                     if isinstance(item, dict)
@@ -106,13 +104,90 @@ class OllamaRequirementValidator:
             return []
 
 
+class OllamaPoiCurator:
+    """Let the planning agent reconcile AMap and OSM/OpenTripMap POIs."""
+
+    def __init__(self, settings: Settings) -> None:
+        self.settings = settings
+
+    async def curate(
+        self,
+        destination_name: str,
+        local_candidates: list[dict[str, Any]],
+        osm_items: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        fallback = _fallback_poi_decisions(local_candidates, osm_items)
+        if not self.settings.ollama_api_key or not osm_items:
+            return fallback
+        local_places = [item.get("place", {}) for item in local_candidates]
+        compact_osm = [
+            {
+                "source_id": item.get("id"),
+                "name": item.get("name"),
+                "longitude": item.get("longitude"),
+                "latitude": item.get("latitude"),
+                "distance_m": item.get("distance_m"),
+                "kinds": item.get("kinds"),
+            }
+            for item in osm_items
+        ]
+        prompt = (
+            "你是 RoadMan 的多源 POI 策展 Agent。请比较高德本地候选与 OpenStreetMap/"
+            "OpenTripMap 候选，结合名称语义、坐标距离和类别判断是否为同一真实景点。"
+            "对每个 OSM 候选输出一个决定：merge 表示合并到同一地点，add 表示作为独立景点加入，"
+            "skip 表示信息不足或明显无旅游价值。所有最终展示名必须是自然、准确的简体中文；"
+            "不要凭空创造景点。只返回 JSON："
+            '{"decisions":[{"source_id":"...","action":"merge|add|skip",'
+            '"display_name_zh":"...","merge_target_name":"...","reason":"..."}]}。'
+            f"目的地：{destination_name}；高德候选：{json.dumps(local_places, ensure_ascii=False)}；"
+            f"OSM 候选：{json.dumps(compact_osm, ensure_ascii=False)}"
+        )
+        try:
+            async with httpx.AsyncClient(timeout=self.settings.ollama_timeout_seconds) as client:
+                response = await client.post(
+                    self.settings.ollama_api_url,
+                    headers={"Authorization": f"Bearer {self.settings.ollama_api_key}"},
+                    json={
+                        "model": self.settings.ollama_model,
+                        "prompt": prompt,
+                        "stream": False,
+                        "think": False,
+                        "format": "json",
+                    },
+                )
+                response.raise_for_status()
+                payload = _parse_unfiltered_json_object(response.json().get("response", ""))
+                decisions = payload.get("decisions")
+                if not isinstance(decisions, list):
+                    return fallback
+                valid_ids = {str(item.get("id")) for item in osm_items}
+                cleaned = []
+                for item in decisions:
+                    if not isinstance(item, dict):
+                        continue
+                    source_id = str(item.get("source_id") or "")
+                    action = str(item.get("action") or "skip")
+                    display_name = str(item.get("display_name_zh") or "").strip()
+                    if source_id not in valid_ids or action not in {"merge", "add", "skip"}:
+                        continue
+                    if action == "add" and not _has_cjk(display_name):
+                        action = "skip"
+                    cleaned.append(
+                        {
+                            "source_id": source_id,
+                            "action": action,
+                            "display_name_zh": display_name,
+                            "merge_target_name": str(item.get("merge_target_name") or "").strip(),
+                            "reason": str(item.get("reason") or "Agent 多源核验"),
+                        }
+                    )
+                return cleaned or fallback
+        except (httpx.HTTPError, ValueError, TypeError, json.JSONDecodeError):
+            return fallback
+
+
 def _parse_json_object(text: str) -> dict[str, Any]:
-    match = re.search(r"\{.*\}", text, re.DOTALL)
-    if not match:
-        raise ValueError("LLM response does not contain JSON")
-    value = json.loads(match.group(0))
-    if not isinstance(value, dict):
-        raise ValueError("LLM response must be a JSON object")
+    value = _parse_unfiltered_json_object(text)
     allowed = {
         "origin_name",
         "destination_name",
@@ -123,6 +198,48 @@ def _parse_json_object(text: str) -> dict[str, Any]:
         "issues",
     }
     return {key: value for key, value in value.items() if key in allowed}
+
+
+def _parse_unfiltered_json_object(text: str) -> dict[str, Any]:
+    match = re.search(r"\{.*\}", text, re.DOTALL)
+    if not match:
+        raise ValueError("LLM response does not contain JSON")
+    value = json.loads(match.group(0))
+    if not isinstance(value, dict):
+        raise ValueError("LLM response must be a JSON object")
+    return value
+
+
+def _fallback_poi_decisions(
+    local_candidates: list[dict[str, Any]],
+    osm_items: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    local_names = {
+        str(item.get("place", {}).get("name") or "").replace(" ", "").lower()
+        for item in local_candidates
+    }
+    decisions = []
+    for item in osm_items:
+        name = str(item.get("name") or "").strip()
+        normalized = name.replace(" ", "").lower()
+        target = next(
+            (candidate for candidate in local_names if normalized and (normalized in candidate or candidate in normalized)),
+            "",
+        )
+        decisions.append(
+            {
+                "source_id": str(item.get("id") or ""),
+                "action": "merge" if target else ("add" if _has_cjk(name) else "skip"),
+                "display_name_zh": name if _has_cjk(name) else "",
+                "merge_target_name": target,
+                "reason": "名称去重兜底" if target else "保留本地中文名称" if _has_cjk(name) else "等待 Agent 翻译",
+            }
+        )
+    return decisions
+
+
+def _has_cjk(value: str) -> bool:
+    return bool(re.search(r"[\u4e00-\u9fff]", value))
 
 
 def _merge_extraction(base: dict[str, Any], llm: dict[str, Any]) -> dict[str, Any]:
@@ -211,7 +328,7 @@ def deterministic_extract(raw_text: str, today: date) -> dict[str, Any]:
     traveler_match = re.search(r"([一二三四五六七八九十两\d]+)\s*(?:人|位|口)", raw_text)
     if traveler_match:
         result["travelers"] = _cn_number(traveler_match.group(1))
-    for keyword in ("自然风景", "亲子", "轻松", "省钱", "不走夜路", "新能源"):
+    for keyword in ("自然风景", "自然景观", "山水风景", "亲子", "轻松", "省钱", "不走夜路", "新能源"):
         if keyword in raw_text:
             result["preferences"].append(keyword)
     return result

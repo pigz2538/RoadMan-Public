@@ -209,6 +209,18 @@ class FlyAIPoiAdapter(SkillAdapter):
             price = _parse_price(ticket.get("price"))
             if not item.get("name"):
                 continue
+            raw_location = item.get("location") or item.get("lnglat") or ""
+            longitude = latitude = None
+            if isinstance(raw_location, str) and "," in raw_location:
+                try:
+                    longitude, latitude = (float(value) for value in raw_location.split(",", 1))
+                except (TypeError, ValueError):
+                    longitude = latitude = None
+            if longitude is None and item.get("longitude") is not None and item.get("latitude") is not None:
+                try:
+                    longitude, latitude = float(item["longitude"]), float(item["latitude"])
+                except (TypeError, ValueError):
+                    longitude = latitude = None
             items.append(
                 {
                     "id": item.get("id"),
@@ -222,6 +234,9 @@ class FlyAIPoiAdapter(SkillAdapter):
                     "price_min_cny": price[0] if price else None,
                     "price_max_cny": price[1] if price else None,
                     "price_estimated": price[2] if price else None,
+                    "location": raw_location or None,
+                    "longitude": longitude,
+                    "latitude": latitude,
                 }
             )
         if not items:

@@ -3,15 +3,33 @@ from __future__ import annotations
 from io import BytesIO
 from pathlib import Path
 from typing import Iterable
+from urllib.parse import urlparse
 
-from PIL import Image, ImageDraw, ImageFont
+import httpx
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 from pptx import Presentation
 from pptx.util import Inches, Pt
+from reportlab.lib.utils import ImageReader
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.cidfonts import UnicodeCIDFont
 from reportlab.pdfgen import canvas
 
 from ..domain.models import Trip
+
+
+class ReportAgent:
+    """Build every export from one frozen, verified Trip snapshot."""
+
+    def render(self, trip: Trip, markdown: str, kind: str) -> bytes:
+        lines = export_lines(trip, markdown)
+        renderer = {
+            "pdf": render_pdf,
+            "pptx": render_pptx,
+            "png": render_long_image,
+        }.get(kind)
+        if renderer is None:
+            raise ValueError(f"unsupported report format: {kind}")
+        return renderer(lines, trip)
 
 
 def export_lines(trip: Trip, markdown: str) -> list[str]:
@@ -42,12 +60,58 @@ def export_lines(trip: Trip, markdown: str) -> list[str]:
     return lines
 
 
-def render_pdf(lines: Iterable[str]) -> bytes:
+def render_pdf(lines: Iterable[str], trip: Trip | None = None) -> bytes:
     output = BytesIO()
     pdfmetrics.registerFont(UnicodeCIDFont("STSong-Light"))
     document = canvas.Canvas(output, pagesize=(595, 842))
     document.setTitle("RoadMan 行程安排")
     y = 800
+    if trip and trip.days:
+        # Cover: a visual route summary with a restrained report hierarchy.
+        document.setFillColorRGB(0.06, 0.13, 0.25)
+        document.rect(0, 0, 595, 842, fill=1, stroke=0)
+        document.setFillColorRGB(0.25, 0.60, 0.96)
+        document.setFont("STSong-Light", 11)
+        document.drawString(42, 778, "ROADMAN  ·  智能行程报告")
+        document.setFillColorRGB(1, 1, 1)
+        document.setFont("STSong-Light", 27)
+        document.drawString(42, 730, trip.title[:25])
+        document.setFont("STSong-Light", 12)
+        document.setFillColorRGB(0.76, 0.85, 0.95)
+        document.drawString(
+            42,
+            700,
+            f"{trip.start_date or '待定'} — {trip.end_date or '待定'}   ·   {trip.origin.name if trip.origin else '待定'} → {trip.destination.name if trip.destination else '待定'}",
+        )
+        route_image = _render_route_map(trip, 1200, 520)
+        document.drawImage(ImageReader(route_image), 42, 430, width=511, height=221, preserveAspectRatio=True)
+        activity_image = _render_activity_board(trip, 1200, 300)
+        document.drawImage(ImageReader(activity_image), 42, 75, width=511, height=128, preserveAspectRatio=True)
+        document.showPage()
+        for day_index, day in enumerate(trip.days):
+            document.setFillColorRGB(0.96, 0.98, 1)
+            document.rect(0, 0, 595, 842, fill=1, stroke=0)
+            document.setFillColorRGB(0.06, 0.13, 0.25)
+            document.setFont("STSong-Light", 21)
+            document.drawString(42, 790, f"第 {day.day_index} 天  ·  {day.date}  {day.title}")
+            document.setFillColorRGB(0.28, 0.39, 0.55)
+            document.setFont("STSong-Light", 11)
+            document.drawString(42, 766, f"总里程 {day.total_distance_km:g} km   ·   驾驶 {day.total_drive_minutes // 60}h{day.total_drive_minutes % 60}m")
+            day_image = _render_activity_board(trip, 1200, 500, activities=day.activities)
+            document.drawImage(ImageReader(day_image), 42, 395, width=511, height=213, preserveAspectRatio=True)
+            y = 350
+            document.setFillColorRGB(0.10, 0.20, 0.34)
+            for stage in day.stages:
+                line = f"{stage.planned_start:%H:%M}–{stage.planned_end:%H:%M}   {stage.origin.name} → {stage.destination.name}   {stage.distance_km:g} km"
+                for wrapped in _wrap(line, 54):
+                    document.drawString(42, y, wrapped)
+                    y -= 18
+                if y < 70:
+                    break
+            if day_index < len(trip.days) - 1:
+                document.showPage()
+        document.save()
+        return output.getvalue()
     for index, line in enumerate(lines):
         document.setFont("STSong-Light", 18 if index == 0 else 10)
         for wrapped in _wrap(line, 28 if index == 0 else 48):
@@ -63,11 +127,52 @@ def render_pdf(lines: Iterable[str]) -> bytes:
     return output.getvalue()
 
 
-def render_pptx(lines: Iterable[str]) -> bytes:
+def render_pptx(lines: Iterable[str], trip: Trip | None = None) -> bytes:
     presentation = Presentation()
     presentation.slide_width = Inches(13.333)
     presentation.slide_height = Inches(7.5)
     all_lines = list(lines)
+    if trip and trip.days:
+        cover = presentation.slides.add_slide(presentation.slide_layouts[6])
+        title = cover.shapes.add_textbox(Inches(0.65), Inches(0.3), Inches(12), Inches(0.65))
+        title.text_frame.text = trip.title
+        title.text_frame.paragraphs[0].font.size = Pt(28)
+        title.text_frame.paragraphs[0].font.bold = True
+        cover.shapes.add_picture(_render_route_map(trip, 1600, 720), Inches(0.65), Inches(1.15), width=Inches(12), height=Inches(5.4))
+        highlights = presentation.slides.add_slide(presentation.slide_layouts[6])
+        heading = highlights.shapes.add_textbox(Inches(0.65), Inches(0.3), Inches(12), Inches(0.6))
+        heading.text_frame.text = "景点、餐饮与住宿详情"
+        heading.text_frame.paragraphs[0].font.size = Pt(27)
+        heading.text_frame.paragraphs[0].font.bold = True
+        highlights.shapes.add_picture(
+            _render_activity_board(trip, 1600, 720),
+            Inches(0.65), Inches(1.1), width=Inches(12), height=Inches(5.4),
+        )
+        for day in trip.days:
+            slide = presentation.slides.add_slide(presentation.slide_layouts[6])
+            title = slide.shapes.add_textbox(Inches(0.65), Inches(0.3), Inches(12), Inches(0.55))
+            title.text_frame.text = f"第 {day.day_index} 天  ·  {day.date}  {day.title}"
+            title.text_frame.paragraphs[0].font.size = Pt(25)
+            title.text_frame.paragraphs[0].font.bold = True
+            subtitle = slide.shapes.add_textbox(Inches(0.68), Inches(0.85), Inches(12), Inches(0.35))
+            subtitle.text_frame.text = f"{day.total_distance_km:g} km  ·  驾驶 {day.total_drive_minutes // 60}h{day.total_drive_minutes % 60}m  ·  {len(day.activities)} 项安排"
+            subtitle.text_frame.paragraphs[0].font.size = Pt(12)
+            slide.shapes.add_picture(
+                _render_activity_board(trip, 1600, 620, activities=day.activities),
+                Inches(0.65), Inches(1.35), width=Inches(12), height=Inches(4.65),
+            )
+            body = slide.shapes.add_textbox(Inches(0.85), Inches(6.15), Inches(11.5), Inches(0.9))
+            body.text_frame.text = "\n".join(
+                f"{stage.planned_start:%H:%M}–{stage.planned_end:%H:%M}  {stage.origin.name} → {stage.destination.name}  ·  {stage.mode}  ·  {stage.distance_km:g} km"
+                for stage in day.stages[:4]
+            )
+            for paragraph in body.text_frame.paragraphs:
+                paragraph.font.size = Pt(11)
+        # Visual slides already contain the structured report; avoid appending
+        # the old wall of raw Markdown lines after them.
+        output = BytesIO()
+        presentation.save(output)
+        return output.getvalue()
     chunks = [all_lines[index:index + 28] for index in range(0, len(all_lines), 28)] or [[]]
     for slide_index, chunk in enumerate(chunks):
         slide = presentation.slides.add_slide(presentation.slide_layouts[6])
@@ -84,21 +189,210 @@ def render_pptx(lines: Iterable[str]) -> bytes:
     return output.getvalue()
 
 
-def render_long_image(lines: Iterable[str]) -> bytes:
+def render_long_image(lines: Iterable[str], trip: Trip | None = None) -> bytes:
     all_lines = list(lines)
     width, line_height, padding = 1600, 34, 56
-    height = max(900, padding * 2 + line_height * max(1, len(all_lines)))
+    visual_height = 1080 if trip and trip.days else 0
+    if trip and trip.days:
+        visual_height += len(trip.days) * 620
+    height = max(900, padding * 2 + visual_height + line_height * max(1, len(all_lines)))
     image = Image.new("RGB", (width, height), "#f4f8ff")
     draw = ImageDraw.Draw(image)
     font = _load_font(24)
     title_font = _load_font(38)
     y = padding
-    for index, line in enumerate(all_lines):
-        draw.text((padding, y), line[:105], fill="#10213e", font=title_font if index == 0 else font)
-        y += 48 if index == 0 else line_height
+    if trip and trip.days:
+        draw.rounded_rectangle((padding, y, width - padding, y + 66), radius=22, fill="#10213e")
+        draw.text((padding + 28, y + 15), trip.title[:42], fill="#ffffff", font=title_font)
+        y += 92
+        route = Image.open(_render_route_map(trip, width - padding * 2, 560)).convert("RGB")
+        image.paste(route, (padding, y))
+        y += 590
+        activity_board = Image.open(
+            _render_activity_board(trip, width - padding * 2, 390)
+        ).convert("RGB")
+        image.paste(activity_board, (padding, y))
+        y += 420
+        for day in trip.days:
+            draw.text((padding, y), f"第 {day.day_index} 天 · {day.date} · {day.title}", fill="#10213e", font=_load_font(30))
+            y += 48
+            day_board = Image.open(
+                _render_activity_board(trip, width - padding * 2, 400, activities=day.activities)
+            ).convert("RGB")
+            image.paste(day_board, (padding, y))
+            y += 430
+            draw.rounded_rectangle((padding, y, width - padding, y + 12 + max(34, len(day.stages) * 28)), radius=16, fill="#ffffff", outline="#dce7f4", width=2)
+            text_y = y + 16
+            for stage in day.stages:
+                text = f"{stage.planned_start:%H:%M}–{stage.planned_end:%H:%M}   {stage.origin.name} → {stage.destination.name}   {stage.mode} · {stage.distance_km:g} km"
+                draw.text((padding + 20, text_y), text[:120], fill="#385171", font=font)
+                text_y += 28
+            y = text_y + 24
+    else:
+        for index, line in enumerate(all_lines):
+            draw.text((padding, y), line[:105], fill="#10213e", font=title_font if index == 0 else font)
+            y += 48 if index == 0 else line_height
+    if trip and trip.days:
+        image = image.crop((0, 0, width, min(height, y + padding)))
     output = BytesIO()
     image.save(output, format="PNG", optimize=True)
     return output.getvalue()
+
+
+def _render_route_map(trip: Trip, width: int, height: int) -> BytesIO:
+    """Render a route overview image from the persisted road geometry."""
+    image = Image.new("RGB", (width, height), "#eef5fc")
+    draw = ImageDraw.Draw(image)
+    margin = max(34, width // 28)
+    for x in range(margin, width - margin, max(80, width // 12)):
+        draw.line((x, margin, x, height - margin), fill="#dce8f3", width=1)
+    for y in range(margin, height - margin, max(70, height // 8)):
+        draw.line((margin, y, width - margin, y), fill="#dce8f3", width=1)
+
+    routes: list[tuple[str, list[tuple[float, float]]]] = []
+    for day in trip.days:
+        for stage in day.stages:
+            points = [
+                (point.longitude, point.latitude)
+                for segment in stage.route_segments
+                for point in segment.coordinates
+            ]
+            if len(points) >= 2:
+                routes.append((stage.mode, points))
+    all_points = [point for _, points in routes for point in points]
+    if not all_points:
+        output = BytesIO()
+        image.save(output, format="PNG")
+        output.seek(0)
+        return output
+    min_lon, max_lon = min(p[0] for p in all_points), max(p[0] for p in all_points)
+    min_lat, max_lat = min(p[1] for p in all_points), max(p[1] for p in all_points)
+    lon_span = max(max_lon - min_lon, 0.01)
+    lat_span = max(max_lat - min_lat, 0.01)
+
+    def project(point: tuple[float, float]) -> tuple[int, int]:
+        x = margin + int((point[0] - min_lon) / lon_span * (width - margin * 2))
+        y = height - margin - int((point[1] - min_lat) / lat_span * (height - margin * 2))
+        return x, y
+
+    colors = {"driving": "#1777e8", "transit": "#20a879", "walking": "#f2a51a", "riding": "#e6a11d"}
+    for mode, points in routes:
+        projected = [project(point) for point in points]
+        draw.line(projected, fill="#ffffff", width=max(10, width // 105), joint="curve")
+        draw.line(projected, fill=colors.get(mode, "#72849a"), width=max(5, width // 190), joint="curve")
+    numbered: list[tuple[int, int]] = []
+    for _, points in routes:
+        for point in (points[0], points[-1]):
+            pixel = project(point)
+            if not numbered or min((pixel[0]-x)**2 + (pixel[1]-y)**2 for x, y in numbered) > 500:
+                numbered.append(pixel)
+    font = _load_font(max(16, width // 65))
+    for index, (x, y) in enumerate(numbered, 1):
+        radius = max(13, width // 85)
+        draw.ellipse((x-radius, y-radius, x+radius, y+radius), fill="#ffffff", outline="#176fdf", width=3)
+        text = str(index)
+        box = draw.textbbox((0, 0), text, font=font)
+        draw.text((x-(box[2]-box[0])/2, y-(box[3]-box[1])/2-1), text, fill="#145fbf", font=font)
+    caption_font = _load_font(max(12, width // 92))
+    draw.rounded_rectangle((margin, height - 34, min(width - margin, margin + width // 2), height - 8), radius=10, fill="#ffffff")
+    draw.text(
+        (margin + 10, height - 30),
+        "真实道路点列 · 路线来源：高德 WebService · 景点来源详见活动卡",
+        fill="#48617f", font=caption_font,
+    )
+    output = BytesIO()
+    image.save(output, format="PNG", optimize=True)
+    output.seek(0)
+    return output
+
+
+def _render_activity_board(
+    trip: Trip,
+    width: int,
+    height: int,
+    *,
+    activities: list | None = None,
+) -> BytesIO:
+    """Render the curated POI/hotel/meal cards used by every rich export."""
+    image = Image.new("RGB", (width, height), "#f7faff")
+    draw = ImageDraw.Draw(image)
+    title_font = _load_font(max(20, width // 50))
+    body_font = _load_font(max(14, width // 78))
+    small_font = _load_font(max(12, width // 95))
+    draw.text((28, 20), "Agent 精选行程安排", fill="#10213e", font=title_font)
+    activities = sorted(
+        activities
+        if activities is not None
+        else [
+            activity
+            for day in trip.days
+            for activity in day.activities
+            if activity.type in {"attraction", "hotel", "meal"}
+        ],
+        key=lambda item: ({"attraction": 0, "hotel": 1, "meal": 2}.get(item.type, 3), item.planned_start),
+    )[:6]
+    if not activities:
+        draw.text((28, 78), "暂无可展示的景点、餐饮或住宿安排", fill="#66758f", font=body_font)
+    else:
+        gap = 18
+        card_width = (width - 56 - gap * (len(activities) - 1)) // len(activities)
+        card_top, card_bottom = 72, height - 24
+        colors = {"attraction": "#2377e8", "hotel": "#7457e8", "meal": "#e79424"}
+        labels = {"attraction": "景点", "hotel": "住宿", "meal": "餐饮"}
+        for index, activity in enumerate(activities):
+            left = 28 + index * (card_width + gap)
+            right = left + card_width
+            draw.rounded_rectangle(
+                (left, card_top, right, card_bottom), radius=18,
+                fill="#ffffff", outline="#dce7f4", width=2,
+            )
+            photo = _download_activity_image(activity.image_url)
+            photo_height = max(80, int((card_bottom - card_top) * 0.43))
+            if photo:
+                fitted = ImageOps.fit(photo.convert("RGB"), (card_width - 4, photo_height))
+                image.paste(fitted, (left + 2, card_top + 2))
+            else:
+                draw.rounded_rectangle(
+                    (left + 2, card_top + 2, right - 2, card_top + photo_height),
+                    radius=15, fill=colors.get(activity.type, "#70839e"),
+                )
+                draw.text(
+                    (left + 18, card_top + 24), labels.get(activity.type, "安排"),
+                    fill="#ffffff", font=title_font,
+                )
+            text_y = card_top + photo_height + 14
+            draw.text((left + 14, text_y), activity.place.name[:18], fill="#10213e", font=body_font)
+            text_y += max(24, width // 60)
+            time_text = f"{activity.planned_start:%m-%d %H:%M}–{activity.planned_end:%H:%M}"
+            draw.text((left + 14, text_y), time_text, fill="#3e5c82", font=small_font)
+            text_y += max(20, width // 78)
+            note = activity.user_note or next(
+                (source.title for source in activity.source_records if source.title),
+                "详情见来源链接",
+            )
+            for line in _wrap(note, max(8, card_width // max(12, width // 85)))[:2]:
+                draw.text((left + 14, text_y), line, fill="#66758f", font=small_font)
+                text_y += max(18, width // 88)
+    output = BytesIO()
+    image.save(output, format="PNG", optimize=True)
+    output.seek(0)
+    return output
+
+
+def _download_activity_image(url: str | None) -> Image.Image | None:
+    if not url:
+        return None
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        return None
+    try:
+        response = httpx.get(url, timeout=2.5, follow_redirects=True)
+        response.raise_for_status()
+        if len(response.content) > 5 * 1024 * 1024:
+            return None
+        return Image.open(BytesIO(response.content)).convert("RGB")
+    except (httpx.HTTPError, OSError, ValueError):
+        return None
 
 
 def _wrap(value: str, width: int) -> list[str]:
@@ -106,7 +400,11 @@ def _wrap(value: str, width: int) -> list[str]:
 
 
 def _load_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
-    for candidate in ("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "C:/Windows/Fonts/msyh.ttc"):
+    for candidate in (
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "C:/Windows/Fonts/msyh.ttc",
+    ):
         if Path(candidate).is_file():
             try:
                 return ImageFont.truetype(candidate, size)

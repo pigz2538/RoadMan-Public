@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+from copy import deepcopy
 from datetime import date
 from typing import Any
 
@@ -73,7 +75,26 @@ async def run_planning(
                 settings,
                 progress_callback=_job_aware_progress(job_id),
             )
-            result = await graph.ainvoke(state)
+            result = dict(state)
+            async for update in graph.astream(state, stream_mode="updates"):
+                if not isinstance(update, dict):
+                    continue
+                updated_nodes: list[str] = []
+                for node_name, values in update.items():
+                    if isinstance(values, dict):
+                        result.update(values)
+                        updated_nodes.append(str(node_name))
+                if updated_nodes:
+                    node_name = updated_nodes[-1]
+                    await _persist_partial_result(repo, trip, result, node_name)
+                    await _publish_progress(
+                        trip_id,
+                        node_name,
+                        _partial_update_label(node_name, result),
+                        int(result.get("progress", {}).get("value") or 1),
+                        "plan_updated",
+                        None,
+                    )
             request = TripRequest.model_validate(result["trip_request"])
             trip.request = request
             if request.origin and request.destination and request.start_date and request.end_date:
@@ -110,6 +131,12 @@ async def run_planning(
                     "value": 100,
                     "label": "规划完成",
                 }
+                await repo.save_planning_result(
+                    trip,
+                    _json_safe_state(result),
+                    result.get("plan_markdown"),
+                    result.get("messages", []),
+                )
                 await _publish_progress(
                     trip_id,
                     "persist_trip",
@@ -262,3 +289,175 @@ async def pause_planning(trip_id: str) -> None:
 
 class PlanningCancelled(Exception):
     pass
+
+
+async def _persist_partial_result(
+    repo: TripRepository,
+    trip: Any,
+    result: dict[str, Any],
+    node: str,
+) -> None:
+    """Persist every usable graph update so the detail page can grow in real time."""
+    request_data = result.get("trip_request")
+    if isinstance(request_data, dict):
+        try:
+            request = TripRequest.model_validate(request_data)
+            trip.request = request
+            trip.origin = request.origin
+            trip.destination = request.destination
+            trip.start_date = request.start_date
+            trip.end_date = request.end_date
+            if request.origin and request.destination and request.start_date and request.end_date:
+                day_count = max(1, (request.end_date - request.start_date).days + 1)
+                trip.title = f"{request.origin.name}—{request.destination.name}{day_count}天自驾行程"
+        except (TypeError, ValueError):
+            pass
+
+    raw_days = result.get("day_plans")
+    if isinstance(raw_days, list) and raw_days:
+        try:
+            full_days = [DayPlan.model_validate(item) for item in raw_days]
+            revealed = False
+            if node in {"build_stages", "enrich_deep_drive", "repair_plan"}:
+                revealed = await _reveal_stages(repo, trip, result, raw_days)
+            elif node == "schedule_tourism":
+                revealed = await _reveal_activities(repo, trip, result, raw_days)
+            if not revealed:
+                trip.days = full_days
+        except (TypeError, ValueError):
+            pass
+
+    raw_sources = result.get("sources")
+    if isinstance(raw_sources, list):
+        trip.sources = _validate_items(SourceRecord, raw_sources)
+    raw_warnings = result.get("warnings")
+    if isinstance(raw_warnings, list):
+        trip.warnings = _validate_items(PlanWarning, raw_warnings)
+
+    trip.status = TripStatus.planning
+    await repo.save_planning_result(
+        trip,
+        _json_safe_state(result),
+        result.get("plan_markdown"),
+        result.get("messages", []),
+    )
+
+
+async def _reveal_stages(
+    repo: TripRepository,
+    trip: Any,
+    result: dict[str, Any],
+    raw_days: list[dict[str, Any]],
+) -> bool:
+    current_count = sum(len(day.stages) for day in trip.days)
+    target_count = sum(len(day.get("stages", [])) for day in raw_days)
+    if target_count <= current_count:
+        return False
+    for visible_count in range(max(1, current_count + 1), target_count + 1):
+        trip.days = _partial_days(raw_days, visible_count, None)
+        await repo.save_planning_result(
+            trip,
+            _json_safe_state(result),
+            result.get("plan_markdown"),
+            result.get("messages", []),
+        )
+        await _publish_progress(
+            trip.id,
+            "build_stages",
+            f"Agent 已加入第 {visible_count}/{target_count} 个行程阶段",
+            int(result.get("progress", {}).get("value") or 1),
+            "plan_updated",
+            None,
+        )
+        await asyncio.sleep(0.12)
+    return True
+
+
+async def _reveal_activities(
+    repo: TripRepository,
+    trip: Any,
+    result: dict[str, Any],
+    raw_days: list[dict[str, Any]],
+) -> bool:
+    current_count = sum(len(day.activities) for day in trip.days)
+    target_count = sum(len(day.get("activities", [])) for day in raw_days)
+    if target_count <= current_count:
+        return False
+    stage_count = sum(len(day.get("stages", [])) for day in raw_days)
+    for visible_count in range(max(1, current_count + 1), target_count + 1):
+        trip.days = _partial_days(raw_days, stage_count, visible_count)
+        await repo.save_planning_result(
+            trip,
+            _json_safe_state(result),
+            result.get("plan_markdown"),
+            result.get("messages", []),
+        )
+        visible_items = [item for day in trip.days for item in day.activities]
+        activity = visible_items[visible_count - 1] if len(visible_items) >= visible_count else None
+        label = f"Agent 已加入：{activity.place.name}" if activity else f"Agent 已加入第 {visible_count} 项停留安排"
+        await _publish_progress(
+            trip.id,
+            "schedule_tourism",
+            label,
+            int(result.get("progress", {}).get("value") or 1),
+            "plan_updated",
+            None,
+        )
+        await asyncio.sleep(0.12)
+    return True
+
+
+def _partial_days(
+    raw_days: list[dict[str, Any]],
+    visible_stages: int,
+    visible_activities: int | None,
+) -> list[DayPlan]:
+    stage_remaining = visible_stages
+    activity_remaining = visible_activities
+    partial: list[DayPlan] = []
+    for raw_day in raw_days:
+        day = deepcopy(raw_day)
+        stages = list(day.get("stages", []))
+        activities = list(day.get("activities", []))
+        day["stages"] = stages[:max(0, stage_remaining)]
+        stage_remaining -= len(day["stages"])
+        if activity_remaining is not None:
+            day["activities"] = activities[:max(0, activity_remaining)]
+            activity_remaining -= len(day["activities"])
+        visible_ids = {
+            item.get("id")
+            for item in [*day.get("stages", []), *day.get("activities", [])]
+        }
+        day["items"] = [item for item in day.get("items", []) if item.get("id") in visible_ids]
+        partial.append(DayPlan.model_validate(day))
+    return partial
+
+
+def _validate_items(model: Any, values: list[Any]) -> list[Any]:
+    validated: list[Any] = []
+    for value in values:
+        try:
+            validated.append(model.model_validate(value))
+        except (TypeError, ValueError):
+            continue
+    return validated
+
+
+def _partial_update_label(node: str, result: dict[str, Any]) -> str:
+    day_plans = result.get("day_plans") or []
+    stage_count = sum(len(day.get("stages", [])) for day in day_plans if isinstance(day, dict))
+    activity_count = sum(len(day.get("activities", [])) for day in day_plans if isinstance(day, dict))
+    labels = {
+        "extract_requirements": "Agent 已理解并结构化旅行需求",
+        "build_base_route": "Agent 已加入跨城主路线",
+        "discover_tourism": "Agent 已完成多来源景点、餐饮与住宿候选整理",
+        "build_local_routes": "Agent 正在补齐景点间的本地交通",
+        "build_stages": f"已加入 {stage_count} 个行程阶段",
+        "discover_services": "Agent 已检查沿途休息与补能设施",
+        "schedule_tourism": f"已加入 {activity_count} 项景点、用餐与住宿安排",
+        "sample_weather": "Agent 已按计划时间补充逐段天气",
+        "enrich_deep_drive": "Agent 已补充休息、补能与安全余量",
+        "verify_plan": "Agent 正在逐段核验时间、闭环与驾驶安全",
+        "generate_plan": "Agent 正在整理最终行程安排",
+    }
+    return labels.get(node, f"Agent 已完成：{node.replace('_', ' ')}")

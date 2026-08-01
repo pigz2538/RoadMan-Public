@@ -65,9 +65,91 @@ def schedule_tourism_activities(
                     sources=candidate.get("source_records", []),
                     opening_text="开放时间以景区当天公告为准",
                     ticket_or_price=candidate.get("ticket_or_price"),
+                    user_note=(
+                        candidate.get("agent_reason")
+                        or " · ".join(candidate.get("recommendation_reasons", []))
+                        or "由 POI Agent 综合来源、距离与偏好选入"
+                    ),
+                    image_url=candidate.get("image_url"),
+                    detail_url=candidate.get("detail_url"),
                 )
             )
             existing_names.add(candidate["place"]["name"])
+
+        # Use remaining safe gaps for a second/third attraction when the day
+        # has enough slack.  The old implementation only attached the POI
+        # whose name exactly matched a stage destination, which left most of
+        # the Agent's ranked candidates unused.
+        scheduled_attractions = [
+            item for item in activities if item.get("type") == "attraction"
+        ]
+        target_attractions = min(3, max(1, len(stages)))
+        if len(scheduled_attractions) < target_attractions:
+            stage_ranges = [
+                (
+                    datetime.fromisoformat(stage["planned_start"]),
+                    datetime.fromisoformat(stage["planned_end"]),
+                )
+                for stage in stages
+            ]
+            occupied = [*stage_ranges, *_occupied_ranges(activities)]
+            ranked_candidates = sorted(
+                candidates.get("attractions", []),
+                key=lambda item: (-float(item.get("score", 0)), item.get("place", {}).get("name", "")),
+            )
+            for candidate in ranked_candidates:
+                if len(scheduled_attractions) >= target_attractions:
+                    break
+                place = candidate.get("place") or {}
+                name = place.get("name")
+                if not name or name in existing_names:
+                    continue
+                slot = _closest_free_slot(
+                    datetime.combine(
+                        datetime.fromisoformat(f"{day['date']}T00:00:00+08:00").date(),
+                        time(9, 0),
+                        tzinfo=SHANGHAI,
+                    ),
+                    datetime.combine(
+                        datetime.fromisoformat(f"{day['date']}T00:00:00+08:00").date(),
+                        time(21, 0),
+                        tzinfo=SHANGHAI,
+                    ),
+                    preferred=datetime.combine(
+                        datetime.fromisoformat(f"{day['date']}T00:00:00+08:00").date(),
+                        time(15, 0),
+                        tzinfo=SHANGHAI,
+                    ),
+                    duration_minutes=75,
+                    occupied=occupied,
+                    minimum_minutes=45,
+                )
+                if not slot:
+                    continue
+                activity_start, duration = slot
+                activities.append(
+                    _activity(
+                        day=day,
+                        sequence=len(activities),
+                        activity_type="attraction",
+                        place=place,
+                        start_at=activity_start,
+                        duration_minutes=duration,
+                        sources=candidate.get("source_records", []),
+                        opening_text="开放时间以景区当天公告为准",
+                        ticket_or_price=candidate.get("ticket_or_price"),
+                        user_note=(
+                            candidate.get("agent_reason")
+                            or " · ".join(candidate.get("recommendation_reasons", []))
+                            or "由 POI Agent 综合来源、距离与偏好选入"
+                        ),
+                        image_url=candidate.get("image_url"),
+                        detail_url=candidate.get("detail_url"),
+                    )
+                )
+                occupied.append((activity_start, activity_start + timedelta(minutes=duration)))
+                scheduled_attractions.append(activities[-1])
+                existing_names.add(name)
 
         if day_index < len(day_plans) - 1 and hotels:
             hotel = hotels[day_index % len(hotels)]
@@ -112,6 +194,12 @@ def schedule_tourism_activities(
                     opening_text="入住时间与房态以酒店实时信息为准",
                     required=True,
                     ticket_or_price=hotel.get("ticket_or_price"),
+                    user_note=(
+                        " · ".join(hotel.get("recommendation_reasons", []))
+                        or "由住宿 Agent 综合位置、时间和来源选入"
+                    ),
+                    image_url=hotel.get("image_url"),
+                    detail_url=hotel.get("detail_url"),
                 )
             )
 
@@ -302,6 +390,9 @@ def _activity(
     opening_text: str,
     required: bool = False,
     ticket_or_price: dict[str, Any] | None = None,
+    user_note: str | None = None,
+    image_url: str | None = None,
+    detail_url: str | None = None,
 ) -> dict[str, Any]:
     end_at = start_at + timedelta(minutes=duration_minutes)
     return {
@@ -319,5 +410,8 @@ def _activity(
         "ticket_or_price": ticket_or_price,
         "opening_hours": {"text": opening_text, "confirmed": False},
         "source_records": sources,
+        "user_note": user_note,
+        "image_url": image_url,
+        "detail_url": detail_url,
         "warnings": [],
     }

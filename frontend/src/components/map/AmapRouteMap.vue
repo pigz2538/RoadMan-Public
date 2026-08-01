@@ -6,14 +6,19 @@ import localSecurityCode from '../../../../Skills/amap-jsapi/secretkey.txt?raw'
 import type { DayPlan } from '../../types/trip'
 import MockRouteMap from './MockRouteMap.vue'
 
-const props = defineProps<{ day?: DayPlan; activeStageId?: string }>()
-const emit = defineEmits<{ selectStage: [stageId: string] }>()
+const props = defineProps<{ day?: DayPlan; activeStageId?: string; pickEnabled?: boolean }>()
+const emit = defineEmits<{
+  selectStage: [stageId: string]
+  selectActivity: [activityId: string]
+  pointSelected: [point: { name: string; address?: string; longitude: number; latitude: number }]
+}>()
 
 const containerId = `roadman-amap-${Math.random().toString(36).slice(2)}`
 const map = shallowRef<any>(null)
 const AMap = shallowRef<any>(null)
 const routeOverlays = shallowRef<Array<{ stageId: string; polyline: any }>>([])
 const otherOverlays = shallowRef<any[]>([])
+const pickedMarker = shallowRef<any>(null)
 type TravelMode = 'driving' | 'riding' | 'walking' | 'transit'
 type PlannedRoute = { path: any[]; mode: TravelMode | 'direct'; fallback: boolean }
 type MarkerKind = 'start' | 'end' | 'attraction' | 'charging' | 'fueling' | 'meal' | 'rest' | 'hotel' | 'parking' | 'service'
@@ -195,55 +200,63 @@ function stagePath(stage: NonNullable<typeof props.day>['stages'][number]): Prom
 
 function itineraryConnectors() {
   if (!props.day) return []
-  const stageById = new Map(props.day.stages.map((stage) => [stage.id, stage]))
-  const activityById = new Map(props.day.activities.map((activity) => [activity.id, activity]))
+  type TimelinePoint = {
+    kind: 'stage' | 'activity'
+    id: string
+    name: string
+    city?: string
+    coordinates?: { longitude: number; latitude: number }
+    plannedStart: string
+  }
+  const timeline: TimelinePoint[] = [
+    ...props.day.stages.map((stage) => ({
+      kind: 'stage' as const,
+      id: stage.id,
+      name: stage.destination.name,
+      city: stage.destination.city,
+      coordinates: stage.destination.coordinates,
+      plannedStart: stage.planned_start,
+    })),
+    ...props.day.activities.map((activity) => ({
+      kind: 'activity' as const,
+      id: activity.id,
+      name: activity.place.name,
+      city: activity.place.city,
+      coordinates: activity.place.coordinates,
+      plannedStart: activity.planned_start || '',
+    })),
+  ].sort((left, right) => {
+    const timeDelta = left.plannedStart.localeCompare(right.plannedStart)
+    return timeDelta || (left.kind === 'stage' ? -1 : 1)
+  })
   const pairs: Array<{
     id: string
     start: { longitude: number; latitude: number }
     end: { longitude: number; latitude: number }
     city?: string
   }> = []
-  let previous: { name: string; city?: string; coordinates?: { longitude: number; latitude: number } } | undefined
-  for (const item of props.day.items ?? []) {
-    if (item.type === 'stage') {
-      const stage = stageById.get(item.id)
-      if (!stage) continue
-      const start = stage.origin
-      if (previous?.coordinates && start.coordinates) {
-        const distance = Math.hypot(
-          previous.coordinates.longitude - start.coordinates.longitude,
-          previous.coordinates.latitude - start.coordinates.latitude,
-        )
-        if (distance > 0.0001) {
-          pairs.push({
-            id: `connector-${previous.name}-${start.name}`,
-            start: previous.coordinates,
-            end: start.coordinates,
-            city: previous.city === start.city ? start.city : undefined,
-          })
-        }
-      }
-      previous = stage.destination
-    } else {
-      const activity = activityById.get(item.id)
-      const place = activity?.place
-      if (!place?.coordinates) continue
-      if (previous?.coordinates) {
-        const distance = Math.hypot(
-          previous.coordinates.longitude - place.coordinates.longitude,
-          previous.coordinates.latitude - place.coordinates.latitude,
-        )
-        if (distance > 0.0001) {
-          pairs.push({
-            id: `connector-${previous.name}-${place.name}`,
-            start: previous.coordinates,
-            end: place.coordinates,
-            city: previous.city === place.city ? place.city : undefined,
-          })
-        }
-      }
-      previous = place
-    }
+  for (let index = 1; index < timeline.length; index += 1) {
+    const previous = timeline[index - 1]
+    const current = timeline[index]
+    // MovementStage already owns its real road geometry. Connectors are only
+    // needed around activities inserted between stages; this prevents the
+    // old stage-first/activity-last ordering from drawing a false Lushan→Wuhan
+    // dashed line across the whole trip.
+    if (previous.kind === 'stage' && current.kind === 'stage') continue
+    if (!previous.coordinates || !current.coordinates) continue
+    const distance = Math.hypot(
+      previous.coordinates.longitude - current.coordinates.longitude,
+      previous.coordinates.latitude - current.coordinates.latitude,
+    )
+    if (distance <= 0.0001) continue
+    const id = `connector-${previous.id}-${current.id}`
+    if (pairs.some((item) => item.id === id)) continue
+    pairs.push({
+      id,
+      start: previous.coordinates,
+      end: current.coordinates,
+      city: previous.city === current.city ? current.city : undefined,
+    })
   }
   return pairs
 }
@@ -335,6 +348,7 @@ async function renderRoutes() {
   const places = new Map<string, {
     place: NonNullable<typeof props.day>['stages'][number]['origin']
     kind: MarkerKind
+    activityId?: string
   }>()
   const firstStage = props.day.stages[0]
   const lastStage = props.day.stages.at(-1)
@@ -351,13 +365,14 @@ async function renderRoutes() {
       places.set(activity.place.name, {
         place: activity.place,
         kind: activityMarkerKind(activity.type),
+        activityId: activity.id,
       })
     }
   }
   if (lastStage?.destination.coordinates) {
     places.set(lastStage.destination.name, { place: lastStage.destination, kind: 'end' })
   }
-  for (const [index, { place, kind }] of [...places.values()].entries()) {
+  for (const [index, { place, kind, activityId }] of [...places.values()].entries()) {
     if (!place.coordinates) continue
     const terminal = kind === 'start' || kind === 'end'
     const marker = new AMap.value.Marker({
@@ -367,6 +382,7 @@ async function renderRoutes() {
       offset: new AMap.value.Pixel(-16, -38),
       zIndex: 1000 + index,
     })
+    if (activityId) marker.on('click', () => emit('selectActivity', activityId))
     otherOverlays.value.push(marker)
   }
 
@@ -414,6 +430,7 @@ async function initMap() {
         'AMap.Riding',
         'AMap.Walking',
         'AMap.Transfer',
+        'AMap.Geocoder',
       ],
     })
     if (typeof instance.getConfig === 'function') {
@@ -434,6 +451,31 @@ async function initMap() {
     })
     map.value.addControl(new instance.Scale())
     map.value.addControl(new instance.ToolBar({ position: { right: '12px', top: '12px' } }))
+    const geocoder = new instance.Geocoder({ radius: 800, extensions: 'all' })
+    map.value.on('click', (event: any) => {
+      if (!props.pickEnabled) return
+      const longitude = Number(event.lnglat.getLng())
+      const latitude = Number(event.lnglat.getLat())
+      if (pickedMarker.value) map.value.remove(pickedMarker.value)
+      pickedMarker.value = new instance.Marker({
+        position: [longitude, latitude],
+        content: '<div class="amap-picked-marker"><span>+</span></div>',
+        offset: new instance.Pixel(-18, -36),
+        zIndex: 3000,
+      })
+      map.value.add(pickedMarker.value)
+      geocoder.getAddress([longitude, latitude], (status: string, result: any) => {
+        const regeocode = status === 'complete' ? result?.regeocode : undefined
+        const poiName = regeocode?.pois?.[0]?.name
+        const address = regeocode?.formattedAddress
+        emit('pointSelected', {
+          name: poiName || address || `地图选点 ${longitude.toFixed(5)},${latitude.toFixed(5)}`,
+          address,
+          longitude,
+          latitude,
+        })
+      })
+    })
     map.value.on('complete', () => {
       loading.value = false
       void renderRoutes()
@@ -452,6 +494,12 @@ watch(
   () => [props.day?.id, props.activeStageId],
   () => void renderRoutes(),
 )
+watch(() => props.pickEnabled, (enabled) => {
+  if (!enabled && pickedMarker.value && map.value) {
+    map.value.remove(pickedMarker.value)
+    pickedMarker.value = null
+  }
+})
 onMounted(initMap)
 onBeforeUnmount(() => {
   map.value?.destroy()
@@ -461,7 +509,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="amap-shell">
+  <div class="amap-shell" :class="{ 'is-picking': pickEnabled }">
     <div v-show="!failed" :id="containerId" class="amap-container" />
     <MockRouteMap v-if="failed" :day="day" :active-stage-id="activeStageId" />
     <div v-if="loading" class="map-loading"><i />正在加载高德地图…</div>

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowLeft, ChevronLeft, ChevronRight, Download, Paperclip, Share2 } from '@lucide/vue'
+import { ArrowLeft, ChevronLeft, ChevronRight, Crosshair, Download, Paperclip, Share2 } from '@lucide/vue'
 import {
   answerClarification,
   createTripVersion,
@@ -16,6 +16,7 @@ import {
   fetchTrip,
   startPlanning,
   previewDeletePatch,
+  previewMapPointPatch,
   type PlanningSnapshot,
 } from '../api/trips'
 import { useTripStore } from '../stores/trip'
@@ -39,15 +40,27 @@ const attachmentInput = ref<HTMLInputElement | null>(null)
 const attachmentPreview = ref<AttachmentExtraction | null>(null)
 const attachmentSelection = ref<string[]>([])
 const attachmentMessage = ref('')
+const mapPickMode = ref(false)
+const mapPickCategory = ref<'attractions' | 'hotels' | 'meals'>('attractions')
+const mapPickMessage = ref('')
 let pollingTimer: number | undefined
 const stageDrag = { active: false, moved: false, startX: 0, startScrollLeft: 0, pointerId: -1 }
 const categories = ['景点', '住宿', '餐饮', '服务'] as const
 const { connect } = useTripSSE((event) => {
-  store.planningEvent = event
-  if (event.event === 'planning_completed' || event.event === 'clarification_required') {
+  store.addPlanningEvent(event)
+  if (
+    event.event === 'plan_updated'
+    || event.event === 'planning_completed'
+    || event.event === 'clarification_required'
+    || event.event === 'planning_failed'
+  ) {
     void refreshPlanning()
   }
 })
+
+const planningComplete = computed(() =>
+  planningSnapshot.value?.status === 'completed' || store.trip?.status === 'completed',
+)
 
 const filteredActivities = computed(() => {
   const typeMap: Record<string, string[]> = {
@@ -76,6 +89,7 @@ const riskStages = computed(() =>
 
 async function load() {
   const tripId = String(route.params.tripId)
+  store.resetPlanningEvents()
   try {
     if (tripId === 'trip_wuhan_lushan_demo') {
       store.trip = await fetchMockTrip()
@@ -107,8 +121,7 @@ async function refreshPlanning() {
     planningSnapshot.value = snapshot
     if (snapshot.status === 'completed') {
       store.trip = await fetchTrip(tripId)
-      store.setDay(0)
-      store.planningEvent = null
+      if (!store.currentDay) store.setDay(0)
       await nextTick()
       centerCurrentStage('auto')
       return
@@ -118,10 +131,31 @@ async function refreshPlanning() {
       return
     }
     if (snapshot.status !== 'clarification_required') {
+      const partialTrip = await fetchTrip(tripId)
+      const hadNoDay = !store.currentDay
+      store.trip = partialTrip
+      if (hadNoDay && partialTrip.days.length) store.setDay(0)
       pollingTimer = window.setTimeout(() => void refreshPlanning(), 900)
     }
   } catch (error) {
     planningError.value = error instanceof Error ? error.message : '无法读取规划进度'
+  }
+}
+
+async function handleMapPoint(point: { name: string; address?: string; longitude: number; latitude: number }) {
+  if (!store.trip || !store.currentDay) return
+  mapPickMessage.value = `正在为“${point.name}”生成修改预览…`
+  try {
+    store.pendingPatch = await previewMapPointPatch(store.trip.id, {
+      day_id: store.currentDay.id,
+      category: mapPickCategory.value,
+      ...point,
+    })
+    store.selectedNodeId = store.currentStageId
+    mapPickMode.value = false
+    mapPickMessage.value = `已选中“${point.name}”，请在右侧 Agent 面板确认是否加入行程。`
+  } catch (error) {
+    mapPickMessage.value = error instanceof Error ? error.message : '地图选点暂时无法生成修改预览'
   }
 }
 
@@ -208,6 +242,11 @@ async function confirmAttachment() {
 function selectStageById(stageId: string) {
   const item = allStages.value.find((entry) => entry.stage.id === stageId)
   if (item) selectJourneyStage(item)
+}
+
+function selectActivityById(activityId: string) {
+  const activity = store.currentDay?.activities.find((item) => item.id === activityId)
+  if (activity) store.selectActivity(activity)
 }
 
 function selectJourneyStage(item: (typeof allStages.value)[number]) {
@@ -331,10 +370,12 @@ watch(
       </div>
       <div class="top-actions">
         <button class="ghost-button" @click="saveVersion"><Share2 />保存版本</button>
-        <button class="ghost-button" @click="exportMarkdown"><Download />导出 Markdown</button>
-        <button class="ghost-button export-small" @click="exportSnapshot('pdf')">PDF</button>
-        <button class="ghost-button export-small" @click="exportSnapshot('pptx')">PPT</button>
-        <button class="ghost-button export-small" @click="exportSnapshot('png')">长图</button>
+        <template v-if="planningComplete">
+          <button class="ghost-button" @click="exportMarkdown"><Download />导出 Markdown</button>
+          <button class="ghost-button export-small" @click="exportSnapshot('pdf')">PDF</button>
+          <button class="ghost-button export-small" @click="exportSnapshot('pptx')">PPT</button>
+          <button class="ghost-button export-small" @click="exportSnapshot('png')">长图</button>
+        </template>
         <button class="ghost-button export-small" @click="openAttachmentPicker"><Paperclip />附件</button>
         <input ref="attachmentInput" class="sr-only" type="file" accept=".png,.jpg,.jpeg,.webp,.pdf,.docx,.md,.xlsx" @change="onAttachmentSelected">
       </div>
@@ -352,13 +393,19 @@ watch(
     </section>
 
     <div v-if="loading" class="page-state">正在加载武汉—庐山行程…</div>
-    <section v-else-if="planningSnapshot && !store.currentDay" class="planning-state glass-card">
-      <span class="eyebrow">LANGGRAPH PLANNING</span>
-      <h2>{{ planningSnapshot.status === 'failed' ? '这次行程未通过安全校验' : planningSnapshot.clarification_question || '正在生成您的真实路线与行程安排…' }}</h2>
-      <div class="planning-meter">
-        <i :style="{ width: `${store.planningEvent?.progress || planningSnapshot.progress.value || 3}%` }" />
+    <section v-else-if="planningSnapshot && !store.currentDay" class="planning-live-layout">
+      <section class="planning-state glass-card">
+      <span class="eyebrow">ROADMAN AGENTS 正在协作</span>
+      <h2>{{ planningSnapshot.status === 'failed' ? '这次行程需要调整后再规划' : planningSnapshot.clarification_question || '正在把行程一项一项加入详情页' }}</h2>
+      <div v-if="planningSnapshot.status !== 'failed'" class="planning-event-list">
+        <article v-for="(event, index) in store.planningEvents.slice(-7)" :key="`${event.event}-${index}`">
+          <i :class="{ active: index === store.planningEvents.slice(-7).length - 1 }" />
+          <div><strong>{{ event.label }}</strong><span>{{ event.progress }}% · {{ event.tool || event.node || '规划 Agent' }}</span></div>
+        </article>
+        <article v-if="!store.planningEvents.length">
+          <i class="active" /><div><strong>正在建立行程上下文</strong><span>Requirement Agent</span></div>
+        </article>
       </div>
-      <p>{{ planningSnapshot.status === 'failed' ? planningError || '规划校验未通过，请修改需求后重试。' : store.planningEvent?.label || planningSnapshot.progress.label || '规划任务已进入队列' }}</p>
       <div v-if="planningSnapshot.defaults_applied.length" class="visible-defaults">
         <strong>已采用的可见默认值</strong>
         <span v-for="item in planningSnapshot.defaults_applied" :key="item">{{ humanizeDefault(item) }}</span>
@@ -380,10 +427,20 @@ watch(
         <input v-model="clarificationAnswer" autofocus placeholder="输入补充信息…" />
         <button class="primary-button">继续规划</button>
       </form>
-      <p v-if="planningError" class="planning-error">{{ planningError }}</p>
+      <p v-if="planningError && planningSnapshot.status !== 'failed'" class="planning-error">{{ planningError }}</p>
+      </section>
+      <AgentPanel />
     </section>
     <template v-else-if="store.trip && store.currentDay">
       <div v-if="degraded" class="degraded-banner">后端暂不可用，正在加载本地行程数据。</div>
+      <section v-if="!planningComplete" class="planning-live-strip glass-card">
+        <span class="planning-pulse" />
+        <div>
+          <strong>{{ store.planningEvent?.label || 'Agent 正在继续完善行程' }}</strong>
+          <small>地图、阶段、景点、用餐、住宿和补能安排会继续逐项出现</small>
+        </div>
+        <b>{{ store.planningEvent?.progress || planningSnapshot?.progress.value || 1 }}%</b>
+      </section>
       <section class="plan-grid">
         <aside class="trip-sidebar glass-card">
           <select :value="store.currentDayIndex" @change="store.setDay(Number(($event.target as HTMLSelectElement).value))">
@@ -414,10 +471,24 @@ watch(
         </aside>
 
         <section class="map-workspace">
+          <div class="map-pick-toolbar glass-card">
+            <select v-model="mapPickCategory" aria-label="地图选点类型">
+              <option value="attractions">景点</option>
+              <option value="hotels">住宿</option>
+              <option value="meals">餐饮</option>
+            </select>
+            <button :class="{ active: mapPickMode }" @click="mapPickMode = !mapPickMode">
+              <Crosshair />{{ mapPickMode ? '请点击地图位置' : '地图选点加入' }}
+            </button>
+            <span v-if="mapPickMessage">{{ mapPickMessage }}</span>
+          </div>
           <AmapRouteMap
             :day="store.currentDay"
             :active-stage-id="store.currentStageId"
+            :pick-enabled="mapPickMode"
             @select-stage="selectStageById"
+            @select-activity="selectActivityById"
+            @point-selected="handleMapPoint"
           />
           <div class="stage-nav glass-card">
             <button

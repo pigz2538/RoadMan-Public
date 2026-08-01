@@ -18,6 +18,8 @@ export interface Activity {
   required?: boolean
   backup?: boolean
   user_note?: string
+  image_url?: string
+  detail_url?: string
   ticket_or_price?: {
     currency: string
     minimum: number
