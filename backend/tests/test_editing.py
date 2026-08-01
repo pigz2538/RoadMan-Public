@@ -13,9 +13,11 @@ from app.domain.models import (
 )
 from app.planning.editing import (
     CandidatePatchRequest,
+    DeleteActivityPatchRequest,
     EditIntentRequest,
     MapPointPatchRequest,
     create_candidate_patch,
+    create_delete_activity_patch,
     create_map_point_patch,
     decide_candidate_patch,
     interpret_edit_intent,
@@ -294,3 +296,56 @@ def test_semantic_duration_can_shrink_for_more_attractions():
     assert patch is not None
     assert patch.proposed_value["duration_minutes"] == 60
     assert patch.time_delta_minutes == 60
+
+
+def test_delete_then_add_keeps_the_new_activity_in_canonical_day_state():
+    origin = {"name": "Origin", "coordinates": {"longitude": 114.3, "latitude": 30.5}}
+    destination = {"name": "Destination", "coordinates": {"longitude": 114.4, "latitude": 30.6}}
+    start = datetime(2026, 8, 2, 8, tzinfo=timezone.utc)
+    old = Activity(
+        id="activity_old",
+        day_id="day_1",
+        sequence=1,
+        type="attraction",
+        place={"name": "Old attraction"},
+        planned_start=start + timedelta(minutes=35),
+        planned_end=start + timedelta(minutes=95),
+        duration_minutes=60,
+    )
+    trip = Trip(
+        title="edit regression",
+        request=TripRequest(raw_text="test"),
+        days=[DayPlan(
+            id="day_1",
+            day_index=1,
+            date=date(2026, 8, 2),
+            title="Day 1",
+            stages=[stage("stage_1", 0, origin, destination, start)],
+            activities=[old],
+        )],
+    )
+    state = {"tourism_candidates": {"attractions": [{
+        "candidate_id": "candidate_new",
+        "place": {"name": "New attraction", "coordinates": destination["coordinates"]},
+        "rank": 1,
+        "score": 90,
+    }]}}
+    delete_patch = create_delete_activity_patch(
+        trip,
+        state,
+        DeleteActivityPatchRequest(day_id="day_1", activity_id="activity_old"),
+    )
+    decide_candidate_patch(trip, state, delete_patch.id, apply=True)
+    add_patch = create_candidate_patch(
+        trip,
+        state,
+        CandidatePatchRequest(
+            candidate_id="candidate_new",
+            category="attractions",
+            day_id="day_1",
+            operation="add",
+        ),
+    )
+    decide_candidate_patch(trip, state, add_patch.id, apply=True)
+    assert [item.place.name for item in trip.days[0].activities] == ["New attraction"]
+    assert [item.id for item in trip.days[0].items] == ["stage_1", trip.days[0].activities[0].id]

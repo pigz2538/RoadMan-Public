@@ -287,6 +287,7 @@ class Activity(BaseModel):
     required: bool = False
     backup: bool = False
     user_note: str | None = None
+    description: str | None = None
     image_url: str | None = None
     detail_url: str | None = None
     ticket_or_price: MoneyRange | None = None

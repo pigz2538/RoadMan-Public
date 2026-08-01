@@ -125,3 +125,5 @@ SSE 使用命名事件，每条事件包含单调递增的 `id:`。客户端断�
 - Job Worker 使用 Redis + ARQ，Web API 与 Worker 共享任务状态。
 - 文件内容存储在 `UPLOAD_DIR`，数据库只保存安全文件名和元数据。
 - JSON Schema 位于 `shared/schemas/`，由 `backend/scripts/export_schemas.py` 生成。
+- POI 候选会在规划阶段由 `baidu.baike` 做最佳努力的详情补充：返回 `description`、`image_url`、`detail_url` 和 `source_records` 中的百科来源。该查询有短超时，失败只降级为已有地图或旅行平台来源。
+- 补丁应用接口在事务提交后重新读取 canonical Trip；前端也会重新 hydrate，保证连续删除、加入、替换操作不会恢复旧活动。

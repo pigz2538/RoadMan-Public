@@ -4,6 +4,7 @@ import { Bot, RefreshCw, Send, Sparkles } from '@lucide/vue'
 import {
   applyPlanPatch,
   fetchRecommendations,
+  fetchTrip,
   interpretTripEdit,
   previewCandidatePatch,
   rejectPlanPatch,
@@ -103,8 +104,21 @@ async function decidePatch(apply: boolean) {
     if (apply) {
       const patchName = displayPatchName(store.pendingPatch)
       const result = await applyPlanPatch(store.trip.id, store.pendingPatch.id)
-      store.trip = result.trip
+      // Hydrate once more after the commit so deletion -> add/replacement
+      // sequences cannot resurrect a stale activity list from the preview.
+      try {
+        store.trip = await fetchTrip(store.trip.id)
+      } catch {
+        // The apply response is already canonical; a transient refresh error
+        // must not make a committed edit look like it failed.
+        store.trip = result.trip
+      }
       store.lastAppliedPatchId = result.patch.id
+      recommendations.value = recommendations.value.filter((candidate) =>
+        !store.trip?.days.some((day) => day.activities.some((activity) =>
+          activity.place.name === candidate.place.name && activity.type === ({ attractions: 'attraction', hotels: 'hotel', meals: 'meal' }[currentCategory.value ?? 'attractions']),
+        )),
+      )
       messages.value.push({
         side: 'ai',
         text: `已应用：${patchName}`,
@@ -196,6 +210,7 @@ watch(() => store.pendingPatch?.id, (patchId) => {
             <span>{{ candidate.score.toFixed(1) }} 分</span>
           </header>
           <p>{{ candidate.agent_reason || candidate.recommendation_reasons?.join(' · ') || candidate.place.address || '综合距离与偏好排序' }}</p>
+          <p v-if="candidate.description" class="recommendation-description">{{ candidate.description }}</p>
           <a
             v-if="candidate.detail_url || candidate.source_records?.find((item) => item.url)"
             class="recommendation-detail"

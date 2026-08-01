@@ -273,7 +273,12 @@ function formatTime(value: string) {
 }
 
 function formatDuration(minutes: number) {
-  return `${Math.floor(minutes / 60)}小时${minutes % 60 ? `${minutes % 60}分钟` : ''}`
+  const rounded = Math.max(0, Math.round(minutes))
+  const hours = Math.floor(rounded / 60)
+  const rest = rounded % 60
+  if (hours && rest) return `${hours}小时${rest}分钟`
+  if (hours) return `${hours}小时`
+  return `${rest}分钟`
 }
 
 function humanizeDefault(value: string) {
@@ -450,7 +455,7 @@ watch(
           </select>
           <div class="day-summary">
             <strong>{{ store.currentDay.title }}</strong>
-            <span>{{ store.currentDay.total_distance_km }} km · {{ Math.floor(store.currentDay.total_drive_minutes / 60) }}h{{ store.currentDay.total_drive_minutes % 60 }}m</span>
+            <span>{{ store.currentDay.total_distance_km }} km · {{ formatDuration(store.currentDay.total_drive_minutes) }}</span>
             <span>{{ store.currentDay.weather_summary }}</span>
           </div>
           <div class="category-tabs">
@@ -472,12 +477,18 @@ watch(
 
         <section class="map-workspace">
           <div class="map-pick-toolbar glass-card">
+            <div class="map-pick-heading"><strong>地图加点</strong><small>先选类型，再点地图位置</small></div>
             <select v-model="mapPickCategory" aria-label="地图选点类型">
               <option value="attractions">景点</option>
               <option value="hotels">住宿</option>
               <option value="meals">餐饮</option>
             </select>
-            <button :class="{ active: mapPickMode }" @click="mapPickMode = !mapPickMode">
+            <div class="map-pick-categories" role="tablist" aria-label="地图加点类型">
+              <button type="button" role="tab" :class="{ selected: mapPickCategory === 'attractions' }" :aria-selected="mapPickCategory === 'attractions'" @click="mapPickCategory = 'attractions'">景点</button>
+              <button type="button" role="tab" :class="{ selected: mapPickCategory === 'hotels' }" :aria-selected="mapPickCategory === 'hotels'" @click="mapPickCategory = 'hotels'">住宿</button>
+              <button type="button" role="tab" :class="{ selected: mapPickCategory === 'meals' }" :aria-selected="mapPickCategory === 'meals'" @click="mapPickCategory = 'meals'">餐饮</button>
+            </div>
+            <button type="button" :class="{ active: mapPickMode }" @click="mapPickMode = !mapPickMode">
               <Crosshair />{{ mapPickMode ? '请点击地图位置' : '地图选点加入' }}
             </button>
             <span v-if="mapPickMessage">{{ mapPickMessage }}</span>

@@ -16,6 +16,15 @@ const visuals: Record<string, string> = {
   charging: '⚡',
   service: '🛟',
 }
+
+function formatStayDuration(minutes: number) {
+  const rounded = Math.max(0, Math.round(minutes))
+  const hours = Math.floor(rounded / 60)
+  const rest = rounded % 60
+  if (hours && rest) return `${hours}小时${rest}分钟`
+  if (hours) return `${hours}小时`
+  return `${rest}分钟`
+}
 </script>
 
 <template>
@@ -33,7 +42,7 @@ const visuals: Record<string, string> = {
       <div class="activity-copy">
         <strong><b>{{ index + 1 }}</b>{{ activity.place.name }}</strong>
         <span>
-          {{ activity.type === 'hotel' ? '住宿' : `停留 ${Math.round(activity.duration_minutes / 60 * 10) / 10}h` }}
+          {{ activity.type === 'hotel' ? '住宿' : `停留 ${formatStayDuration(activity.duration_minutes)}` }}
           · {{ activity.place.city }}
         </span>
         <span v-if="activity.planned_start && activity.planned_end" class="activity-meta">
@@ -48,6 +57,7 @@ const visuals: Record<string, string> = {
           来源：{{ [...new Set(activity.source_records.map((item) => item.provider))].join('、') }}
         </span>
         <p v-if="activity.user_note" class="activity-note">{{ activity.user_note }}</p>
+        <p v-if="activity.description" class="activity-description">{{ activity.description }}</p>
         <a
           v-if="activity.detail_url || activity.source_records?.find((item) => item.url)"
           class="activity-detail-link"

@@ -237,6 +237,13 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .map-workspace { min-width: 0; display: grid; grid-template-rows: minmax(0, 1fr) auto; gap: 13px; position: relative; }
 .map-pick-toolbar { position: absolute; z-index: 12; top: 54px; left: 14px; display: flex; align-items: center; gap: 8px; max-width: calc(100% - 90px); padding: 7px; }
 .map-pick-toolbar select, .map-pick-toolbar button { height: 36px; border: 1px solid #d6e3f2; border-radius: 10px; background: #fff; color: #17304f; font-weight: 700; }
+.map-pick-toolbar > select { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.map-pick-heading { display: flex; flex-direction: column; gap: 1px; min-width: 92px; }
+.map-pick-heading strong { color: #17304f; font-size: 13px; }
+.map-pick-heading small { color: #7185a0; font-size: 10px; white-space: nowrap; }
+.map-pick-categories { display: inline-flex; align-items: center; gap: 3px; padding: 3px; border: 1px solid #d6e3f2; border-radius: 12px; background: #f3f7fc; }
+.map-pick-categories button { height: 29px; padding: 0 9px; border: 0; border-radius: 8px; background: transparent; color: #58718f; font-size: 12px; cursor: pointer; }
+.map-pick-categories button.selected { background: #1677ff; color: #fff; box-shadow: 0 3px 8px #1677ff33; }
 .map-pick-toolbar select { padding: 0 9px; }
 .map-pick-toolbar button { display: inline-flex; align-items: center; gap: 6px; padding: 0 12px; cursor: pointer; }
 .map-pick-toolbar button.active { color: #fff; border-color: #1677ff; background: #1677ff; }
@@ -436,6 +443,7 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .patch-card { position: sticky; bottom: 0; z-index: 3; border: 1px solid #cbdcf8; border-radius: 15px; padding: 13px; background: linear-gradient(145deg, rgba(255,255,255,.98), rgba(245,248,255,.98)); box-shadow: 0 -10px 24px rgba(54,91,143,.12); }
 .patch-card > span { color: var(--blue); font-size: 11px; font-weight: 800; letter-spacing: .1em; }.patch-card > strong { display: block; margin: 7px 0 10px; font-size: 14px; }
 .patch-card dl { margin: 0; display: grid; gap: 5px; }.patch-card dl div { display: flex; justify-content: space-between; font-size: 12px; }.patch-card dt { color: var(--muted); }.patch-card dd { margin: 0; font-weight: 600; }.patch-card .good { color: #159c7d; }
+.recommendation-description, .activity-description { color: #5b708d; line-height: 1.55; font-size: 12px; margin: 5px 0 0; }
 .patch-card > div { margin-top: 10px; display: grid; grid-template-columns: 1fr 1.4fr; gap: 7px; }.patch-card button { padding: 8px; border: 1px solid #d7e0ed; border-radius: 9px; background: white; font-size: 12px; cursor: pointer; }.patch-card button.apply { background: var(--blue); color: white; border-color: var(--blue); }
 .suggestions { padding: 0 12px 8px; display: flex; gap: 5px; flex-wrap: wrap; }
 .suggestions button { border: 1px solid #d5e1f2; border-radius: 20px; background: white; padding: 6px 8px; color: #42638e; font-size: 12px; cursor: pointer; }

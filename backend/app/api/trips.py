@@ -42,6 +42,7 @@ from ..planning.editing import (
     recompute_and_verify_patch,
     rollback_patch,
 )
+from ..planning.poi_enrichment import enrich_tourism_candidates
 from ..repositories import JobRepository, TripRepository
 from ..services.job_queue import enqueue_job
 from ..services.exports import ReportAgent
@@ -438,6 +439,22 @@ async def preview_map_point_patch(
     state, markdown = await repo.get_planning_snapshot(trip_id)
     state = state or {}
     patch = create_map_point_patch(trip, state, payload)
+    settings = get_settings()
+    if settings.enable_poi_web_enrichment:
+        category_candidates = state.get("tourism_candidates", {}).get(payload.category, [])
+        picked = next(
+            (item for item in category_candidates if item.get("candidate_id") == patch.proposed_value.get("candidate_id")),
+            None,
+        )
+        if picked:
+            await enrich_tourism_candidates(
+                {payload.category: [picked]},
+                max_attractions=1,
+                max_other=1,
+                timeout_seconds=settings.poi_web_timeout_seconds,
+            )
+            patch.proposed_value["candidate"] = picked
+            state.setdefault("plan_patches", {})[patch.id] = patch.model_dump(mode="json")
     await repo.save_planning_result(trip, state, markdown)
     return patch
 
@@ -515,7 +532,11 @@ async def apply_candidate_patch(
     await recompute_and_verify_patch(trip, state, patch, registry)
     state.setdefault("patch_backups", {})[patch.id] = backup
     await repo.save_planning_result(trip, state, markdown)
-    return {"patch": patch, "trip": trip}
+    # Return the canonical row after the commit. This prevents a follow-up
+    # recommendation request from hydrating an older in-memory snapshot when
+    # users delete one POI and immediately add another one.
+    persisted = await repo.get(trip_id)
+    return {"patch": patch, "trip": persisted or trip}
 
 
 @router.post("/{trip_id}/patches/{patch_id}/reject", response_model=PlanPatch)

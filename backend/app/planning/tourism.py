@@ -70,6 +70,7 @@ def schedule_tourism_activities(
                         or " · ".join(candidate.get("recommendation_reasons", []))
                         or "由 POI Agent 综合来源、距离与偏好选入"
                     ),
+                    description=candidate.get("description"),
                     image_url=candidate.get("image_url"),
                     detail_url=candidate.get("detail_url"),
                 )
@@ -143,6 +144,7 @@ def schedule_tourism_activities(
                             or " · ".join(candidate.get("recommendation_reasons", []))
                             or "由 POI Agent 综合来源、距离与偏好选入"
                         ),
+                        description=candidate.get("description"),
                         image_url=candidate.get("image_url"),
                         detail_url=candidate.get("detail_url"),
                     )
@@ -391,6 +393,7 @@ def _activity(
     required: bool = False,
     ticket_or_price: dict[str, Any] | None = None,
     user_note: str | None = None,
+    description: str | None = None,
     image_url: str | None = None,
     detail_url: str | None = None,
 ) -> dict[str, Any]:
@@ -411,6 +414,7 @@ def _activity(
         "opening_hours": {"text": opening_text, "confirmed": False},
         "source_records": sources,
         "user_note": user_note,
+        "description": description,
         "image_url": image_url,
         "detail_url": detail_url,
         "warnings": [],

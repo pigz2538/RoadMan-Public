@@ -29,6 +29,7 @@ from .deep_drive import (
 )
 from .llm import OllamaPoiCurator, OllamaRequirementExtractor
 from .recommendations import rank_tourism_candidates
+from .poi_enrichment import enrich_tourism_candidates
 from .state import RoadManState
 from .tourism import schedule_tourism_activities, verify_tourism_plan
 
@@ -554,6 +555,27 @@ def build_planning_graph(
             destination,
             state["trip_request"].get("preferences", []),
         )
+        if settings.enable_poi_web_enrichment:
+            await emit(
+                state,
+                "enrich_poi_details",
+                "POI Agent 正在汇总百科介绍、图片与可追溯来源",
+                67,
+                event="tool_started",
+                tool="baidu.baike",
+            )
+            candidates = await enrich_tourism_candidates(
+                candidates,
+                timeout_seconds=settings.poi_web_timeout_seconds,
+            )
+            await emit(
+                state,
+                "enrich_poi_details",
+                "POI Agent 已完成景点详情与图片补充",
+                67,
+                event="tool_completed",
+                tool="baidu.baike",
+            )
         await emit(
             state,
             "discover_tourism",

@@ -46,6 +46,7 @@ export interface RecommendationCandidate {
   backup?: boolean
   recommendation_reasons?: string[]
   agent_reason?: string
+  description?: string
   image_url?: string
   detail_url?: string
   place: {

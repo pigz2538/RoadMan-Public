@@ -628,6 +628,7 @@ def _activity_from_candidate(
         opening_hours=candidate.get("opening_hours"),
         source_records=candidate.get("source_records", []),
         user_note="由地图选点或 Agent 备选方案加入",
+        description=candidate.get("description"),
         image_url=candidate.get("image_url"),
         detail_url=candidate.get("detail_url"),
     )
