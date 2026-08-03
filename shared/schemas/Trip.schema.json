@@ -944,6 +944,20 @@
           "title": "Special Events",
           "type": "array"
         },
+        "max_days": {
+          "anyOf": [
+            {
+              "maximum": 30,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Days"
+        },
         "must_visit": {
           "items": {
             "$ref": "#/$defs/PlaceRef"

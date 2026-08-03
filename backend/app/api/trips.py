@@ -25,11 +25,13 @@ from ..domain.models import (
 )
 from ..core.config import get_settings
 from ..planning.llm import (
+    OllamaEventResearchAgent,
     OllamaTripEditAgent,
     OllamaRequirementExtractor,
     OllamaRequirementValidator,
     deterministic_extract,
 )
+from ..planning.event_research import research_special_events
 from ..planning.editing import (
     CandidatePatchRequest,
     DeleteActivityPatchRequest,
@@ -232,6 +234,27 @@ async def preflight_trip(
                 dict.fromkeys([*extracted.get("preferences", []), value])
             )
 
+    # Research named seasonal/astronomical events during requirement review,
+    # before a user has to choose exact travel dates.  This lets the
+    # clarification UI ask around a source-backed peak window rather than
+    # blindly reporting that dates are missing.
+    special_event_research: list[dict[str, object]] = []
+    special_events = [
+        str(item).strip()
+        for item in extracted.get("special_events", [])
+        if str(item).strip()
+    ]
+    if special_events:
+        settings = get_settings()
+        start_value = _safe_date(extracted.get("start_date"))
+        research_year = start_value.year if start_value else date.today().year
+        special_event_research = await research_special_events(
+            special_events,
+            year=research_year,
+            destination=str(extracted.get("destination_name") or "") or None,
+            fact_agent=OllamaEventResearchAgent(settings).extract,
+        )
+
     def answered(code: str, field: str | None = None) -> bool:
         key = f"{code}:{field or ''}"
         return bool(payload.answers.get(key, "").strip())
@@ -381,6 +404,7 @@ async def preflight_trip(
         # Requirement Agent supplies it; do not present the runtime fallback
         # of one traveler as if it came from the user's request.
         "travelers": extracted.get("travelers"),
+        "max_days": extracted.get("max_days"),
         "preferences": extracted.get("preferences", []),
         "clarifications": [
             value.strip() for value in payload.answers.values() if value.strip()
@@ -394,6 +418,7 @@ async def preflight_trip(
         issues=deduped,
         extracted=extracted,
         summary=summary,
+        special_event_research=special_event_research,
     )
 
 
@@ -676,6 +701,7 @@ async def get_planning_snapshot(
         defaults_applied=state.get("trip_request", {}).get("defaults_applied", []),
         progress=state.get("progress", {}),
         verification_result=state.get("verification_result"),
+        special_event_research=state.get("special_event_research", []),
         plan_markdown=markdown,
     )
 

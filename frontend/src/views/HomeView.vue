@@ -22,6 +22,7 @@ const promptSuggestion = '周六早上从武汉出发，去庐山两天一夜，
 const prompt = ref('')
 const historyOpen = ref(false)
 const historyTrips = ref<Trip[]>([])
+const historyDeletingId = ref<string | null>(null)
 const weather = ref({ temperature: '--', condition: '晴', location: '武汉' })
 const activeMenu = ref('账户设置')
 const drawerOpen = ref(false)
@@ -149,14 +150,21 @@ function openHistoryTrip(trip: Trip) {
   }
 }
 
-async function removeHistoryTrip(event: MouseEvent, trip: Trip) {
-  event.stopPropagation()
+async function removeHistoryTrip(trip: Trip) {
   if (!window.confirm(`确定删除“${trip.title}”吗？删除后无法从历史规划恢复。`)) return
+  historyDeletingId.value = trip.id
   try {
     await deleteTrip(trip.id)
-    historyTrips.value = historyTrips.value.filter((item) => item.id !== trip.id)
+    // Re-read the server list so a stale client cache or a failed transaction
+    // cannot make a deleted row look gone when it still exists remotely.
+    await loadHistory()
+    if (historyTrips.value.some((item) => item.id === trip.id)) {
+      throw new Error('服务器仍返回这条历史规划')
+    }
   } catch {
     window.alert('删除失败，请稍后重试。')
+  } finally {
+    historyDeletingId.value = null
   }
 }
 
@@ -286,7 +294,14 @@ function activate(label: string) {
             <span>{{ trip.status === 'completed' ? '规划完成' : trip.status === 'planning' ? '正在规划' : '待继续' }} · {{ trip.days.length }} 天</span>
           </span>
           <span class="history-item-actions">
-            <button type="button" aria-label="删除历史规划" title="删除" @click="removeHistoryTrip($event, trip)"><Trash2 :size="15" /></button>
+            <button
+              type="button"
+              aria-label="删除历史规划"
+              title="删除"
+              :disabled="historyDeletingId === trip.id"
+              :aria-busy="historyDeletingId === trip.id"
+              @click.stop="removeHistoryTrip(trip)"
+            ><Trash2 :size="15" /></button>
           </span>
         </div>
       </aside>
@@ -405,6 +420,7 @@ function activate(label: string) {
             <div><dt>路线</dt><dd>{{ preflight.summary.origin_name }} → {{ preflight.summary.destination_name }}</dd></div>
             <div><dt>日期</dt><dd>{{ preflight.summary.start_date }} 至 {{ preflight.summary.end_date }}</dd></div>
             <div><dt>人数</dt><dd>{{ preflight.summary.travelers ?? '待确认' }}{{ preflight.summary.travelers ? ' 人' : '' }}</dd></div>
+            <div v-if="preflight.summary.max_days"><dt>行程上限</dt><dd>最多 {{ preflight.summary.max_days }} 天</dd></div>
             <div v-if="preflight.summary.clarifications?.length">
               <dt>已确认</dt><dd>{{ preflight.summary.clarifications.join('；') }}</dd>
             </div>
@@ -428,9 +444,23 @@ function activate(label: string) {
             <button class="primary-button" :disabled="preflightChecking" @click="checkPreflight(false)">
               重新检查
             </button>
-          </div>
-        </template>
-      </section>
+            </div>
+          </template>
+          <section v-if="preflight.special_event_research?.length" class="preflight-event-research" aria-label="特殊活动检索结果">
+            <header><strong>Agent 已核对特殊活动</strong><small>请根据来源中的窗口选择日期</small></header>
+            <article v-for="item in preflight.special_event_research" :key="item.event">
+              <strong>{{ item.event }}</strong>
+              <span v-if="item.facts?.peak_start_date">极大期：{{ item.facts.peak_start_date }}{{ item.facts.peak_end_date && item.facts.peak_end_date !== item.facts.peak_start_date ? ` 至 ${item.facts.peak_end_date}` : '' }}</span>
+              <span v-if="item.facts?.peak_time_local">北京时间 {{ item.facts.peak_time_local }}</span>
+              <span v-else-if="item.facts?.peak_time_utc">UTC {{ item.facts.peak_time_utc }}</span>
+              <span v-else-if="item.facts?.peak_time_label">来源时间：{{ item.facts.peak_time_label }}</span>
+              <p>{{ item.facts?.summary || '已找到公开资料，出发前仍需复核天气与现场可见性。' }}</p>
+              <nav v-if="item.sources?.length">
+                <a v-for="(source, index) in item.sources.slice(0, 2)" :key="source.url || index" :href="source.url" target="_blank" rel="noreferrer">{{ source.title || `来源 ${index + 1}` }}</a>
+              </nav>
+            </article>
+          </section>
+       </section>
       <div class="planner-box glass-card">
         <div class="agent-orb">AI</div>
         <div class="prompt-wrap">

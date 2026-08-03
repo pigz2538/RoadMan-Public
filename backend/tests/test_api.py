@@ -49,6 +49,8 @@ async def test_trip_crud(client):
 
     deleted = await client.delete(f"/api/v1/trips/{trip_id}")
     assert deleted.status_code == 204
+    assert (await client.get(f"/api/v1/trips/{trip_id}")).status_code == 404
+    assert all(item["id"] != trip_id for item in (await client.get("/api/v1/trips")).json())
 
 
 @pytest.mark.asyncio

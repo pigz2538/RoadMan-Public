@@ -17,6 +17,7 @@ import {
   startPlanning,
   previewDeletePatch,
   previewMapPointPatch,
+  type SpecialEventResearch,
   type PlanningSnapshot,
 } from '../api/trips'
 import { useTripStore } from '../stores/trip'
@@ -486,6 +487,22 @@ function humanizeDefault(value: string) {
   return value
 }
 
+function eventResearchDetails(item: SpecialEventResearch) {
+  const facts = item.facts
+  const details: string[] = []
+  if (facts?.peak_start_date && facts?.peak_end_date && facts.peak_start_date !== facts.peak_end_date) {
+    details.push(`极大期：${facts.peak_start_date} 至 ${facts.peak_end_date}`)
+  } else if (facts?.peak_start_date) {
+    details.push(`极大期：${facts.peak_start_date}`)
+  }
+  if (facts?.peak_time_local) details.push(`北京时间 ${facts.peak_time_local}`)
+  else if (facts?.peak_time_utc) details.push(`UTC ${facts.peak_time_utc}`)
+  else if (facts?.peak_time_label) details.push(`来源时间：${facts.peak_time_label}`)
+  if (facts?.observation_window_local) details.push(`观测窗口：${facts.observation_window_local}`)
+  if (facts?.zhr != null) details.push(`预计 ZHR ${facts.zhr}`)
+  return details.join(' · ') || '正在整理来源中的具体时间与观测窗口'
+}
+
 async function retryPlanning() {
   planningError.value = ''
   try {
@@ -613,6 +630,24 @@ watch(
         <p v-if="attachmentPreview.warnings.length">{{ attachmentPreview.warnings.join('；') }}</p>
         <button class="primary-button" @click="confirmAttachment">确认选中地点</button>
       </div>
+    </section>
+
+    <section v-if="planningSnapshot?.special_event_research?.length" class="special-event-research glass-card">
+      <div class="special-event-heading">
+        <div><span class="eyebrow">EVENT RESEARCH AGENT</span><strong>已核对的特殊活动</strong></div>
+        <small>事实来自公开来源，日期未确定时不会擅自代填</small>
+      </div>
+      <article v-for="item in planningSnapshot.special_event_research" :key="item.event" class="special-event-item">
+        <div>
+          <strong>{{ item.event }}</strong>
+          <span>{{ eventResearchDetails(item) }}</span>
+          <p v-if="item.facts?.summary">{{ item.facts.summary }}</p>
+          <p v-else-if="item.status !== 'researched'">暂未取得足够来源，出发前需要重新查询。</p>
+        </div>
+        <nav v-if="item.sources?.length" aria-label="活动来源">
+          <a v-for="(source, index) in item.sources.slice(0, 3)" :key="source.url || index" :href="source.url" target="_blank" rel="noreferrer">{{ source.title || `来源 ${index + 1}` }}</a>
+        </nav>
+      </article>
     </section>
 
     <div v-if="loading" class="page-state">正在加载武汉—庐山行程…</div>

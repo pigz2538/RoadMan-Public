@@ -181,6 +181,7 @@ class TripRequest(BaseModel):
     travelers: int | None = Field(default=None, ge=1)
     preferences: list[str] = Field(default_factory=list)
     special_events: list[str] = Field(default_factory=list)
+    max_days: int | None = Field(default=None, ge=1, le=30)
     must_visit: list[PlaceRef] = Field(default_factory=list)
     budget: MoneyRange | None = None
     max_continuous_drive_minutes: int = Field(default=120, ge=30)
@@ -211,6 +212,7 @@ class PreflightResponse(BaseModel):
     issues: list[PreflightIssue] = Field(default_factory=list)
     extracted: dict[str, Any] = Field(default_factory=dict)
     summary: dict[str, Any] = Field(default_factory=dict)
+    special_event_research: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class RouteSegment(BaseModel):
@@ -365,6 +367,7 @@ class PlanningSnapshot(BaseModel):
     defaults_applied: list[str] = Field(default_factory=list)
     progress: dict[str, Any] = Field(default_factory=dict)
     verification_result: dict[str, Any] | None = None
+    special_event_research: list[dict[str, Any]] = Field(default_factory=list)
     plan_markdown: str | None = None
     job_id: str | None = None
 

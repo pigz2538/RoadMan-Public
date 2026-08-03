@@ -11,8 +11,30 @@ export interface PlanningSnapshot {
   defaults_applied: string[]
   progress: { node?: string; value?: number; label?: string }
   verification_result?: { passed: boolean; issues: Array<{ code: string; description: string }> }
+  special_event_research?: SpecialEventResearch[]
   plan_markdown?: string
   job_id?: string
+}
+
+export interface SpecialEventResearch {
+  event: string
+  status: 'researched' | 'needs_review' | string
+  query?: string
+  search_url?: string
+  sources?: Array<{ title?: string; url?: string; snippet?: string; provider?: string }>
+  facts?: {
+    peak_start_date?: string
+    peak_end_date?: string
+    peak_time_utc?: string
+    peak_time_local?: string
+    peak_time_label?: string
+    observation_window_local?: string
+    active_period?: string
+    zhr?: number
+    confidence?: 'high' | 'medium' | 'low' | string
+    summary?: string
+    evidence_source_indexes?: number[]
+  }
 }
 
 export interface PreflightResult {
@@ -36,9 +58,11 @@ export interface PreflightResult {
     departure_time?: string
     return_time?: string
     travelers?: number
+    max_days?: number
     preferences?: string[]
     clarifications?: string[]
   }
+  special_event_research?: SpecialEventResearch[]
 }
 
 export interface RecommendationCandidate {
@@ -114,18 +138,21 @@ export async function createTrip(
         return_time: extracted.return_time,
         travelers: extracted.travelers,
         preferences: extracted.preferences,
+        special_events: extracted.special_events,
+        max_days: extracted.max_days,
       },
     }),
   }))
 }
 
 export async function listTrips(): Promise<Trip[]> {
-  return json(await fetch(`${API_BASE}/api/v1/trips`))
+  return json(await fetch(`${API_BASE}/api/v1/trips`, { cache: 'no-store' }))
 }
 
 export async function deleteTrip(tripId: string): Promise<void> {
   await json(await fetch(`${API_BASE}/api/v1/trips/${tripId}`, {
     method: 'DELETE',
+    cache: 'no-store',
   }))
 }
 

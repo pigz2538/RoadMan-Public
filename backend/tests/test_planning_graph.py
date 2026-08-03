@@ -74,6 +74,7 @@ def test_deterministic_extractor_does_not_guess_relationship_based_party_size():
     assert "travelers" not in extracted
     assert extracted["destination_name"] == "乌镇"
     assert "目的地周边" in extracted["preferences"]
+    assert extracted["max_days"] == 2
 
 
 def test_deterministic_extract_reads_iso_dates_adjacent_to_chinese_text():
@@ -129,6 +130,8 @@ async def test_requirement_agent_decides_semantic_party_size(monkeypatch):
 
     assert extracted["travelers"] == 2
     assert extracted["destination_name"] == "乌镇"
+    assert "start_date" not in extracted
+    assert "end_date" not in extracted
     assert "根据语义判断同行人数" in FakeClient.prompt
 
 

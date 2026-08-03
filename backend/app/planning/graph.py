@@ -29,7 +29,12 @@ from .deep_drive import (
     verify_deep_drive_plan,
 )
 from .event_research import event_research_summary, research_special_events
-from .llm import OllamaPoiCurator, OllamaPoiRanker, OllamaRequirementExtractor
+from .llm import (
+    OllamaEventResearchAgent,
+    OllamaPoiCurator,
+    OllamaPoiRanker,
+    OllamaRequirementExtractor,
+)
 from .recommendations import apply_agent_ranking, rank_tourism_candidates
 from .poi_enrichment import enrich_tourism_candidates
 from .state import RoadManState
@@ -45,6 +50,7 @@ def build_planning_graph(
     progress_callback: ProgressCallback | None = None,
 ):
     extractor = OllamaRequirementExtractor(settings)
+    event_research_agent = OllamaEventResearchAgent(settings)
     poi_curator = OllamaPoiCurator(settings)
     poi_ranker = OllamaPoiRanker(settings)
 
@@ -77,7 +83,7 @@ def build_planning_graph(
         if extracted.get("destination_name") and not current.get("destination"):
             current["destination"] = {"name": extracted["destination_name"]}
         defaults = set(current.get("defaults_applied", []))
-        for field in ("start_date", "end_date", "departure_time", "return_time", "travelers"):
+        for field in ("start_date", "end_date", "departure_time", "return_time", "travelers", "max_days"):
             if extracted.get(field) is not None and (
                 current.get(field) is None
                 or (field == "travelers" and "travelers=1" in defaults)
@@ -124,6 +130,7 @@ def build_planning_graph(
             events,
             year=year,
             destination=(request.get("destination") or {}).get("name"),
+            fact_agent=event_research_agent.extract,
         )
         await emit(
             state,
@@ -1334,6 +1341,7 @@ def build_planning_graph(
             "",
             f"- 日期：{request['start_date']} 至 {request['end_date']}",
             f"- 出行人数：{traveler_label}",
+            *([f"- 行程时长上限：最多 {request['max_days']} 天"] if request.get("max_days") else []),
             f"- 可见默认值：{', '.join(request.get('defaults_applied', [])) or '无'}",
             "",
         ]

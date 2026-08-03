@@ -26,8 +26,11 @@ class OllamaRequirementExtractor:
             "You are RoadMan Requirement Agent. Extract requirements only; never plan a route. "
             f"Today is {today.isoformat()}. Return ONLY one valid JSON object (no markdown, no explanation) "
             "with exactly these keys: origin_name, destination_name, start_date, end_date, "
-            "departure_time, return_time, travelers, preferences, special_events. "
+            "departure_time, return_time, travelers, max_days, preferences, special_events. "
             "Dates must be YYYY-MM-DD; unknown scalar fields must be null and preferences/special_events must be arrays. "
+            "Only fill start_date/end_date when the user's text explicitly gives a calendar date, a relative date "
+            "such as 今天/明天, or an unambiguous weekday. Phrases such as 今年暑假、最多三天、玩三天 are not "
+            "calendar dates; leave both date fields null instead of inventing dates. "
             "Normalize Chinese time phrases: 中午=12:00, 下午=14:00, 晚上=19:00. "
             "Infer travelers semantically (情侣/夫妻=2, 一家三口=3); do not default to 1 when evidence is absent. "
             "请根据语义判断同行人数，不要机械默认 1。"
@@ -60,6 +63,15 @@ class OllamaRequirementExtractor:
                 for date_field in ("start_date", "end_date"):
                     if deterministic.get(date_field):
                         merged[date_field] = deterministic[date_field]
+                # The Requirement Agent may understand duration or season
+                # semantically, but it must never turn those phrases into a
+                # fabricated calendar date.  Dates are retained only when
+                # the structural parser found an explicit user constraint.
+                if not deterministic.get("start_date"):
+                    merged.pop("start_date", None)
+                    merged.pop("end_date", None)
+                elif not deterministic.get("end_date"):
+                    merged.pop("end_date", None)
                 for place_field in ("origin_name", "destination_name"):
                     if deterministic.get(place_field):
                         merged[place_field] = deterministic[place_field]
@@ -88,6 +100,14 @@ class OllamaRequirementExtractor:
                     merged["travelers"] = _coerce_travelers(merged.get("travelers"))
                 if merged.get("travelers") is None:
                     merged.pop("travelers", None)
+                if deterministic.get("max_days") is not None:
+                    merged["max_days"] = deterministic["max_days"]
+                else:
+                    max_days = _coerce_positive_int(merged.get("max_days"), maximum=30)
+                    if max_days is None:
+                        merged.pop("max_days", None)
+                    else:
+                        merged["max_days"] = max_days
                 return merged
         except (httpx.HTTPError, ValueError, TypeError, json.JSONDecodeError):
             return deterministic
@@ -397,6 +417,105 @@ class OllamaPoiRanker:
         return cleaned
 
 
+class OllamaEventResearchAgent:
+    """Extract source-backed facts for a user-requested seasonal event.
+
+    Web search only supplies evidence.  This Agent turns the snippets into a
+    small structured record while being explicitly forbidden from filling an
+    unknown date/time from memory.  The caller can therefore show the exact
+    peak window and ask the user to choose dates around it.
+    """
+
+    def __init__(self, settings: Settings) -> None:
+        self.settings = settings
+
+    async def extract(
+        self,
+        event: str,
+        year: int,
+        sources: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        if not self.settings.ollama_api_key or not sources:
+            return {}
+        compact = [
+            {
+                "index": index,
+                "title": str(source.get("title") or ""),
+                "snippet": str(source.get("snippet") or ""),
+                "url": str(source.get("url") or ""),
+            }
+            for index, source in enumerate(sources[:8])
+        ]
+        prompt = (
+            "你是 RoadMan 事件事实核验 Agent。只根据下面公开网页标题、摘要和链接提取事实，"
+            "不要依靠记忆补全，也不要把搜索词当成事实。返回且只能返回一个 JSON 对象："
+            '{"peak_start_date":"YYYY-MM-DD或null","peak_end_date":"YYYY-MM-DD或null",'
+            '"peak_time_utc":"HH:MM或null","peak_time_local":"HH:MM或null",'
+            '"peak_time_label":"来源原文中的时间表述或null",'
+            '"observation_window_local":"中文观测窗口或null","active_period":"活动期或null",'
+            '"zhr":null,"confidence":"high|medium|low",'
+            '"evidence_source_indexes":[0],"summary":"有证据支持的中文事实摘要"}。'
+            f"事件：{event}；目标年份：{year}。日期必须确实出现在来源中；只有来源明确给出时才填日期或时间，"
+            "如果来源互相矛盾，保留 null 并在 summary 说明需要临近出发复核。peak_time_local 使用北京时间/"
+            "当地时间的明确时刻；不能把‘夜间’臆造为具体小时。若来源给出了 02:00、上午/中午等具体"
+            "表述但时区不清，保留在 peak_time_label，不要强行转换成北京时间。zhr 只能填来源明确的数字。"
+            f"来源：{json.dumps(compact, ensure_ascii=False)}"
+        )
+        try:
+            async with httpx.AsyncClient(timeout=min(self.settings.ollama_timeout_seconds, 45)) as client:
+                response = await client.post(
+                    self.settings.ollama_api_url,
+                    headers={"Authorization": f"Bearer {self.settings.ollama_api_key}"},
+                    json={
+                        "model": self.settings.ollama_model,
+                        "prompt": prompt,
+                        "stream": False,
+                        "think": False,
+                        "format": "json",
+                    },
+                )
+                response.raise_for_status()
+                payload = _parse_unfiltered_json_object(response.json().get("response", ""))
+        except (httpx.HTTPError, ValueError, TypeError, json.JSONDecodeError):
+            return {}
+        return _clean_event_facts(payload, year, len(compact))
+
+
+def _clean_event_facts(value: dict[str, Any], year: int, source_count: int) -> dict[str, Any]:
+    """Validate the event Agent's source-backed JSON before exposing it."""
+    facts: dict[str, Any] = {}
+    for field in ("peak_start_date", "peak_end_date"):
+        raw = value.get(field)
+        if isinstance(raw, str):
+            try:
+                parsed = date.fromisoformat(raw.strip())
+            except ValueError:
+                parsed = None
+            if parsed is not None and parsed.year == year:
+                facts[field] = parsed.isoformat()
+    for field in ("peak_time_utc", "peak_time_local"):
+        normalized = _normalize_clock(value.get(field))
+        if normalized:
+            facts[field] = normalized
+    for field in ("peak_time_label", "observation_window_local", "active_period", "summary"):
+        raw = value.get(field)
+        if isinstance(raw, str) and raw.strip():
+            facts[field] = raw.strip()[:500]
+    confidence = str(value.get("confidence") or "low").lower().strip()
+    facts["confidence"] = confidence if confidence in {"high", "medium", "low"} else "low"
+    indexes = value.get("evidence_source_indexes")
+    if isinstance(indexes, list):
+        facts["evidence_source_indexes"] = [
+            int(index)
+            for index in indexes
+            if isinstance(index, int) and 0 <= index < source_count
+        ][:8]
+    zhr = value.get("zhr")
+    if isinstance(zhr, (int, float)) and not isinstance(zhr, bool) and 0 <= zhr <= 10000:
+        facts["zhr"] = zhr
+    return facts
+
+
 def _parse_json_object(text: str) -> dict[str, Any]:
     value = _parse_unfiltered_json_object(text)
     allowed = {
@@ -409,6 +528,7 @@ def _parse_json_object(text: str) -> dict[str, Any]:
         "travelers",
         "preferences",
         "special_events",
+        "max_days",
         "issues",
     }
     return {key: value for key, value in value.items() if key in allowed}
@@ -560,9 +680,29 @@ def deterministic_extract(raw_text: str, today: date) -> dict[str, Any]:
     nights_match = re.search(r"([一二三四五六七八九十两\d]+)天([一二三四五六七八九十两\d]+)夜", raw_text)
     if nights_match:
         days = _cn_number(nights_match.group(1))
+        if days:
+            result["max_days"] = days
         if result.get("start_date") and days:
             start = date.fromisoformat(result["start_date"])
             result["end_date"] = (start + timedelta(days=days - 1)).isoformat()
+
+    duration_match = re.search(
+        r"(?:最多|至多|不超过|不超過|最长|最長)\s*([一二三四五六七八九十两\d]+)\s*天",
+        raw_text,
+    )
+    if duration_match:
+        days = _cn_number(duration_match.group(1))
+        if days:
+            result["max_days"] = days
+    if "max_days" not in result:
+        plain_duration = re.search(
+            r"([一二三四五六七八九十两\d]+)\s*天(?:行程|旅游|旅行|游玩|出游|游|玩)?",
+            raw_text,
+        )
+        if plain_duration:
+            days = _cn_number(plain_duration.group(1))
+            if days:
+                result["max_days"] = days
 
     traveler_match = re.search(r"([一二三四五六七八九十两\d]+)\s*(?:人|位|口)", raw_text)
     if traveler_match:
@@ -607,6 +747,20 @@ def _coerce_travelers(value: Any) -> int | None:
         match = re.search(r"([一二三四五六七八九十两\d]+)", value)
         if match:
             return _cn_number(match.group(1))
+    return None
+
+
+def _coerce_positive_int(value: Any, *, maximum: int) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if 1 <= value <= maximum else None
+    if isinstance(value, float) and value.is_integer():
+        integer = int(value)
+        return integer if 1 <= integer <= maximum else None
+    if isinstance(value, str) and value.strip().isdigit():
+        integer = int(value.strip())
+        return integer if 1 <= integer <= maximum else None
     return None
 
 

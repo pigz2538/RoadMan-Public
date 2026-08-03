@@ -53,7 +53,8 @@
 - `POST /api/v1/trips/preflight`：在创建 Trip 前逐轮理解、校验并确认自然语言需求。
   请求可携带 `answers`、`previous_extracted`、`semantic_checked`、`confirmed`；
   响应返回 `ready`、`confirmation_required`、`semantic_checked`、逐题 `issues`、
-  最终 `summary` 和结构化 `extracted`。该接口不创建行程、不投递 Job。
+  最终 `summary`、结构化 `extracted`，以及特殊活动的来源核验结果
+  `special_event_research`。该接口不创建行程、不投递 Job。
 - `POST /api/v1/trips/{trip_id}/planning/start`：投递 Planning Job，返回 202。
 - `GET /api/v1/trips/{trip_id}/planning`：需求、默认值、追问、校验和 Markdown 快照。
 - `POST /api/v1/trips/{trip_id}/planning/clarifications`：补充答案并恢复规划。
@@ -138,6 +139,7 @@ SSE 使用命名事件，每条事件包含单调递增的 `id:`。客户端断�
 ### 近期字段与展示约定
 
 - `TripRequest` / `PreflightResponse.summary` 支持可选 `departure_time`、`return_time`（`HH:MM`）。需求中明确的点号/斜杠日期优先于模型输出；“中午/下午”等自然语言时间会标准化后传给阶段编排。
+- `TripRequest.max_days` 保存“最多/不超过 N 天”等时长上限；它不会被转换成虚构的日历日期。若用户只给出“今年暑假”等季节，Requirement Agent 会保留日期为空，并先通过 `special_event_research` 展示事件极大期和观测窗口后再追问日期。
 - 规划编排会优先填充每日 2–4 个景点（受候选数据和时间窗口约束），并为每天生成三餐与住宿活动。餐饮活动的 `user_note` 使用早餐/午餐/晚餐标记，前端按全天时间线展示。
 - 详情页的最终数据采用渐进 hydration：后台持久化阶段和活动后，客户端按阶段、活动顺序逐项加入视图；这只是展示节奏，不改变服务端 canonical Trip。
 - 详情页在 `plan_updated` SSE 后会重新读取 canonical Trip；客户端轮询带并发保护，避免重复请求导致阶段/活动显示停滞。

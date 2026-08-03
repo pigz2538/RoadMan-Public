@@ -71,6 +71,14 @@
       "default": null,
       "title": "Verification Result"
     },
+    "special_event_research": {
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "title": "Special Event Research",
+      "type": "array"
+    },
     "plan_markdown": {
       "anyOf": [
         {
