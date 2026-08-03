@@ -1,6 +1,6 @@
 import json
 import re
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
 import httpx
@@ -13,10 +13,11 @@ class OllamaRequirementExtractor:
         self.settings = settings
 
     async def extract(self, raw_text: str, today: date) -> dict[str, Any]:
-        # The model owns semantic interpretation. The offline parser is now
-        # limited to literal calendar validation and never extracts places,
-        # weekdays, preferences, party size or travel modes.
-        legacy_fallback = deterministic_extract(raw_text, today)
+        # The model owns semantic interpretation. The offline fallback only
+        # handles structural calendar constraints (numeric dates, relative
+        # dates and weekday ranges); it never extracts places, preferences,
+        # party size or travel modes.
+        legacy_fallback = extract_structural_constraints(raw_text, today)
         if (
             not self.settings.enable_llm_requirement_extraction
             or not self.settings.ollama_api_key
@@ -38,6 +39,7 @@ class OllamaRequirementExtractor:
             "Normalize Chinese time phrases: 中午=12:00, 下午=14:00, 晚上=19:00. "
             "Understand relative weekdays and ranges as a pair: 周一出发、周五回来 means a Monday-to-Friday "
             "window in the same upcoming week; do not return an end date earlier than the start date. "
+            "When a weekday pair is present, resolve both concrete dates from Today instead of leaving one null. "
             "Infer travelers semantically (情侣/夫妻=2, 一家三口=3); do not default to 1 when evidence is absent. "
             "请根据语义判断同行人数，不要机械默认 1。"
             "cross_sea_required must be true only when the trip actually requires crossing a sea or water barrier; "
@@ -66,7 +68,7 @@ class OllamaRequirementExtractor:
                 )
                 response.raise_for_status()
                 parsed = _parse_json_object(response.json().get("response", ""))
-                structural = _extract_literal_constraints(raw_text, today)
+                structural = extract_structural_constraints(raw_text, today)
                 merged = _merge_extraction(structural, parsed)
                 # Literal calendar tokens are hard user constraints. Do not
                 # let the Agent hallucinate another year.
@@ -608,6 +610,69 @@ def _extract_literal_constraints(raw_text: str, today: date) -> dict[str, Any]:
         result["start_date"] = explicit_dates[0]
         if len(explicit_dates) > 1:
             result["end_date"] = explicit_dates[1]
+    return result
+
+
+_WEEKDAY_PATTERN = re.compile(r"(?P<scope>下周|下星期|本周|这周|周|星期)(?P<day>[一二三四五六日天])")
+_WEEKDAY_INDEX = {"一": 0, "二": 1, "三": 2, "四": 3, "五": 4, "六": 5, "日": 6, "天": 6}
+_RELATIVE_DAY_OFFSETS = {"大后天": 3, "后天": 2, "明天": 1, "今天": 0, "昨天": -1}
+
+
+def _weekday_date(match: re.Match[str], today: date) -> date:
+    """Resolve one Chinese weekday token without interpreting travel intent."""
+    monday = today - timedelta(days=today.weekday())
+    candidate = monday + timedelta(days=_WEEKDAY_INDEX[match.group("day")])
+    scope = match.group("scope")
+    if scope in {"下周", "下星期"}:
+        candidate += timedelta(days=7)
+    elif scope in {"周", "星期"} and candidate < today:
+        candidate += timedelta(days=7)
+    return candidate
+
+
+def extract_structural_constraints(raw_text: str, today: date) -> dict[str, Any]:
+    """Extract only deterministic calendar structure for Agent fallback/validation.
+
+    This deliberately does not classify destinations, experiences, party size or
+    preferences.  A weekday pair such as “周一出发、周五回来” is a calendar
+    constraint, so resolving it here prevents a transient Agent failure from
+    asking the user for a date that is already unambiguous in the request.
+    """
+    result = _extract_literal_constraints(raw_text, today)
+
+    relative = list(
+        re.finditer(
+            r"大后天|后天|明天|今天|昨天",
+            raw_text,
+        )
+    )
+    if relative:
+        relative_dates = [
+            today + timedelta(days=_RELATIVE_DAY_OFFSETS[item.group(0)])
+            for item in relative[:2]
+        ]
+        if "start_date" not in result:
+            result["start_date"] = relative_dates[0].isoformat()
+        if len(relative_dates) > 1 and "end_date" not in result:
+            result["end_date"] = relative_dates[1].isoformat()
+
+    weekday_matches = list(_WEEKDAY_PATTERN.finditer(raw_text))
+    if weekday_matches:
+        weekday_dates = [
+            _weekday_date(match, today) for match in weekday_matches[:2]
+        ]
+        if len(weekday_dates) > 1 and weekday_dates[1] <= weekday_dates[0]:
+            # A bare second weekday in a range belongs after the first one,
+            # including ranges that cross the Sunday/Monday boundary.
+            second = weekday_dates[1]
+            while second <= weekday_dates[0]:
+                second += timedelta(days=7)
+            weekday_dates[1] = second
+        if "start_date" not in result:
+            result["start_date"] = weekday_dates[0].isoformat()
+        if len(weekday_dates) > 1 and "end_date" not in result:
+            result["end_date"] = weekday_dates[1].isoformat()
+
     return result
 
 

@@ -16,7 +16,7 @@
   - 跨海、过去返回和时间窗口只读取 Requirement Agent 的结构化字段；用户在确认界面提交的答案仍按字段协议写入。
 - `backend/app/planning/llm.py`
   - Requirement Agent 负责地点、周几、相对日期、人数、偏好、特殊活动和交通语义。
-  - 离线兼容函数 `deterministic_extract` 现在只保留明确数字日历字面量（用于防止模型改写用户写出的日期），不产生地点、人数、偏好或交通结论。
+  - `deterministic_extract` 仍只保留明确数字日历字面量；预检使用的 `extract_structural_constraints` 另外解析今天/明天和周一至周五这类日历结构，用于校验或模型不可用时的安全兜底，不产生地点、人数、偏好或交通结论。
 - `backend/app/planning/llm.py` 与 `backend/app/planning/graph.py`
   - OpenStreetMap/OpenTripMap 与高德候选的合并、翻译和新增只接受 POI Curator Agent 返回的候选 ID 决策。
   - Agent 不可用时不再用名称子串兜底；Agent 返回的合并目标在后端仅做规范化后的完整名称精确核对。

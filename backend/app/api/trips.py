@@ -28,7 +28,7 @@ from ..planning.llm import (
     OllamaTripEditAgent,
     OllamaRequirementExtractor,
     OllamaRequirementValidator,
-    deterministic_extract,
+    extract_structural_constraints,
 )
 from ..planning.event_research import research_special_events
 from ..planning.editing import (
@@ -175,20 +175,28 @@ async def preflight_trip(
     payload: PreflightRequest,
     registry: SkillRegistry = Depends(get_skill_registry),
 ) -> PreflightResponse:
+    today = date.today()
+    structural_dates = extract_structural_constraints(payload.raw_text, today)
     extracted = dict(payload.previous_extracted)
     if not extracted:
         settings = get_settings()
-        fast_extracted = deterministic_extract(payload.raw_text, date.today())
+        fast_extracted = structural_dates
         # Let the Requirement Agent interpret semantic details (for example
         # relationship-based party size) whenever it is configured. The
         # deterministic parser remains the offline fallback only.
         if settings.enable_llm_requirement_extraction and settings.ollama_api_key:
             extracted = await OllamaRequirementExtractor(settings).extract(
                 payload.raw_text,
-                date.today(),
+                today,
             )
         else:
             extracted = fast_extracted
+    # A clarification round sends the previous extraction back to us. Refresh
+    # only the calendar fields from the original text so an earlier partial
+    # Agent response cannot keep asking for a date that was already explicit.
+    for field in ("start_date", "end_date"):
+        if structural_dates.get(field):
+            extracted[field] = structural_dates[field]
     for key, value in payload.answers.items():
         value = value.strip()
         if not value:

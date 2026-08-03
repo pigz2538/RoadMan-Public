@@ -9,7 +9,11 @@ from app.db import SessionLocal, create_tables
 from app.domain.models import SkillResult, TripCreate, TripRequest, VehicleProfile
 from app.planning.graph import _ensure_coordinates, _movement_stage, build_planning_graph
 from app.planning.deep_drive import _ensure_daily_meals
-from app.planning.llm import OllamaRequirementExtractor, deterministic_extract
+from app.planning.llm import (
+    OllamaRequirementExtractor,
+    deterministic_extract,
+    extract_structural_constraints,
+)
 from app.planning.runner import run_planning
 from app.repositories import TripRepository, VehicleRepository
 from app.services.sse import sse_manager
@@ -75,6 +79,18 @@ def test_offline_fallback_does_not_interpret_weekday_or_destination_language():
         date(2026, 8, 3),
     )
     assert extracted == {}
+
+
+def test_structural_calendar_resolves_weekday_range_from_today():
+    extracted = extract_structural_constraints(
+        "周一早上从武汉出发，去九宫山，周五晚上八点回来，喜欢自然景观",
+        date(2026, 8, 3),
+    )
+
+    assert extracted == {
+        "start_date": "2026-08-03",
+        "end_date": "2026-08-07",
+    }
 
 
 @pytest.mark.asyncio
