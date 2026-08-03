@@ -1,7 +1,7 @@
 # RoadMan 仓库清理候选审计
 
 > 审计日期：2026-08-03
-> 结论：本轮只读审计，未删除任何候选文件；本报告用于下一次确认后清理。
+> 结论：已按用户确认清理高置信度生成物；`前端1.png`、`前端2.png` 和所有待确认资产均保留。
 
 ## 1. 审计范围与方法
 
@@ -14,21 +14,21 @@
 
 “没有搜到引用”只代表当前静态引用证据不足，不等于可以立即删除。二进制模型、Skill 参考资料和部署脚本仍需产品确认或一次构建/运行验证。
 
-## 2. 高置信度可清理项（当前均未删除）
+## 2. 已按确认清理的高置信度生成物
 
-这些是本地生成、缓存或运行时数据，原则上不应进入提交；清理前需确认没有需要保留的本地数据库或测试产物。
+这些是本地生成、缓存或运行时数据，已在本轮确认没有需要保留的本地产物后清理；它们不会影响版本库中的源代码。
 
 | 路径/模式 | 证据 | 建议 |
 | --- | --- | --- |
-| `.history/` | 编辑器历史目录，已被忽略 | 确认不需要回滚后整体清理 |
-| `.pytest_cache/`、`backend/.pytest_cache/`、`frontend/.pytest_cache/` | pytest 缓存，已被忽略 | 可重建，清理 |
-| `**/__pycache__/`、`*.pyc` | Python 字节码，已被忽略 | 可重建，清理 |
-| `Skills/.codegraph/codegraph.db`、`Skills/.codegraph/source.json` | Codegraph 生成索引，已被忽略 | 需要索引时重新生成 |
-| `frontend/dist/` | Vite 构建输出，已被忽略 | 用 `npm run build` 重建 |
-| `frontend/node_modules/` | npm 安装目录，已被忽略 | 用 `npm install` 重建 |
-| `frontend/test-results/` | Playwright 运行产物，已被忽略 | 保留必要失败截图后清理 |
-| `frontend/tsconfig.app.tsbuildinfo`、`frontend/tsconfig.node.tsbuildinfo` | TypeScript 增量构建缓存 | 可重建，清理 |
-| `backend/roadman.db`、根目录 `roadman.db` | 本地 SQLite 运行数据，已被忽略 | 先备份/确认无用户数据，再清理 |
+| `.history/` | 编辑器历史目录，已被忽略 | 已清理 |
+| `.pytest_cache/`、`backend/.pytest_cache/`、`frontend/.pytest_cache/` | pytest 缓存，已被忽略 | 已清理；本轮测试后重新生成的根缓存也已再次清理 |
+| `**/__pycache__/`、`*.pyc` | Python 字节码，已被忽略 | 已清理；测试后生成的后端缓存也已再次清理 |
+| `Skills/.codegraph/codegraph.db`、`Skills/.codegraph/source.json` | Codegraph 生成索引，已被忽略 | 已清理，需要索引时重新生成 |
+| `frontend/dist/` | Vite 构建输出，已被忽略 | 已清理，用 `npm run build` 重建 |
+| `frontend/node_modules/` | npm 安装目录，已被忽略 | 已清理，用 `npm install` 重建 |
+| `frontend/test-results/` | Playwright 运行产物，已被忽略 | 已清理 |
+| `frontend/tsconfig.app.tsbuildinfo`、`frontend/tsconfig.node.tsbuildinfo` | TypeScript 增量构建缓存 | 已清理 |
+| `backend/roadman.db`、根目录 `roadman.db` | 本地 SQLite 运行数据，已被忽略 | 已清理；运行时会重新建库 |
 
 ## 3. 已跟踪、但需要确认的候选项
 
@@ -72,10 +72,10 @@
 
 ## 6. 建议的下一次清理顺序
 
-1. 先备份并确认两个 SQLite 文件没有要保留的本地行程；清理所有缓存、`dist`、`node_modules` 和测试产物。
+1. 已完成高置信度缓存、构建产物、测试产物和本地数据库清理；`前端1.png`、`前端2.png` 未触碰。
 2. 对三份 GLB 和 SVG 做一次资源清单/许可证确认，只保留白模和必要的原始素材。
 3. 决定是否把 Open Charge Map 参考资料和 Skill 编写 PDF 归档到 `docs/archive`。
-4. 补充敏感文件忽略规则，运行 secret scan，再确认 `git status` 只剩预期文档。
-5. 通过后再执行删除，并单独提交“仓库清理”提交，避免和功能开发混在一起。
+4. 补充敏感文件忽略规则，运行 secret scan，再确认 `git status` 只剩预期源文件。
+5. 后续若确认中风险资产删除，应单独提交“资源归档/清理”提交，避免和功能开发混在一起。
 
 本轮新增的车型计划见 [`vehicle-management-plan.md`](./vehicle-management-plan.md)。

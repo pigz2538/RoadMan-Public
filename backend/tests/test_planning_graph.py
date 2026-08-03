@@ -87,6 +87,37 @@ def test_deterministic_extract_reads_iso_dates_adjacent_to_chinese_text():
     assert extracted["end_date"] == "2026-08-01"
 
 
+def test_deterministic_extract_keeps_weekday_departure_and_return_in_order():
+    extracted = deterministic_extract(
+        "周一从武汉出发，然后周五返回武汉",
+        date(2026, 8, 3),  # Monday
+    )
+
+    assert extracted["start_date"] == "2026-08-03"
+    assert extracted["end_date"] == "2026-08-07"
+
+
+def test_deterministic_extract_resolves_weekday_pair_from_next_week_when_needed():
+    extracted = deterministic_extract(
+        "周一出发，周五回来",
+        date(2026, 8, 4),  # Tuesday
+    )
+
+    assert extracted["start_date"] == "2026-08-10"
+    assert extracted["end_date"] == "2026-08-14"
+
+
+def test_deterministic_extract_does_not_geocode_weekday_as_origin():
+    extracted = deterministic_extract(
+        "从周一出发然后周五回来",
+        date(2026, 8, 3),
+    )
+
+    assert "origin_name" not in extracted
+    assert extracted["start_date"] == "2026-08-03"
+    assert extracted["end_date"] == "2026-08-07"
+
+
 @pytest.mark.asyncio
 async def test_requirement_agent_decides_semantic_party_size(monkeypatch):
     class FakeResponse:

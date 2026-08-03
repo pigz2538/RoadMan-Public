@@ -584,6 +584,77 @@ def _merge_extraction(base: dict[str, Any], llm: dict[str, Any]) -> dict[str, An
     return result
 
 
+def _resolve_weekday_window(
+    raw_text: str,
+    today: date,
+    *,
+    explicit_start: date | None = None,
+) -> tuple[date | None, date | None]:
+    """Resolve a weekday departure/return pair without swapping its order.
+
+    ``周一出发，周五回来`` contains two independent weekday constraints.  The
+    previous parser only used the first ``周X`` token and always moved a
+    same-day match seven days forward.  On a Monday that turned an intended
+    current-week trip into next Monday while an Agent-provided Friday return
+    remained in the current week, producing an inverted date range.
+
+    A pair is anchored to the next occurrence of the departure weekday (today
+    is a valid occurrence).  The return weekday is then advanced from that
+    departure by its weekday delta, with equal weekdays meaning a full week.
+    ``下周X`` is treated explicitly as the following occurrence.
+    """
+
+    weekday_map = {
+        "一": 0,
+        "二": 1,
+        "三": 2,
+        "四": 3,
+        "五": 4,
+        "六": 5,
+        "日": 6,
+        "天": 6,
+    }
+    matches = list(re.finditer(r"(?:周|星期)([一二三四五六日天])", raw_text))
+    if not matches:
+        return None, None
+
+    start_match = matches[0]
+    start_weekday = weekday_map[start_match.group(1)]
+    if explicit_start is not None:
+        start = explicit_start
+    else:
+        start_delta = (start_weekday - today.weekday()) % 7
+        prefix = raw_text[max(0, start_match.start() - 3) : start_match.start()]
+        if "下周" in prefix or "下星期" in prefix:
+            # A zero delta means the next week's occurrence, not today.
+            start_delta = start_delta or 7
+            start_delta += 7
+        start = today + timedelta(days=start_delta)
+
+    end_match = None
+    return_markers = ("回来", "返回", "返程", "回程", "回到", "回家")
+    for candidate in reversed(matches[1:]):
+        tail = raw_text[candidate.end() : candidate.end() + 12]
+        if any(marker in tail for marker in return_markers):
+            end_match = candidate
+            break
+    if end_match is None and len(matches) >= 2:
+        # Also support compact ranges such as “周一到周五”。
+        end_match = matches[-1]
+    if end_match is None:
+        return start, None
+
+    end_weekday = weekday_map[end_match.group(1)]
+    day_delta = (end_weekday - start.weekday()) % 7
+    if day_delta == 0:
+        day_delta = 7
+    return start, start + timedelta(days=day_delta)
+
+
+def _is_weekday_token(value: str) -> bool:
+    return bool(re.fullmatch(r"(?:周|星期)[一二三四五六日天]", value.strip()))
+
+
 def deterministic_extract(raw_text: str, today: date) -> dict[str, Any]:
     result: dict[str, Any] = {"preferences": []}
     explicit_dates = [
@@ -636,7 +707,9 @@ def deterministic_extract(raw_text: str, today: date) -> dict[str, Any]:
         raw_text,
     )
     if route_match:
-        result["origin_name"] = route_match.group("origin")
+        origin_name = route_match.group("origin")
+        if not _is_weekday_token(origin_name):
+            result["origin_name"] = origin_name
         result["destination_name"] = _normalize_place_name(route_match.group("destination"))
     else:
         origin_match = re.search(
@@ -651,7 +724,9 @@ def deterministic_extract(raw_text: str, today: date) -> dict[str, Any]:
             raw_text,
         )
         if origin_match:
-            result["origin_name"] = origin_match.group("origin")
+            origin_name = origin_match.group("origin")
+            if not _is_weekday_token(origin_name):
+                result["origin_name"] = origin_name
         if destination_matches:
             result["destination_name"] = _normalize_place_name(destination_matches[-1])
     local_destination = re.search(
@@ -667,15 +742,19 @@ def deterministic_extract(raw_text: str, today: date) -> dict[str, Any]:
     if any(qualifier in raw_text for qualifier in ("及其周边", "周边地区", "周边", "附近", "一带")):
         result["preferences"].append("目的地周边")
 
-    weekday_map = {"一": 0, "二": 1, "三": 2, "四": 3, "五": 4, "六": 5, "日": 6, "天": 6}
-    weekday_match = re.search(r"周([一二三四五六日天])", raw_text)
-    if weekday_match:
-        target = weekday_map[weekday_match.group(1)]
-        delta = (target - today.weekday()) % 7
-        if delta == 0:
-            delta = 7
-        start = today + timedelta(days=delta)
-        result["start_date"] = start.isoformat()
+    weekday_start, weekday_end = _resolve_weekday_window(
+        raw_text,
+        today,
+        explicit_start=(
+            date.fromisoformat(result["start_date"])
+            if result.get("start_date")
+            else None
+        ),
+    )
+    if weekday_start and not result.get("start_date"):
+        result["start_date"] = weekday_start.isoformat()
+    if weekday_end and not result.get("end_date"):
+        result["end_date"] = weekday_end.isoformat()
 
     nights_match = re.search(r"([一二三四五六七八九十两\d]+)天([一二三四五六七八九十两\d]+)夜", raw_text)
     if nights_match:
