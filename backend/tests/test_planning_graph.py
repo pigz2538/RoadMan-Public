@@ -17,29 +17,15 @@ from app.skills.base import SkillAdapter, SkillContext
 from app.skills.registry import SkillRegistry
 
 
-def test_requirement_extractor_handles_departure_and_later_arrival_time():
+def test_offline_fallback_preserves_only_literal_calendar_constraints():
     extracted = deterministic_extract(
-        "2026年8月2日下午3点从武汉出发，下午4点到北京，2026年8月3日返回",
-        date(2026, 7, 30),
+        "2026-08-02从武汉出发，2026-08-01返回",
+        date(2026, 8, 3),
     )
-
-    assert extracted["origin_name"] == "武汉"
-    assert extracted["destination_name"] == "北京"
-    assert extracted["departure_time"] == "15:00"
-    assert "travelers" not in extracted
-
-
-def test_deterministic_extractor_understands_midday_departure_without_defaulting_to_eight():
-    extracted = deterministic_extract(
-        "8.11中午从湖州南浔站出发，8.14返程回到南浔站，在乌镇及其周边转转",
-        date(2026, 8, 1),
-    )
-
-    assert extracted["departure_time"] == "12:00"
-    assert extracted["start_date"] == "2026-08-11"
-    assert extracted["end_date"] == "2026-08-14"
-    assert extracted["origin_name"] == "湖州南浔站"
-    assert extracted["destination_name"] == "乌镇"
+    assert extracted == {
+        "start_date": "2026-08-02",
+        "end_date": "2026-08-01",
+    }
 
 
 def test_daily_meals_follow_a_late_departure_and_avoid_stage_overlap():
@@ -65,16 +51,12 @@ def test_daily_meals_follow_a_late_departure_and_avoid_stage_overlap():
     assert meals["每日午餐安排"]["planned_start"].startswith("2026-08-11T13:00")
 
 
-def test_deterministic_extractor_does_not_guess_relationship_based_party_size():
+def test_requirement_agent_owns_relationship_and_destination_semantics():
     extracted = deterministic_extract(
         "情侣出游，从湖州南浔到乌镇及其周边，玩两天",
         date(2026, 8, 1),
     )
-
-    assert "travelers" not in extracted
-    assert extracted["destination_name"] == "乌镇"
-    assert "目的地周边" in extracted["preferences"]
-    assert extracted["max_days"] == 2
+    assert extracted == {}
 
 
 def test_deterministic_extract_reads_iso_dates_adjacent_to_chinese_text():
@@ -87,35 +69,12 @@ def test_deterministic_extract_reads_iso_dates_adjacent_to_chinese_text():
     assert extracted["end_date"] == "2026-08-01"
 
 
-def test_deterministic_extract_keeps_weekday_departure_and_return_in_order():
+def test_offline_fallback_does_not_interpret_weekday_or_destination_language():
     extracted = deterministic_extract(
-        "周一从武汉出发，然后周五返回武汉",
-        date(2026, 8, 3),  # Monday
-    )
-
-    assert extracted["start_date"] == "2026-08-03"
-    assert extracted["end_date"] == "2026-08-07"
-
-
-def test_deterministic_extract_resolves_weekday_pair_from_next_week_when_needed():
-    extracted = deterministic_extract(
-        "周一出发，周五回来",
-        date(2026, 8, 4),  # Tuesday
-    )
-
-    assert extracted["start_date"] == "2026-08-10"
-    assert extracted["end_date"] == "2026-08-14"
-
-
-def test_deterministic_extract_does_not_geocode_weekday_as_origin():
-    extracted = deterministic_extract(
-        "从周一出发然后周五回来",
+        "周一从武汉出发，周五返回武汉",
         date(2026, 8, 3),
     )
-
-    assert "origin_name" not in extracted
-    assert extracted["start_date"] == "2026-08-03"
-    assert extracted["end_date"] == "2026-08-07"
+    assert extracted == {}
 
 
 @pytest.mark.asyncio
@@ -127,8 +86,7 @@ async def test_requirement_agent_decides_semantic_party_size(monkeypatch):
         def json(self):
             return {
                 "response": (
-                    '{"origin_name":"湖州南浔","destination_name":"乌镇及其周边",'
-                    '"start_date":"2026-08-01","end_date":"2026-08-02",'
+                    '{"origin_name":"湖州南浔","destination_name":"乌镇",'
                     '"travelers":2,"preferences":["目的地周边"]}'
                 )
             }
@@ -196,7 +154,9 @@ async def test_requirement_agent_preserves_explicit_party_size(monkeypatch):
         date(2026, 8, 1),
     )
 
-    assert extracted["travelers"] == 4
+    # The structured Agent response is authoritative; raw text is not scanned
+    # for a numeric keyword override.
+    assert extracted["travelers"] == 2
 
 
 def test_non_driving_stage_exposes_total_elevation_gain():
@@ -403,7 +363,14 @@ async def test_graph_builds_two_day_markdown_plan():
         {
             "trip_id": "trip_graph",
             "raw_input": "周六从武汉去庐山，两天一夜",
-            "trip_request": {"raw_text": "周六从武汉去庐山，两天一夜"},
+            "trip_request": {
+                "raw_text": "周六从武汉去庐山，两天一夜",
+                "origin": {"name": "武汉"},
+                "destination": {"name": "庐山"},
+                "start_date": "2026-08-08",
+                "end_date": "2026-08-09",
+                "max_days": 2,
+            },
             "clarification_round": 0,
         }
     )
@@ -441,7 +408,15 @@ async def test_graph_builds_five_days_and_multiple_transport_modes():
         {
             "trip_id": "trip_five_days",
             "raw_input": "周六从武汉去庐山，五天四夜，喜欢公共交通和步行",
-            "trip_request": {"raw_text": "周六从武汉去庐山，五天四夜，喜欢公共交通和步行"},
+            "trip_request": {
+                "raw_text": "周六从武汉去庐山，五天四夜，喜欢公共交通和步行",
+                "origin": {"name": "武汉"},
+                "destination": {"name": "庐山"},
+                "start_date": "2026-08-08",
+                "end_date": "2026-08-12",
+                "max_days": 5,
+                "preferences": ["公共交通", "步行", "骑行"],
+            },
             "clarification_round": 0,
         }
     )
@@ -491,7 +466,14 @@ async def test_runner_persists_state_markdown_and_trip_days():
         trip = await TripRepository(session).create(
             TripCreate(
                 title="武汉—庐山",
-                request=TripRequest(raw_text="周六从武汉去庐山，两天一夜"),
+                request=TripRequest(
+                    raw_text="周六从武汉去庐山，两天一夜",
+                    origin={"name": "武汉"},
+                    destination={"name": "庐山"},
+                    start_date=date(2026, 8, 8),
+                    end_date=date(2026, 8, 9),
+                    max_days=2,
+                ),
             )
         )
     result = await run_planning(trip.id, registry=fake_registry())
@@ -538,7 +520,14 @@ async def test_runner_uses_selected_vehicle_for_energy_and_charging_plan():
         trip = await TripRepository(session).create(
             TripCreate(
                 title="低电量武汉—庐山",
-                request=TripRequest(raw_text="周六从武汉去庐山，两天一夜"),
+                request=TripRequest(
+                    raw_text="周六从武汉去庐山，两天一夜",
+                    origin={"name": "武汉"},
+                    destination={"name": "庐山"},
+                    start_date=date(2026, 8, 8),
+                    end_date=date(2026, 8, 9),
+                    max_days=2,
+                ),
                 selected_vehicle_id=vehicle.id,
             )
         )

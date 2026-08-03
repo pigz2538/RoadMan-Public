@@ -44,6 +44,11 @@ ProgressCallback = Callable[[str, str, str, int, str, str | None], Awaitable[Non
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 
 
+def _normalize_poi_name(value: Any) -> str:
+    """Normalize a model-selected POI name for exact identity matching."""
+    return "".join(str(value or "").split()).casefold()
+
+
 def build_planning_graph(
     registry: SkillRegistry,
     settings: Settings,
@@ -467,16 +472,13 @@ def build_planning_graph(
                     if not name or action == "skip":
                         continue
                     if action == "merge":
-                        target_name = str(decision.get("merge_target_name") or "").replace(" ", "").lower()
+                        target_name = _normalize_poi_name(decision.get("merge_target_name"))
                         target = next(
                             (
                                 candidate
                                 for candidate in candidates["attractions"]
                                 if target_name
-                                and (
-                                    target_name in candidate["place"]["name"].replace(" ", "").lower()
-                                    or candidate["place"]["name"].replace(" ", "").lower() in target_name
-                                )
+                                and _normalize_poi_name(candidate["place"]["name"]) == target_name
                             ),
                             None,
                         )
@@ -537,16 +539,13 @@ def build_planning_graph(
                 )
         if flyai_ticket_items:
             for candidate in candidates["attractions"]:
-                candidate_name = candidate["place"]["name"].replace(" ", "").lower()
+                candidate_name = _normalize_poi_name(candidate["place"]["name"])
                 match = next(
                     (
                         item
                         for item in flyai_ticket_items
                         if item.get("name")
-                        and (
-                            item["name"].replace(" ", "").lower() in candidate_name
-                            or candidate_name in item["name"].replace(" ", "").lower()
-                        )
+                        and _normalize_poi_name(item["name"]) == candidate_name
                     ),
                     None,
                 )
@@ -567,7 +566,7 @@ def build_planning_graph(
             # previously FlyAI could only enrich an existing AMap name match,
             # making most of its recommendations invisible to the user.
             existing_names = {
-                item.get("place", {}).get("name", "").replace(" ", "").lower()
+                _normalize_poi_name(item.get("place", {}).get("name", ""))
                 for item in candidates["attractions"]
             }
             for item in flyai_ticket_items:
@@ -575,12 +574,8 @@ def build_planning_graph(
                 longitude, latitude = item.get("longitude"), item.get("latitude")
                 if not name or longitude is None or latitude is None:
                     continue
-                normalized = name.replace(" ", "").lower()
-                if any(
-                    normalized in existing or existing in normalized
-                    for existing in existing_names
-                    if existing
-                ):
+                normalized = _normalize_poi_name(name)
+                if normalized in existing_names:
                     continue
                 candidates["attractions"].append(
                     {
@@ -649,7 +644,7 @@ def build_planning_graph(
             await emit(
                 state,
                 "rank_tourism_candidates",
-                "POI Agent 姝ｅ湪鏍规嵁鍋忓ソ涓庣壒娈婁綋楠岄噸鎺掑€欓€夊苟璇存槑鐞嗙敱",
+                "POI Agent 正在根据偏好、距离、评分、价格综合排序候选",
                 68,
                 event="tool_started",
                 tool="ollama.poi_ranker",
@@ -664,7 +659,7 @@ def build_planning_graph(
             await emit(
                 state,
                 "rank_tourism_candidates",
-                "POI Agent 宸插畬鎴愬€欓€夋帓搴忋€佹樉绀虹悊鐢变笌绛嗛€夊€�",
+                "POI Agent 已完成候选排序与推荐理由",
                 68,
                 event="tool_completed",
                 tool="ollama.poi_ranker",
@@ -1507,14 +1502,13 @@ async def _ensure_coordinates(
                 SkillContext(trip_id=trip_id),
             )
             items = poi_result.data.get("items", []) if poi_result.success and isinstance(poi_result.data, dict) else []
-            normalized_name = str(place["name"]).replace(" ", "").lower()
+            # The geocoder already reported an implausibly distant result. At
+            # this point the nearby POI search is a coordinate disambiguation
+            # step; choose the closest valid point rather than guessing with
+            # a name substring table (乌镇/乌镇风景区 is a common example).
             candidates = [
                 item for item in items
                 if item.get("name") and item.get("location")
-                and (
-                    normalized_name in str(item["name"]).replace(" ", "").lower()
-                    or str(item["name"]).replace(" ", "").lower() in normalized_name
-                )
             ]
             if candidates:
                 chosen = min(
@@ -1632,7 +1626,7 @@ def _select_itinerary_places(
     seen_coordinates: list[tuple[float, float]] = []
     for candidate in candidates:
         place = candidate.get("place") or {}
-        normalized_name = str(place.get("name") or "").replace(" ", "").lower()
+        normalized_name = _normalize_poi_name(place.get("name"))
         coordinates = place.get("coordinates") or {}
         try:
             point = (float(coordinates["longitude"]), float(coordinates["latitude"]))

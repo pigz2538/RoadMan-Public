@@ -31,6 +31,7 @@ def _stage() -> dict:
         "planned_end": datetime(2026, 8, 1, 13, 0, tzinfo=SHANGHAI).isoformat(),
         "distance_km": 300,
         "duration_minutes": 240,
+        "elevation_gain_m": 420,
         "weather_samples": [
             {
                 "place": {"name": "庐山"},

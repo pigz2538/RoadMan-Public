@@ -54,208 +54,234 @@ def interpret_edit_intent(
     *,
     agent_intent: dict[str, Any] | None = None,
 ) -> tuple[str, PlanPatch | None, bool]:
-    message = request.message.strip()
-    if agent_intent:
-        intent = str(agent_intent.get("intent") or "unknown")
-        reply = str(agent_intent.get("reply") or "").strip()
-        if intent == "replan":
-            return (
-                reply or "这个修改会影响日期、路线或整体节奏，需要重新生成整份行程安排。",
-                None,
-                True,
-            )
-        if intent == "question":
-            return reply or "我可以帮你调整景点、餐饮、住宿和交通，请告诉我希望改变哪一段。", None, False
-        if intent == "adjust":
-            return (
-                reply or "我会重新平衡这一天的停留时间和用餐窗口，请确认后重新规划。",
-                None,
-                True,
-            )
-        day_index = agent_intent.get("day_index")
-        semantic_prefix = f"第{day_index}天 " if day_index else ""
-        category_labels = {"attractions": "景点", "hotels": "酒店", "meals": "餐饮"}
-        category = agent_intent.get("category")
-        if intent == "add":
-            message = f"{message} {semantic_prefix}加入{category_labels.get(category, '安排')} {agent_intent.get('candidate_name') or ''}"
-        elif intent == "delete":
-            message = f"{message} {semantic_prefix}删除 {agent_intent.get('target_name') or ''}"
-        elif intent == "replace":
-            message = (
-                f"{message} {semantic_prefix}替换 {agent_intent.get('target_name') or ''} "
-                f"换成 {agent_intent.get('candidate_name') or ''}"
-            )
-    if any(word in message for word in ("改日期", "换日期", "提前一天", "推迟一天")):
-        return (
-            "修改行程日期会影响全部路线、天气和住宿，需要重新生成整份行程安排。",
-            None,
-            True,
-        )
-    day = next((item for item in trip.days if item.id == request.current_day_id), None)
-    if not day and request.current_target_id:
-        day = next(
-            (
-                item for item in trip.days
-                if any(stage.id == request.current_target_id for stage in item.stages)
-                or any(activity.id == request.current_target_id for activity in item.activities)
-            ),
-            None,
-        )
-    if not day:
-        day = _infer_day_from_message(trip, message)
-    if not day:
-        raise AppError("EDIT_DAY_REQUIRED", "请说明要修改第几天，或在地图、阶段卡上选择一段行程", 422)
-    target = next(
-        (item for item in day.activities if item.id == request.current_target_id),
-        None,
-    )
-    if not target:
-        target = next(
-            (item for item in day.activities if item.place.name and item.place.name in message),
-            None,
-        )
-    selected_stage = next(
-        (item for item in day.stages if item.id == request.current_target_id),
-        None,
-    ) or _infer_stage_from_message(day, message)
+    """Build a patch from a validated Agent intent.
 
-    mentioned_candidate = _candidate_mentioned(state, message)
-    add_category = mentioned_candidate[0] if mentioned_candidate else _infer_add_category(message)
-    if add_category and not any(word in message for word in ("替换", "换成", "改成", "删除", "移除", "不要")):
-        candidate = mentioned_candidate[1] if mentioned_candidate else _candidate_for_add(state, add_category, selected_stage)
-        if not candidate:
-            label = {"meals": "餐饮", "hotels": "住宿", "attractions": "景点"}[add_category]
-            return f"我理解您想在第 {day.day_index} 天加入{label}，但当前候选不足，请先刷新附近推荐。", None, False
-        candidates = state.setdefault("tourism_candidates", {}).setdefault(add_category, [])
-        if not any(item.get("candidate_id") == candidate["candidate_id"] for item in candidates):
-            candidates.append(candidate)
-        patch = create_candidate_patch(
-            trip,
-            state,
-            CandidatePatchRequest(
-                candidate_id=candidate["candidate_id"],
-                category=add_category,
-                day_id=day.id,
-                operation="add",
-                duration_minutes=_requested_duration(add_category, message),
-            ),
+    User language is interpreted by OllamaTripEditAgent. This layer only
+    resolves IDs and exact values from the returned structure; it never
+    classifies the raw message with keyword lists or name substrings.
+    """
+    if not agent_intent:
+        raise AppError(
+            "EDIT_AGENT_REQUIRED",
+            "行程语义修改需要规划 Agent 返回结构化意图，请检查模型配置后重试",
+            503,
         )
-        context = (
-            f"“{selected_stage.origin.name} → {selected_stage.destination.name}”阶段附近"
-            if selected_stage else f"第 {day.day_index} 天"
-        )
-        return f"已理解为在{context}加入“{candidate['place']['name']}”，请确认修改预览。", patch, False
 
-    if any(word in message for word in ("删除", "删掉", "移除", "去掉", "不要", "取消这个", "取消安排")):
-        if not target:
-            raise AppError("EDIT_TARGET_REQUIRED", "请说出要删除的安排名称，或先点选该景点、酒店或餐饮", 422)
+    intent = str(agent_intent.get("intent") or "unknown").strip().lower()
+    reply = str(agent_intent.get("reply") or "").strip()
+    if intent == "replan":
+        return reply or "这项修改会影响日期、路线或整体节奏，需要重新生成整份行程。", None, True
+    if intent == "adjust":
+        return reply or "我会重新平衡当天的停留时间和用餐窗口，确认后重新规划。", None, True
+    if intent == "question":
+        return reply or "我可以调整景点、餐饮、住宿和交通，请告诉我希望改变哪一段。", None, False
+    if intent not in {"add", "delete", "replace"}:
+        return reply or "我没有识别出可执行的行程修改，请在卡片中选择目标后再描述修改。", None, False
+
+    day = _resolve_edit_day(trip, request, agent_intent)
+    if day is None:
+        raise AppError(
+            "EDIT_DAY_REQUIRED",
+            "请先选择要修改的日期或阶段卡片，Agent 才能安全应用修改",
+            422,
+        )
+
+    target = _resolve_edit_target(day, request, agent_intent)
+    selected_stage = _resolve_edit_stage(day, request, agent_intent)
+
+    if intent == "delete":
+        if target is None:
+            raise AppError(
+                "EDIT_TARGET_REQUIRED",
+                "请先在阶段卡片中选择要删除的景点、酒店或餐饮安排",
+                422,
+            )
         patch = create_delete_activity_patch(
             trip,
             state,
             DeleteActivityPatchRequest(day_id=day.id, activity_id=target.id),
         )
-        return f"已生成删除“{target.place.name}”的修改预览。", patch, False
+        return reply or f"已生成删除“{target.place.name}”的修改预览。", patch, False
 
-    if any(word in message for word in ("替换", "换成", "改成")):
-        if not target:
-            raise AppError("EDIT_TARGET_REQUIRED", "请说出要替换的安排名称，或先点选该景点、酒店或餐饮", 422)
-        category = {
-            "attraction": "attractions",
-            "hotel": "hotels",
-            "meal": "meals",
-        }.get(target.type)
-        if not category:
-            raise AppError("EDIT_TYPE_UNSUPPORTED", "当前类型暂不支持候选替换", 422)
-        candidates = state.get("tourism_candidates", {}).get(category, [])
-        candidate = next(
-            (
-                item for item in candidates
-                if item.get("place", {}).get("name")
-                and item["place"]["name"] in message
-            ),
-            None,
-        )
-        if not candidate:
-            return (
-                f"请在“{target.place.name}”所属分类的备选列表中选择替换目标。",
-                None,
-                False,
+    category = agent_intent.get("category")
+    if category not in {"attractions", "hotels", "meals"}:
+        if intent == "replace" and target is not None:
+            category = {
+                "attraction": "attractions",
+                "hotel": "hotels",
+                "meal": "meals",
+            }.get(target.type)
+    if category not in {"attractions", "hotels", "meals"}:
+        return reply or "请让 Agent 明确这次修改是景点、住宿还是餐饮。", None, False
+
+    candidate = _find_candidate_exact(state, category, agent_intent)
+    if candidate is None and intent == "add":
+        candidate = _candidate_for_add(state, category, selected_stage)
+    if candidate is None:
+        return reply or "没有找到与 Agent 意图完全对应的候选项，请先刷新候选推荐或在地图上选点。", None, False
+
+    candidates = state.setdefault("tourism_candidates", {}).setdefault(category, [])
+    if not any(item.get("candidate_id") == candidate.get("candidate_id") for item in candidates):
+        candidates.append(candidate)
+
+    if intent == "replace":
+        if target is None:
+            raise AppError(
+                "EDIT_TARGET_REQUIRED",
+                "请先在阶段卡片中选择要替换的现有安排",
+                422,
             )
         patch = create_candidate_patch(
             trip,
             state,
             CandidatePatchRequest(
-                candidate_id=candidate["candidate_id"],
+                candidate_id=str(candidate["candidate_id"]),
                 category=category,
                 day_id=day.id,
                 operation="replace",
                 target_activity_id=target.id,
+                duration_minutes=_intent_duration(agent_intent),
             ),
         )
-        return f"已生成替换“{target.place.name}”的修改预览。", patch, False
+        return reply or f"已生成将“{target.place.name}”替换为“{candidate.get('place', {}).get('name', '候选项')}”的预览。", patch, False
 
-    return (
-        "您可以直接说“在返程服务区吃午饭”“第 2 天加一家酒店”，也可以点选阶段或活动后要求删除、替换。",
-        None,
-        False,
+    patch = create_candidate_patch(
+        trip,
+        state,
+        CandidatePatchRequest(
+            candidate_id=str(candidate["candidate_id"]),
+            category=category,
+            day_id=day.id,
+            operation="add",
+            duration_minutes=_intent_duration(agent_intent),
+        ),
     )
+    context = (
+        f"“{selected_stage.origin.name} → {selected_stage.destination.name}”阶段"
+        if selected_stage
+        else f"第 {day.day_index} 天"
+    )
+    return reply or f"已生成在{context}加入“{candidate.get('place', {}).get('name', '候选项')}”的修改预览。", patch, False
 
 
-def _infer_day_from_message(trip: Trip, message: str):
-    for day in trip.days:
-        if f"第{day.day_index}天" in message.replace(" ", ""):
+def _resolve_edit_day(
+    trip: Trip,
+    request: EditIntentRequest,
+    intent: dict[str, Any],
+):
+    requested_day_id = str(intent.get("day_id") or request.current_day_id or "").strip()
+    if requested_day_id:
+        day = next((item for item in trip.days if item.id == requested_day_id), None)
+        if day is not None:
             return day
-        names = [
-            *[stage.origin.name for stage in day.stages],
-            *[stage.destination.name for stage in day.stages],
-            *[activity.place.name for activity in day.activities],
-        ]
-        if any(name and name in message for name in names):
-            return day
+
+    target_ids = {
+        str(value).strip()
+        for value in (
+            request.current_target_id,
+            intent.get("target_stage_id"),
+            intent.get("target_activity_id"),
+        )
+        if value
+    }
+    if target_ids:
+        for day in trip.days:
+            if any(stage.id in target_ids for stage in day.stages):
+                return day
+            if any(activity.id in target_ids for activity in day.activities):
+                return day
+
+    day_index = intent.get("day_index")
+    try:
+        day_index = int(day_index) if day_index is not None else None
+    except (TypeError, ValueError):
+        day_index = None
+    if day_index is not None:
+        return next((item for item in trip.days if item.day_index == day_index), None)
     return trip.days[0] if len(trip.days) == 1 else None
 
 
-def _infer_stage_from_message(day: Any, message: str):
-    scored = []
-    for stage in day.stages:
-        score = sum(
-            1
-            for value in (stage.title, stage.origin.name, stage.destination.name)
-            if value and value in message
-        )
-        if "返程" in message and "返程" in stage.title:
-            score += 2
-        if score:
-            scored.append((score, stage))
-    if scored:
-        return max(scored, key=lambda item: item[0])[1]
-    if any(word in message for word in ("返程", "服务区", "沿途", "途中")):
+def _resolve_edit_target(day: Any, request: EditIntentRequest, intent: dict[str, Any]):
+    target_id = str(
+        intent.get("target_activity_id")
+        or request.current_target_id
+        or ""
+    ).strip()
+    if target_id:
+        return next((item for item in day.activities if item.id == target_id), None)
+
+    target_name = _normalize_label(intent.get("target_name"))
+    if not target_name:
+        return None
+    return next(
+        (
+            item for item in day.activities
+            if _normalize_label(item.place.name) == target_name
+        ),
+        None,
+    )
+
+
+def _resolve_edit_stage(day: Any, request: EditIntentRequest, intent: dict[str, Any]):
+    stage_id = str(
+        intent.get("target_stage_id")
+        or request.current_target_id
+        or ""
+    ).strip()
+    if stage_id:
+        return next((item for item in day.stages if item.id == stage_id), None)
+    return None
+
+
+def _find_candidate_exact(
+    state: dict[str, Any],
+    category: str,
+    intent: dict[str, Any],
+) -> dict[str, Any] | None:
+    candidates = state.get("tourism_candidates", {}).get(category, [])
+    if not isinstance(candidates, list):
+        return None
+    candidate_id = str(intent.get("candidate_id") or "").strip()
+    if candidate_id:
         return next(
-            (stage for stage in reversed(day.stages) if stage.mode == "driving"),
-            day.stages[-1] if day.stages else None,
+            (
+                item for item in candidates
+                if isinstance(item, dict) and str(item.get("candidate_id") or "") == candidate_id
+            ),
+            None,
         )
-    return None
+    candidate_name = _normalize_label(intent.get("candidate_name"))
+    if not candidate_name:
+        return None
+    return next(
+        (
+            item for item in candidates
+            if isinstance(item, dict)
+            and _normalize_label((item.get("place") or {}).get("name")) == candidate_name
+        ),
+        None,
+    )
 
 
-def _infer_add_category(message: str) -> str | None:
-    if any(word in message for word in ("吃饭", "吃个饭", "餐厅", "午饭", "午餐", "晚饭", "晚餐", "早餐", "用餐", "餐饮")):
-        return "meals"
-    if any(word in message for word in ("住宿", "住一晚", "酒店", "宾馆", "民宿")):
-        return "hotels"
-    if any(word in message for word in ("景点", "增加景点", "加个景点", "安排景点", "游览", "逛一逛", "玩一会", "多逛")):
-        return "attractions"
-    return None
+def _normalize_label(value: Any) -> str:
+    return " ".join(str(value or "").split()).casefold()
 
 
-def _requested_duration(category: str, message: str) -> int | None:
-    """Allow natural-language edits to trade visit depth for itinerary capacity."""
-    if any(word in message for word in ("多逛", "深度", "多停留", "慢慢看")):
-        return 120 if category == "attractions" else 90
-    if any(word in message for word in ("顺路", "快速", "少逛", "短停")):
-        return 60 if category == "attractions" else 45
-    if any(word in message for word in ("再加", "多加", "多安排", "增加几个", "增加一些")):
-        return 60 if category == "attractions" else 45
-    return None
+def _intent_duration(intent: dict[str, Any]) -> int | None:
+    raw = intent.get("duration_minutes")
+    if raw is None:
+        delta = intent.get("duration_delta_minutes")
+        if delta is None:
+            return None
+        try:
+            raw = 90 + int(delta)
+        except (TypeError, ValueError):
+            return None
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return None
+    return max(30, min(240, value))
 
 
 def _candidate_for_add(
@@ -286,28 +312,6 @@ def _candidate_for_add(
             }
     candidates = state.get("tourism_candidates", {}).get(category, [])
     return candidates[0] if candidates else None
-
-
-def _candidate_mentioned(
-    state: dict[str, Any],
-    message: str,
-) -> tuple[str, dict[str, Any]] | None:
-    if not any(word in message for word in ("添加", "加入", "安排", "想去", "去一下")):
-        return None
-    for category, candidates in state.get("tourism_candidates", {}).items():
-        if category not in CATEGORY_ACTIVITY_TYPE:
-            continue
-        match = next(
-            (
-                item for item in candidates
-                if item.get("place", {}).get("name")
-                and item["place"]["name"] in message
-            ),
-            None,
-        )
-        if match:
-            return category, match
-    return None
 
 
 def create_map_point_patch(

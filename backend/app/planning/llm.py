@@ -1,6 +1,6 @@
 import json
 import re
-from datetime import date, timedelta
+from datetime import date
 from typing import Any
 
 import httpx
@@ -13,7 +13,10 @@ class OllamaRequirementExtractor:
         self.settings = settings
 
     async def extract(self, raw_text: str, today: date) -> dict[str, Any]:
-        deterministic = deterministic_extract(raw_text, today)
+        # The model owns semantic interpretation. The offline parser is now
+        # limited to literal calendar validation and never extracts places,
+        # weekdays, preferences, party size or travel modes.
+        legacy_fallback = deterministic_extract(raw_text, today)
         if (
             not self.settings.enable_llm_requirement_extraction
             or not self.settings.ollama_api_key
@@ -21,19 +24,26 @@ class OllamaRequirementExtractor:
             # No cloud Agent means no semantic guess.  Keep only hard,
             # structural fields from the offline parser and let preflight ask
             # the user instead of silently inventing party size/preferences.
-            return deterministic
+            return legacy_fallback
         prompt = (
             "You are RoadMan Requirement Agent. Extract requirements only; never plan a route. "
             f"Today is {today.isoformat()}. Return ONLY one valid JSON object (no markdown, no explanation) "
             "with exactly these keys: origin_name, destination_name, start_date, end_date, "
-            "departure_time, return_time, travelers, max_days, preferences, special_events. "
+            "departure_time, return_time, travelers, max_days, preferences, special_events, "
+            "cross_sea_required, cross_sea_mode, past_return_requested, time_window_minutes. "
             "Dates must be YYYY-MM-DD; unknown scalar fields must be null and preferences/special_events must be arrays. "
             "Only fill start_date/end_date when the user's text explicitly gives a calendar date, a relative date "
             "such as 今天/明天, or an unambiguous weekday. Phrases such as 今年暑假、最多三天、玩三天 are not "
             "calendar dates; leave both date fields null instead of inventing dates. "
             "Normalize Chinese time phrases: 中午=12:00, 下午=14:00, 晚上=19:00. "
+            "Understand relative weekdays and ranges as a pair: 周一出发、周五回来 means a Monday-to-Friday "
+            "window in the same upcoming week; do not return an end date earlier than the start date. "
             "Infer travelers semantically (情侣/夫妻=2, 一家三口=3); do not default to 1 when evidence is absent. "
             "请根据语义判断同行人数，不要机械默认 1。"
+            "cross_sea_required must be true only when the trip actually requires crossing a sea or water barrier; "
+            "cross_sea_mode may be ferry, flight, bridge or null. past_return_requested is true only when the user "
+            "explicitly requests returning before the current date. time_window_minutes is the user's explicit "
+            "departure-to-arrival window, or null when no such window is stated. "
             "For text like 从A出发，在B及其周边旅游, use A as origin and B as destination. "
             "Separate the destination from the experience: in 到九宫山看流星雨, destination_name is 九宫山, "
             "special_events contains 流星雨. For astronomy, festivals, flowers or seasonal events, preserve the "
@@ -56,28 +66,15 @@ class OllamaRequirementExtractor:
                 )
                 response.raise_for_status()
                 parsed = _parse_json_object(response.json().get("response", ""))
-                merged = _merge_extraction(deterministic, parsed)
-                # Calendar tokens and explicit clock hints are deterministic
-                # user constraints. Do not let an Agent hallucinate another
-                # year while still allowing it to infer semantic fields.
+                structural = _extract_literal_constraints(raw_text, today)
+                merged = _merge_extraction(structural, parsed)
+                # Literal calendar tokens are hard user constraints. Do not
+                # let the Agent hallucinate another year.
                 for date_field in ("start_date", "end_date"):
-                    if deterministic.get(date_field):
-                        merged[date_field] = deterministic[date_field]
-                # The Requirement Agent may understand duration or season
-                # semantically, but it must never turn those phrases into a
-                # fabricated calendar date.  Dates are retained only when
-                # the structural parser found an explicit user constraint.
-                if not deterministic.get("start_date"):
-                    merged.pop("start_date", None)
+                    if structural.get(date_field):
+                        merged[date_field] = structural[date_field]
+                if not merged.get("start_date"):
                     merged.pop("end_date", None)
-                elif not deterministic.get("end_date"):
-                    merged.pop("end_date", None)
-                for place_field in ("origin_name", "destination_name"):
-                    if deterministic.get(place_field):
-                        merged[place_field] = deterministic[place_field]
-                for clock_field in ("departure_time", "return_time"):
-                    if deterministic.get(clock_field):
-                        merged[clock_field] = deterministic[clock_field]
                 if merged.get("destination_name"):
                     merged["destination_name"] = _normalize_place_name(
                         str(merged["destination_name"])
@@ -89,28 +86,31 @@ class OllamaRequirementExtractor:
                         merged[clock_field] = normalized_clock
                     else:
                         merged.pop(clock_field, None)
-                has_explicit_travelers = bool(
-                    re.search(r"[一二三四五六七八九十两\d]+\s*(?:人|位|口)", raw_text)
-                )
-                if has_explicit_travelers and deterministic.get("travelers"):
-                    # An explicit count is a hard user constraint; semantic
-                    # inference is only used when the user did not state one.
-                    merged["travelers"] = deterministic["travelers"]
-                else:
-                    merged["travelers"] = _coerce_travelers(merged.get("travelers"))
+                # Party size is a semantic decision owned by the Requirement
+                # Agent (for example, “情侣” means two people). The backend
+                # only validates the returned scalar and never scans raw text.
+                merged["travelers"] = _coerce_travelers(merged.get("travelers"))
                 if merged.get("travelers") is None:
                     merged.pop("travelers", None)
-                if deterministic.get("max_days") is not None:
-                    merged["max_days"] = deterministic["max_days"]
+                max_days = _coerce_positive_int(merged.get("max_days"), maximum=30)
+                if max_days is None:
+                    merged.pop("max_days", None)
                 else:
-                    max_days = _coerce_positive_int(merged.get("max_days"), maximum=30)
-                    if max_days is None:
-                        merged.pop("max_days", None)
-                    else:
-                        merged["max_days"] = max_days
+                    merged["max_days"] = max_days
+                merged["cross_sea_required"] = _coerce_optional_bool(
+                    merged.get("cross_sea_required")
+                )
+                if merged.get("cross_sea_mode") not in {"ferry", "flight", "bridge"}:
+                    merged["cross_sea_mode"] = None
+                merged["past_return_requested"] = _coerce_optional_bool(
+                    merged.get("past_return_requested")
+                )
+                merged["time_window_minutes"] = _coerce_positive_minutes(
+                    merged.get("time_window_minutes")
+                )
                 return merged
         except (httpx.HTTPError, ValueError, TypeError, json.JSONDecodeError):
-            return deterministic
+            return legacy_fallback
 
 
 class OllamaRequirementValidator:
@@ -193,11 +193,14 @@ class OllamaTripEditAgent:
             "不能虚构不存在的景点、酒店或餐厅，也不能直接声称修改已经完成。"
             "请只返回一个 JSON 对象，不要 Markdown："
             '{"intent":"add|delete|replace|replan|adjust|question|unknown",'
-            '"day_index":1,"category":"attractions|hotels|meals|null",'
-            '"target_name":"","candidate_name":"","duration_delta_minutes":0,'
+            '"day_index":1,"day_id":"","category":"attractions|hotels|meals|null",'
+            '"target_stage_id":"","target_activity_id":"","candidate_id":"",'
+            '"target_name":"","candidate_name":"","duration_minutes":null,'
+            '"duration_delta_minutes":0,'
             '"reply":"给用户的简短中文说明"}。'
             "如果用户要求增加或减少天数、重排整体路线、改变出发/返回日期，intent 用 replan。"
             "如果是加入/删除/替换一个已有候选，尽量填出对应第几天和名称；不确定时留空，"
+            "优先返回上下文中的 day_id、阶段 ID、活动 ID、候选 ID；名称仅用于精确核对，禁止返回不存在的 ID。"
             "不要把‘看流星雨’、‘赏花’、‘泡温泉’等体验目标误当成景点名称。"
             f"当前行程上下文：{json.dumps(trip_context, ensure_ascii=False)}；"
             f"用户修改请求：{message}"
@@ -233,12 +236,22 @@ class OllamaTripEditAgent:
             delta = int(value.get("duration_delta_minutes") or 0)
         except (TypeError, ValueError):
             delta = 0
+        try:
+            duration = int(value.get("duration_minutes")) if value.get("duration_minutes") is not None else None
+        except (TypeError, ValueError):
+            duration = None
+        duration = max(30, min(240, duration)) if duration is not None else None
         return {
             "intent": intent,
             "day_index": day_index,
+            "day_id": str(value.get("day_id") or "").strip()[:120],
             "category": category,
+            "target_stage_id": str(value.get("target_stage_id") or "").strip()[:120],
+            "target_activity_id": str(value.get("target_activity_id") or "").strip()[:120],
+            "candidate_id": str(value.get("candidate_id") or "").strip()[:200],
             "target_name": str(value.get("target_name") or "").strip()[:120],
             "candidate_name": str(value.get("candidate_name") or "").strip()[:120],
+            "duration_minutes": duration,
             "duration_delta_minutes": max(-240, min(240, delta)),
             "reply": str(value.get("reply") or "").strip()[:500],
         }
@@ -256,9 +269,10 @@ class OllamaPoiCurator:
         local_candidates: list[dict[str, Any]],
         osm_items: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        fallback = _fallback_poi_decisions(local_candidates, osm_items)
+        # Merging two POI sources is a semantic decision.  Never guess it from
+        # a local substring/keyword table when the curator Agent is unavailable.
         if not self.settings.ollama_api_key or not osm_items:
-            return fallback
+            return []
         local_places = [item.get("place", {}) for item in local_candidates]
         compact_osm = [
             {
@@ -299,7 +313,7 @@ class OllamaPoiCurator:
                 payload = _parse_unfiltered_json_object(response.json().get("response", ""))
                 decisions = payload.get("decisions")
                 if not isinstance(decisions, list):
-                    return fallback
+                    return []
                 valid_ids = {str(item.get("id")) for item in osm_items}
                 cleaned = []
                 for item in decisions:
@@ -321,9 +335,9 @@ class OllamaPoiCurator:
                             "reason": str(item.get("reason") or "Agent 多源核验"),
                         }
                     )
-                return cleaned or fallback
+                return cleaned
         except (httpx.HTTPError, ValueError, TypeError, json.JSONDecodeError):
-            return fallback
+            return []
 
 
 class OllamaPoiRanker:
@@ -530,6 +544,10 @@ def _parse_json_object(text: str) -> dict[str, Any]:
         "special_events",
         "max_days",
         "issues",
+        "cross_sea_required",
+        "cross_sea_mode",
+        "past_return_requested",
+        "time_window_minutes",
     }
     return {key: value for key, value in value.items() if key in allowed}
 
@@ -544,34 +562,6 @@ def _parse_unfiltered_json_object(text: str) -> dict[str, Any]:
     return value
 
 
-def _fallback_poi_decisions(
-    local_candidates: list[dict[str, Any]],
-    osm_items: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    local_names = {
-        str(item.get("place", {}).get("name") or "").replace(" ", "").lower()
-        for item in local_candidates
-    }
-    decisions = []
-    for item in osm_items:
-        name = str(item.get("name") or "").strip()
-        normalized = name.replace(" ", "").lower()
-        target = next(
-            (candidate for candidate in local_names if normalized and (normalized in candidate or candidate in normalized)),
-            "",
-        )
-        decisions.append(
-            {
-                "source_id": str(item.get("id") or ""),
-                "action": "merge" if target else ("add" if _has_cjk(name) else "skip"),
-                "display_name_zh": name if _has_cjk(name) else "",
-                "merge_target_name": target,
-                "reason": "名称去重兜底" if target else "保留本地中文名称" if _has_cjk(name) else "等待 Agent 翻译",
-            }
-        )
-    return decisions
-
-
 def _has_cjk(value: str) -> bool:
     return bool(re.search(r"[\u4e00-\u9fff]", value))
 
@@ -584,95 +574,24 @@ def _merge_extraction(base: dict[str, Any], llm: dict[str, Any]) -> dict[str, An
     return result
 
 
-def _resolve_weekday_window(
-    raw_text: str,
-    today: date,
-    *,
-    explicit_start: date | None = None,
-) -> tuple[date | None, date | None]:
-    """Resolve a weekday departure/return pair without swapping its order.
-
-    ``周一出发，周五回来`` contains two independent weekday constraints.  The
-    previous parser only used the first ``周X`` token and always moved a
-    same-day match seven days forward.  On a Monday that turned an intended
-    current-week trip into next Monday while an Agent-provided Friday return
-    remained in the current week, producing an inverted date range.
-
-    A pair is anchored to the next occurrence of the departure weekday (today
-    is a valid occurrence).  The return weekday is then advanced from that
-    departure by its weekday delta, with equal weekdays meaning a full week.
-    ``下周X`` is treated explicitly as the following occurrence.
-    """
-
-    weekday_map = {
-        "一": 0,
-        "二": 1,
-        "三": 2,
-        "四": 3,
-        "五": 4,
-        "六": 5,
-        "日": 6,
-        "天": 6,
-    }
-    matches = list(re.finditer(r"(?:周|星期)([一二三四五六日天])", raw_text))
-    if not matches:
-        return None, None
-
-    start_match = matches[0]
-    start_weekday = weekday_map[start_match.group(1)]
-    if explicit_start is not None:
-        start = explicit_start
-    else:
-        start_delta = (start_weekday - today.weekday()) % 7
-        prefix = raw_text[max(0, start_match.start() - 3) : start_match.start()]
-        if "下周" in prefix or "下星期" in prefix:
-            # A zero delta means the next week's occurrence, not today.
-            start_delta = start_delta or 7
-            start_delta += 7
-        start = today + timedelta(days=start_delta)
-
-    end_match = None
-    return_markers = ("回来", "返回", "返程", "回程", "回到", "回家")
-    for candidate in reversed(matches[1:]):
-        tail = raw_text[candidate.end() : candidate.end() + 12]
-        if any(marker in tail for marker in return_markers):
-            end_match = candidate
-            break
-    if end_match is None and len(matches) >= 2:
-        # Also support compact ranges such as “周一到周五”。
-        end_match = matches[-1]
-    if end_match is None:
-        return start, None
-
-    end_weekday = weekday_map[end_match.group(1)]
-    day_delta = (end_weekday - start.weekday()) % 7
-    if day_delta == 0:
-        day_delta = 7
-    return start, start + timedelta(days=day_delta)
-
-
-def _is_weekday_token(value: str) -> bool:
-    return bool(re.fullmatch(r"(?:周|星期)[一二三四五六日天]", value.strip()))
-
-
-def deterministic_extract(raw_text: str, today: date) -> dict[str, Any]:
-    result: dict[str, Any] = {"preferences": []}
+def _extract_literal_constraints(raw_text: str, today: date) -> dict[str, Any]:
+    """Extract only unambiguous numeric calendar literals for validation."""
     explicit_dates = [
         date.fromisoformat(value).isoformat()
-        # Chinese characters are Unicode word characters, so ``\b`` does not
-        # form a boundary between a date and the adjacent character (for
-        # example ``2026-08-02从``).  Use digit lookarounds instead.
         for value in re.findall(r"(?<!\d)\d{4}-\d{2}-\d{2}(?!\d)", raw_text)
     ]
-    for month, day_value in re.findall(r"(?<!\d)(\d{1,2})[./](\d{1,2})(?!\d)", raw_text):
+    for month, day_value in re.findall(
+        r"(?<!\d)(\d{1,2})[./](\d{1,2})(?!\d)", raw_text
+    ):
         try:
-            explicit_dates.append(date(today.year, int(month), int(day_value)).isoformat())
+            explicit_dates.append(
+                date(today.year, int(month), int(day_value)).isoformat()
+            )
         except ValueError:
             continue
     if not explicit_dates:
         for year, month, day_value in re.findall(
-            r"(?:(\d{4})年)?(\d{1,2})月(\d{1,2})日",
-            raw_text,
+            r"(?:(\d{4})年)?(\d{1,2})月(\d{1,2})日", raw_text
         ):
             try:
                 explicit_dates.append(
@@ -684,122 +603,37 @@ def deterministic_extract(raw_text: str, today: date) -> dict[str, Any]:
                 )
             except ValueError:
                 continue
+    result: dict[str, Any] = {}
     if explicit_dates:
         result["start_date"] = explicit_dates[0]
         if len(explicit_dates) > 1:
             result["end_date"] = explicit_dates[1]
-    if "今天" in raw_text and not result.get("start_date"):
-        result["start_date"] = today.isoformat()
-    elif "明天" in raw_text and not result.get("start_date"):
-        result["start_date"] = (today + timedelta(days=1)).isoformat()
-    elif "后天" in raw_text and not result.get("start_date"):
-        result["start_date"] = (today + timedelta(days=2)).isoformat()
-    if "昨天" in raw_text and any(word in raw_text for word in ("回", "返", "抵达", "到达")):
-        result["end_date"] = (today - timedelta(days=1)).isoformat()
-    departure_time, return_time = _extract_clock_preferences(raw_text)
-    if departure_time:
-        result["departure_time"] = departure_time
-    if return_time:
-        result["return_time"] = return_time
-    route_match = re.search(
-        r"从(?P<origin>[\u4e00-\u9fffA-Za-z0-9·]+?)(?:出发)?(?:去|到|前往)"
-        r"(?P<destination>[\u4e00-\u9fffA-Za-z0-9·]+?)(?=看|赏|观|参加|体验|游玩|旅游|露营|拍摄|追|，|,|。|；|;|最多|三天|两天|一日|周[一二三四五六日天]|$)",
-        raw_text,
-    )
-    if route_match:
-        origin_name = route_match.group("origin")
-        if not _is_weekday_token(origin_name):
-            result["origin_name"] = origin_name
-        result["destination_name"] = _normalize_place_name(route_match.group("destination"))
-    else:
-        origin_match = re.search(
-            r"从(?P<origin>[\u4e00-\u9fffA-Za-z0-9·]{2,20}?)(?=出发|启程|去|前往|到)",
-            raw_text,
-        )
-        destination_matches = re.findall(
-            r"(?:去|前往|抵达|到达|到)"
-            r"(?!今天|明天|后天|昨天|早上|上午|中午|下午|晚上|\d)"
-            r"(?P<destination>[\u4e00-\u9fffA-Za-z0-9·]{2,20}?)"
-            r"(?=，|,|。|；|;|两天|一日|周[一二三四五六日天]|$)",
-            raw_text,
-        )
-        if origin_match:
-            origin_name = origin_match.group("origin")
-            if not _is_weekday_token(origin_name):
-                result["origin_name"] = origin_name
-        if destination_matches:
-            result["destination_name"] = _normalize_place_name(destination_matches[-1])
-    local_destination = re.search(
-        r"在(?P<destination>[\u4e00-\u9fffA-Za-z0-9·]{2,30}?)(?=及其周边|周边地区|周边|附近|一带)",
-        raw_text,
-    )
-    if local_destination:
-        # A local “在 B 及其周边游览” clause is more specific than a later
-        # “到 A 返程” clause, which otherwise looks like the destination.
-        result["destination_name"] = _normalize_place_name(
-            local_destination.group("destination")
-        )
-    if any(qualifier in raw_text for qualifier in ("及其周边", "周边地区", "周边", "附近", "一带")):
-        result["preferences"].append("目的地周边")
-
-    weekday_start, weekday_end = _resolve_weekday_window(
-        raw_text,
-        today,
-        explicit_start=(
-            date.fromisoformat(result["start_date"])
-            if result.get("start_date")
-            else None
-        ),
-    )
-    if weekday_start and not result.get("start_date"):
-        result["start_date"] = weekday_start.isoformat()
-    if weekday_end and not result.get("end_date"):
-        result["end_date"] = weekday_end.isoformat()
-
-    nights_match = re.search(r"([一二三四五六七八九十两\d]+)天([一二三四五六七八九十两\d]+)夜", raw_text)
-    if nights_match:
-        days = _cn_number(nights_match.group(1))
-        if days:
-            result["max_days"] = days
-        if result.get("start_date") and days:
-            start = date.fromisoformat(result["start_date"])
-            result["end_date"] = (start + timedelta(days=days - 1)).isoformat()
-
-    duration_match = re.search(
-        r"(?:最多|至多|不超过|不超過|最长|最長)\s*([一二三四五六七八九十两\d]+)\s*天",
-        raw_text,
-    )
-    if duration_match:
-        days = _cn_number(duration_match.group(1))
-        if days:
-            result["max_days"] = days
-    if "max_days" not in result:
-        plain_duration = re.search(
-            r"([一二三四五六七八九十两\d]+)\s*天(?:行程|旅游|旅行|游玩|出游|游|玩)?",
-            raw_text,
-        )
-        if plain_duration:
-            days = _cn_number(plain_duration.group(1))
-            if days:
-                result["max_days"] = days
-
-    traveler_match = re.search(r"([一二三四五六七八九十两\d]+)\s*(?:人|位|口)", raw_text)
-    if traveler_match:
-        result["travelers"] = _cn_number(traveler_match.group(1))
-    # Semantic preferences are intentionally left to the Requirement Agent.
-    # This offline parser only handles structural qualifiers such as a
-    # destination radius above; it must not decide what “舒服”“情侣” or
-    # “看流星雨” means by scanning keywords.
     return result
 
 
+def _coerce_optional_bool(value: Any) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "yes", "1", "是", "需要"}:
+            return True
+        if normalized in {"false", "no", "0", "否", "不需要"}:
+            return False
+    return None
+
+
+def _coerce_positive_minutes(value: Any) -> int | None:
+    try:
+        minutes = int(value)
+    except (TypeError, ValueError):
+        return None
+    return minutes if 1 <= minutes <= 7 * 24 * 60 else None
+
+
 def _normalize_place_name(value: str) -> str:
-    """Remove natural-language radius qualifiers before geocoding a place."""
-    normalized = re.sub(r"\s+", "", value).strip("，,。；;、")
-    for suffix in ("及其周边地区", "及其周边", "周边地区", "周边", "附近", "一带"):
-        if normalized.endswith(suffix) and len(normalized) > len(suffix):
-            return normalized[: -len(suffix)]
-    return normalized
+    """Normalize whitespace without interpreting place language."""
+    return " ".join(value.split()).strip("，,。；;、")
 
 
 def _normalize_special_events(value: Any) -> list[str]:
@@ -807,25 +641,17 @@ def _normalize_special_events(value: Any) -> list[str]:
     return list(dict.fromkeys(item for item in events if item))[:8]
 
 
-def _cn_number(value: str) -> int | None:
-    if value.isdigit():
-        return int(value)
-    mapping = {"一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
-    return mapping.get(value)
-
-
 def _coerce_travelers(value: Any) -> int | None:
-    """Normalize the Requirement Agent's semantic count without inferring it locally."""
+    """Validate the numeric count returned by the Requirement Agent."""
     if isinstance(value, bool):
         return None
     if isinstance(value, int):
         return value if value >= 1 else None
     if isinstance(value, float) and value.is_integer():
         return int(value) if value >= 1 else None
-    if isinstance(value, str):
-        match = re.search(r"([一二三四五六七八九十两\d]+)", value)
-        if match:
-            return _cn_number(match.group(1))
+    if isinstance(value, str) and value.strip().isdigit():
+        number = int(value.strip())
+        return number if number >= 1 else None
     return None
 
 
@@ -855,52 +681,7 @@ def _normalize_clock(value: Any) -> str | None:
     return f"{hour:02d}:{minute:02d}"
 
 
-def _extract_clock_preferences(raw_text: str) -> tuple[str | None, str | None]:
-    """Extract explicit day-boundary hints for the offline fallback only."""
-    marker_hours = {
-        "凌晨": 5,
-        "清晨": 6,
-        "早上": 8,
-        "上午": 9,
-        "中午": 12,
-        "下午": 14,
-        "傍晚": 17,
-        "晚上": 19,
-    }
-    departure: str | None = None
-    return_time: str | None = None
-    for marker, hour in marker_hours.items():
-        if re.search(rf"{marker}[^，。；,;]{{0,8}}(?:从|出发|启程)", raw_text):
-            departure = f"{hour:02d}:00"
-        if re.search(rf"(?:返程|返回|回到|回来)[^，。；,;]{{0,8}}{marker}", raw_text):
-            return_time = f"{hour:02d}:00"
-    prefix_departure = re.search(
-        r"(早上|上午|中午|下午|傍晚|晚上)\s*(\d{1,2})(?:[:：点时](\d{1,2}))?"
-        r"[^，。；,;]{0,8}(?:从|出发|启程)",
-        raw_text,
-    )
-    if prefix_departure:
-        marker = prefix_departure.group(1)
-        hour = int(prefix_departure.group(2))
-        minute = int(prefix_departure.group(3) or 0)
-        if marker in {"下午", "傍晚", "晚上"} and hour < 12:
-            hour += 12
-        if marker == "中午" and hour < 11:
-            hour += 12
-        departure = f"{hour:02d}:{minute:02d}"
-    explicit_departure = re.search(
-        r"(?:从|出发|启程)[^，。；,;]{0,12}?(早上|上午|中午|下午|傍晚|晚上)?"
-        r"\s*(\d{1,2})(?:[:：点时](\d{1,2}))?",
-        raw_text,
-    )
-    if explicit_departure:
-        marker = explicit_departure.group(1)
-        hour = int(explicit_departure.group(2))
-        minute = int(explicit_departure.group(3) or 0)
-        if marker in {"下午", "傍晚", "晚上"} and hour < 12:
-            hour += 12
-        if marker == "中午" and hour < 11:
-            hour += 12
-        if 0 <= hour <= 23 and 0 <= minute <= 59:
-            departure = f"{hour:02d}:{minute:02d}"
-    return departure, return_time
+# Compatibility symbol retained for callers that import the old helper. The
+# implementation is intentionally Agent-free: only literal dates are kept.
+def deterministic_extract(raw_text: str, today: date) -> dict[str, Any]:
+    return _extract_literal_constraints(raw_text, today)

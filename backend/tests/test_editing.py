@@ -183,12 +183,18 @@ def test_semantic_edit_adds_meal_near_selected_stage_without_activity_selection(
             current_day_id="day_2",
             current_target_id="stage_return",
         ),
+        agent_intent={
+            "intent": "add",
+            "category": "meals",
+            "day_id": "day_2",
+            "target_stage_id": "stage_return",
+        },
     )
 
     assert global_replan is False
     assert patch is not None and patch.operation == "add"
     assert patch.proposed_value["candidate"]["place"]["name"] == "阳新服务区餐厅"
-    assert "请确认修改预览" in message
+    assert "修改预览" in message
 
 
 def test_map_point_creates_preview_without_mutating_trip():
@@ -236,7 +242,13 @@ def test_semantic_add_prefers_named_candidate_over_first_candidate():
     _, patch, _ = interpret_edit_intent(
         trip,
         state,
-        EditIntentRequest(message="第 1 天添加花径公园", current_day_id="day_1"),
+        EditIntentRequest(message="添加候选", current_day_id="day_1"),
+        agent_intent={
+            "intent": "add",
+            "category": "attractions",
+            "day_id": "day_1",
+            "candidate_id": "target",
+        },
     )
 
     assert patch is not None
@@ -267,7 +279,12 @@ def test_semantic_meal_request_can_use_route_service_without_selected_stage():
     message, patch, _ = interpret_edit_intent(
         trip,
         state,
-        EditIntentRequest(message="在返程服务区安排午饭", current_day_id="day_1"),
+        EditIntentRequest(message="安排餐饮", current_day_id="day_1"),
+        agent_intent={
+            "intent": "add",
+            "category": "meals",
+            "day_id": "day_1",
+        },
     )
 
     assert patch is not None
@@ -290,7 +307,14 @@ def test_semantic_duration_can_shrink_for_more_attractions():
     _, patch, _ = interpret_edit_intent(
         trip,
         state,
-        EditIntentRequest(message="第1天多加一个景点，顺路短停", current_day_id="day_1"),
+        EditIntentRequest(message="增加候选", current_day_id="day_1"),
+        agent_intent={
+            "intent": "add",
+            "category": "attractions",
+            "day_id": "day_1",
+            "candidate_id": "a",
+            "duration_minutes": 60,
+        },
     )
 
     assert patch is not None

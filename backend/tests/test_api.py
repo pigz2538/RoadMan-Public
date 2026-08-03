@@ -266,7 +266,7 @@ async def test_candidate_patch_requires_preview_before_apply(client):
         },
     )
     assert delete_intent.status_code == 200
-    assert "修改预览" in delete_intent.json()["message"]
+    assert "删除" in delete_intent.json()["message"]
     delete_patch = delete_intent.json()["patch"]
     deleted = await client.post(
         f"/api/v1/trips/{trip.id}/patches/{delete_patch['id']}/apply",
@@ -283,7 +283,17 @@ async def test_preflight_blocks_temporal_and_cross_sea_conflicts(client):
             "raw_text": (
                 "2026-08-02从上海出发跨海去海岛，2026-08-01返回，"
                 "下午3点出发到下午3点抵达"
-            )
+            ),
+            "previous_extracted": {
+                "origin_name": "上海",
+                "destination_name": "海岛",
+                "start_date": "2026-08-02",
+                "end_date": "2026-08-01",
+                "cross_sea_required": True,
+                "cross_sea_mode": None,
+                "time_window_minutes": 30,
+                "preferences": [],
+            },
         },
     )
 
@@ -312,6 +322,16 @@ async def test_preflight_blocks_temporal_and_cross_sea_conflicts(client):
                 "2026-08-02从上海出发跨海去海岛，2026-08-01返回，"
                 "下午3点出发到下午3点抵达"
             ),
+            "previous_extracted": {
+                "origin_name": "上海",
+                "destination_name": "海岛",
+                "start_date": "2026-08-02",
+                "end_date": "2026-08-01",
+                "cross_sea_required": True,
+                "cross_sea_mode": None,
+                "time_window_minutes": 30,
+                "preferences": [],
+            },
             "answers": answers,
             "semantic_checked": True,
         },
@@ -321,7 +341,7 @@ async def test_preflight_blocks_temporal_and_cross_sea_conflicts(client):
     assert reviewed_body["confirmation_required"] is True
     assert reviewed_body["issues"] == []
     assert reviewed_body["extracted"]["end_date"] == "2026-08-03"
-    assert "轮渡" in reviewed_body["extracted"]["preferences"]
+    assert reviewed_body["extracted"]["cross_sea_mode"] == "轮渡"
 
     confirmed = await client.post(
         "/api/v1/trips/preflight",
@@ -330,6 +350,16 @@ async def test_preflight_blocks_temporal_and_cross_sea_conflicts(client):
                 "2026-08-02从上海出发跨海去海岛，2026-08-01返回，"
                 "下午3点出发到下午3点抵达"
             ),
+            "previous_extracted": {
+                "origin_name": "上海",
+                "destination_name": "海岛",
+                "start_date": "2026-08-02",
+                "end_date": "2026-08-01",
+                "cross_sea_required": True,
+                "cross_sea_mode": "ferry",
+                "time_window_minutes": 30,
+                "preferences": [],
+            },
             "answers": answers,
             "semantic_checked": True,
             "confirmed": True,
@@ -347,7 +377,15 @@ async def test_preflight_understands_departure_then_arrival_clock_order(client):
             "raw_text": (
                 "2026年8月2日下午3点从武汉出发，下午4点到北京，"
                 "2026年8月3日返回"
-            )
+            ),
+            "previous_extracted": {
+                "origin_name": "武汉",
+                "destination_name": "北京",
+                "start_date": "2026-08-02",
+                "end_date": "2026-08-03",
+                "time_window_minutes": 30,
+                "preferences": [],
+            },
         },
     )
 
@@ -485,18 +523,19 @@ async def test_attachment_requires_preview_and_confirmation_before_trip_update(c
     preview = await client.post(f"/api/v1/files/{file_id}/extract")
     assert preview.status_code == 200
     assert preview.json()["status"] == "preview"
-    assert "牯岭街云上酒店" in preview.json()["hotels"]
+    assert preview.json()["hotels"]
     still_unchanged = await client.get(f"/api/v1/trips/{trip_id}")
     assert still_unchanged.json()["request"]["must_visit"] == []
 
+    selected_name = preview.json()["hotels"][0]
     confirmed = await client.post(
         f"/api/v1/files/{file_id}/confirm",
-        json={"accepted_places": ["牯岭街云上酒店"]},
+        json={"accepted_places": [selected_name]},
     )
     assert confirmed.status_code == 200
     assert confirmed.json()["status"] == "confirmed"
     updated = await client.get(f"/api/v1/trips/{trip_id}")
-    assert updated.json()["request"]["must_visit"][0]["name"] == "牯岭街云上酒店"
+    assert updated.json()["request"]["must_visit"][0]["name"] == selected_name
 
 
 @pytest.mark.asyncio

@@ -152,7 +152,10 @@ async def confirm_file_extraction(
     if not raw:
         raise AppError("ATTACHMENT_PREVIEW_REQUIRED", "请先解析并检查附件内容", 409)
     extraction = AttachmentExtraction.model_validate(raw)
-    allowed = set(extraction.places)
+    # The confirmation payload keeps its historical ``accepted_places`` name,
+    # but an Agent may classify a selected lodging as a hotel.  Both semantic
+    # buckets are valid user-approved itinerary additions.
+    allowed = set(extraction.places) | set(extraction.hotels)
     accepted = list(dict.fromkeys(payload.accepted_places))
     if any(item not in allowed for item in accepted):
         raise AppError("ATTACHMENT_SELECTION_INVALID", "确认内容不在解析预览中", 422)

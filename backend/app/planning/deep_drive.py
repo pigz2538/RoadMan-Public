@@ -7,7 +7,7 @@ from typing import Any
 
 from ..domain.models import Activity, DayItemRef, EnergyEstimate, PlaceRef, PlanWarning
 
-MOUNTAIN_WORDS = ("山", "岭", "坡", "峡", "峰")
+ELEVATED_ROUTE_THRESHOLD_M = 300.0
 
 
 def default_vehicle() -> dict[str, Any]:
@@ -292,11 +292,10 @@ def verify_deep_drive_plan(
 
 def _energy_use(stage: dict[str, Any], vehicle: dict[str, Any]) -> tuple[float, str, float]:
     distance = float(stage["distance_km"])
-    mountain = any(
-        word in f"{stage['origin']['name']}{stage['destination']['name']}"
-        for word in MOUNTAIN_WORDS
-    )
-    factor = 1.12 if mountain else 1.0
+    # Route difficulty comes from the elevation skill, not from guessing from
+    # Chinese place-name characters such as “山” or “峰”.
+    elevation_gain = float(stage.get("elevation_gain_m") or 0)
+    factor = 1.12 if elevation_gain >= ELEVATED_ROUTE_THRESHOLD_M else 1.0
     consumption = float(
         vehicle.get("consumption_per_100km")
         or (18 if vehicle.get("power_type") == "electric" else 7.5)
@@ -356,11 +355,8 @@ def _apply_vehicle_restrictions(
     warnings: list[dict[str, Any]],
     tags: list[str],
 ) -> None:
-    mountain = any(
-        word in f"{stage['origin']['name']}{stage['destination']['name']}"
-        for word in MOUNTAIN_WORDS
-    )
-    if mountain and not vehicle.get("mountain_ready", True):
+    elevation_gain = float(stage.get("elevation_gain_m") or 0)
+    if elevation_gain >= ELEVATED_ROUTE_THRESHOLD_M and not vehicle.get("mountain_ready", True):
         warnings.append(_warning("MOUNTAIN_CAPABILITY", "车辆未标记为适合山路", "error"))
         tags.append("山路适配")
     if float(vehicle.get("height_m") or 0) >= 2.2:
