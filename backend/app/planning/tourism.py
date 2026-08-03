@@ -18,6 +18,13 @@ def schedule_tourism_activities(
         for item in candidates.get("attractions", [])
         if item.get("place", {}).get("name")
     }
+    used_attraction_names: set[str] = set()
+    used_meal_names = {
+        item.get("place", {}).get("name")
+        for day in day_plans
+        for item in day.get("activities", [])
+        if item.get("type") == "meal" and item.get("place", {}).get("name")
+    }
 
     for day_index, day in enumerate(day_plans):
         # Some agent-produced day dictionaries omit the optional model id.
@@ -30,8 +37,25 @@ def schedule_tourism_activities(
         # deterministic fallback instead of failing the whole planning job at
         # the final persistence step.
         day.setdefault("title", f"第 {day.get('day_index', day_index + 1)} 天")
-        activities = list(day.get("activities", []))
+        activities: list[dict[str, Any]] = []
+        for activity in list(day.get("activities", [])):
+            name = activity.get("place", {}).get("name")
+            if activity.get("type") == "attraction" and name:
+                if name in used_attraction_names:
+                    # Agent candidates can repeat the destination attraction
+                    # on every day. Keep the first occurrence and let the
+                    # ranked pool fill later days with different places.
+                    continue
+                used_attraction_names.add(name)
+            activities.append(activity)
         stages = sorted(day.get("stages", []), key=lambda item: item.get("sequence", 0))
+        _ensure_meals(
+            day,
+            activities,
+            stages,
+            candidates.get("meals", []),
+            used_names=used_meal_names,
+        )
         _reschedule_meals(day, activities, stages)
         existing_names = {
             item.get("place", {}).get("name")
@@ -40,7 +64,11 @@ def schedule_tourism_activities(
         }
         for stage_index, stage in enumerate(stages):
             candidate = attraction_sources.get(stage.get("destination", {}).get("name"))
-            if not candidate or candidate["place"]["name"] in existing_names:
+            if (
+                not candidate
+                or candidate["place"]["name"] in existing_names
+                or candidate["place"]["name"] in used_attraction_names
+            ):
                 continue
             start_at = datetime.fromisoformat(stage["planned_end"])
             next_start = (
@@ -86,6 +114,7 @@ def schedule_tourism_activities(
                 )
             )
             existing_names.add(candidate["place"]["name"])
+            used_attraction_names.add(candidate["place"]["name"])
 
         # Use remaining safe gaps for a second/third attraction when the day
         # has enough slack.  The old implementation only attached the POI
@@ -117,7 +146,7 @@ def schedule_tourism_activities(
                     break
                 place = candidate.get("place") or {}
                 name = place.get("name")
-                if not name or name in existing_names:
+                if not name or name in existing_names or name in used_attraction_names:
                     continue
                 slot = _closest_free_slot(
                     datetime.combine(
@@ -166,6 +195,7 @@ def schedule_tourism_activities(
                 occupied.append((activity_start, activity_start + timedelta(minutes=duration)))
                 scheduled_attractions.append(activities[-1])
                 existing_names.add(name)
+                used_attraction_names.add(name)
 
         if (
             day_index < len(day_plans) - 1
@@ -232,6 +262,109 @@ def schedule_tourism_activities(
             *[{"type": "activity", "id": item["id"]} for item in activities],
         ]
     return day_plans
+
+
+def _ensure_meals(
+    day: dict[str, Any],
+    activities: list[dict[str, Any]],
+    stages: list[dict[str, Any]],
+    candidates: list[dict[str, Any]],
+    *,
+    used_names: set[str | None],
+) -> None:
+    """Guarantee visible breakfast, lunch and dinner slots for every day.
+
+    Meal candidates are optional enrichment.  When a provider returns no
+    restaurant, keep the time block with a clearly labelled nearby-food
+    placeholder instead of leaving the afternoon/evening empty or inventing a
+    route to a restaurant.
+    """
+    definitions = [
+        ("早餐", time(6, 0), time(9, 30), time(7, 30)),
+        ("午餐", time(11, 0), time(15, 0), time(12, 0)),
+        ("晚餐", time(17, 0), time(22, 0), time(18, 30)),
+    ]
+    day_date = datetime.fromisoformat(f"{day['date']}T00:00:00+08:00").date()
+    existing_meals = [item for item in activities if item.get("type") == "meal"]
+    occupied = [
+        *[
+            (
+                datetime.fromisoformat(stage["planned_start"]),
+                datetime.fromisoformat(stage["planned_end"]),
+            )
+            for stage in stages
+            if stage.get("planned_start") and stage.get("planned_end")
+        ],
+        *_occupied_ranges([item for item in activities if item.get("type") != "meal"]),
+        *_occupied_ranges(existing_meals),
+    ]
+    available = [item for item in candidates if item.get("place", {}).get("name")]
+    candidate_cursor = 0
+    for meal_index, (label, window_start, window_end, preferred_time) in enumerate(definitions):
+        if meal_index < len(existing_meals):
+            used_names.add(existing_meals[meal_index].get("place", {}).get("name"))
+            continue
+        candidate = next(
+            (
+                item
+                for item in available[candidate_cursor:] + available[:candidate_cursor]
+                if item.get("place", {}).get("name") not in used_names
+            ),
+            None,
+        )
+        if candidate:
+            candidate_cursor = (available.index(candidate) + 1) % len(available)
+            place = dict(candidate["place"])
+            used_names.add(place.get("name"))
+        else:
+            anchor = next(
+                (
+                    stage.get("destination")
+                    for stage in reversed(stages)
+                    if stage.get("destination")
+                ),
+                next((stage.get("origin") for stage in stages if stage.get("origin")), {}),
+            )
+            place = {
+                "name": f"{anchor.get('name', '目的地')}附近{label}",
+                "city": anchor.get("city"),
+                "coordinates": anchor.get("coordinates"),
+            }
+        slot = _closest_free_slot(
+            datetime.combine(day_date, window_start, tzinfo=SHANGHAI),
+            datetime.combine(day_date, window_end, tzinfo=SHANGHAI),
+            preferred=datetime.combine(day_date, preferred_time, tzinfo=SHANGHAI),
+            duration_minutes=45,
+            occupied=occupied,
+            minimum_minutes=30,
+        )
+        if not slot:
+            # A full-day transfer may leave no mathematically free slot. Do
+            # not fabricate an overlapping restaurant; the verifier will
+            # surface the constrained day for adjustment.
+            continue
+        start_at, duration = slot
+        activity = _activity(
+            day=day,
+            sequence=len(activities),
+            activity_type="meal",
+            place=place,
+            start_at=start_at,
+            duration_minutes=duration,
+            sources=candidate.get("source_records", []) if candidate else [],
+            opening_text="营业时间与排队情况以当天为准",
+            ticket_or_price=candidate.get("ticket_or_price") if candidate else None,
+            user_note=(
+                f"{label}；{candidate.get('user_note') or '出发前确认餐厅营业状态'}"
+                if candidate
+                else f"{label}；未返回可靠餐饮候选，可在附近灵活选择"
+            ),
+            description=candidate.get("description") if candidate else None,
+            image_url=candidate.get("image_url") if candidate else None,
+            detail_url=candidate.get("detail_url") if candidate else None,
+        )
+        activities.append(activity)
+        occupied.append((start_at, start_at + timedelta(minutes=duration)))
 
 
 def review_daily_schedule(

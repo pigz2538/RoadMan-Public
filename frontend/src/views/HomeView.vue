@@ -3,10 +3,11 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   Bell, ChevronDown, CircleUserRound, CloudSun, Grid2X2, Paperclip,
-  History, Mic, Route, Send, Settings, SlidersHorizontal, UserRound, CarFront,
+  History, Mic, Route, Send, Settings, SlidersHorizontal, UserRound, CarFront, Trash2,
 } from '@lucide/vue'
 import {
   createTrip,
+  deleteTrip,
   fetchWeatherForecast,
   listTrips,
   preflightTrip,
@@ -148,6 +149,17 @@ function openHistoryTrip(trip: Trip) {
   }
 }
 
+async function removeHistoryTrip(event: MouseEvent, trip: Trip) {
+  event.stopPropagation()
+  if (!window.confirm(`确定删除“${trip.title}”吗？删除后无法从历史规划恢复。`)) return
+  try {
+    await deleteTrip(trip.id)
+    historyTrips.value = historyTrips.value.filter((item) => item.id !== trip.id)
+  } catch {
+    window.alert('删除失败，请稍后重试。')
+  }
+}
+
 watch(prompt, (value) => {
   if (typeof window === 'undefined') return
   if (value.trim()) window.sessionStorage.setItem(PROMPT_STORAGE_KEY, value)
@@ -260,16 +272,23 @@ function activate(label: string) {
       <aside v-if="historyOpen" class="history-popover glass-card" aria-label="历史规划">
         <header><strong>历史规划</strong><button type="button" @click="loadHistory">刷新</button></header>
         <p v-if="!historyTrips.length" class="history-empty">还没有保存的规划，完成一次规划后会自动保存在这里。</p>
-        <button
+        <div
           v-for="trip in historyTrips"
           :key="trip.id"
-          type="button"
           class="history-item"
+          role="button"
+          tabindex="0"
           @click="openHistoryTrip(trip)"
+          @keydown.enter="openHistoryTrip(trip)"
         >
-          <strong>{{ trip.title }}</strong>
-          <span>{{ trip.status === 'completed' ? '规划完成' : trip.status === 'planning' ? '正在规划' : '待继续' }} · {{ trip.days.length }} 天</span>
-        </button>
+          <span class="history-item-main">
+            <strong>{{ trip.title }}</strong>
+            <span>{{ trip.status === 'completed' ? '规划完成' : trip.status === 'planning' ? '正在规划' : '待继续' }} · {{ trip.days.length }} 天</span>
+          </span>
+          <span class="history-item-actions">
+            <button type="button" aria-label="删除历史规划" title="删除" @click="removeHistoryTrip($event, trip)"><Trash2 :size="15" /></button>
+          </span>
+        </div>
       </aside>
     </Transition>
 

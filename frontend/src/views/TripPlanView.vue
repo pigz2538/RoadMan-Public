@@ -48,6 +48,7 @@ const mapPickMessage = ref('')
 let pollingTimer: number | undefined
 let refreshInFlight = false
 let refreshQueued = false
+let lastRefreshStartedAt = 0
 const stageDrag = { active: false, moved: false, startX: 0, startScrollLeft: 0, pointerId: -1 }
 const categories = ['景点', '住宿', '餐饮', '服务'] as const
 const { connect } = useTripSSE((event) => {
@@ -58,7 +59,7 @@ const { connect } = useTripSSE((event) => {
     || event.event === 'clarification_required'
     || event.event === 'planning_failed'
   ) {
-    void refreshPlanning()
+    queuePlanningRefresh()
   }
 })
 
@@ -172,7 +173,9 @@ async function refreshPlanning() {
     return
   }
   refreshInFlight = true
+  lastRefreshStartedAt = Date.now()
   if (pollingTimer) window.clearTimeout(pollingTimer)
+  pollingTimer = undefined
   try {
     const snapshot = await fetchPlanning(tripId)
     planningSnapshot.value = snapshot
@@ -193,7 +196,7 @@ async function refreshPlanning() {
       ensureCurrentSelection()
       await nextTick()
       centerCurrentStage('smooth')
-      pollingTimer = window.setTimeout(() => void refreshPlanning(), 900)
+      queuePlanningRefresh(900)
     }
   } catch (error) {
     planningError.value = error instanceof Error ? error.message : '无法读取规划进度'
@@ -201,9 +204,19 @@ async function refreshPlanning() {
     refreshInFlight = false
     if (refreshQueued && planningSnapshot.value?.status !== 'completed' && planningSnapshot.value?.status !== 'failed') {
       refreshQueued = false
-      pollingTimer = window.setTimeout(() => void refreshPlanning(), 120)
+      queuePlanningRefresh(120)
     }
   }
+}
+
+function queuePlanningRefresh(delay = 0) {
+  if (pollingTimer) return
+  const elapsed = Date.now() - lastRefreshStartedAt
+  const wait = Math.max(delay, Math.max(0, 650 - elapsed))
+  pollingTimer = window.setTimeout(() => {
+    pollingTimer = undefined
+    void refreshPlanning()
+  }, wait)
 }
 
 function ensureCurrentSelection() {
@@ -298,7 +311,7 @@ async function submitClarification() {
   try {
     planningSnapshot.value = await answerClarification(String(route.params.tripId), answer)
     clarificationAnswer.value = ''
-    pollingTimer = window.setTimeout(() => void refreshPlanning(), 500)
+    queuePlanningRefresh(500)
   } catch (error) {
     planningError.value = error instanceof Error ? error.message : '提交补充信息失败'
   }
@@ -472,7 +485,7 @@ async function retryPlanning() {
   planningError.value = ''
   try {
     planningSnapshot.value = await startPlanning(String(route.params.tripId))
-    pollingTimer = window.setTimeout(() => void refreshPlanning(), 500)
+    queuePlanningRefresh(500)
   } catch (error) {
     planningError.value = error instanceof Error ? error.message : '规划任务无法重新启动'
   }
@@ -555,6 +568,7 @@ function selectStageFromCard(item: (typeof allStages.value)[number]) {
 onMounted(load)
 onUnmounted(() => {
   if (pollingTimer) window.clearTimeout(pollingTimer)
+  pollingTimer = undefined
   refreshQueued = false
 })
 watch(

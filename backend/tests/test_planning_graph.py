@@ -85,6 +85,16 @@ def test_offline_requirement_fallback_keeps_semantic_couple_size():
     assert extracted["travelers"] == 2
 
 
+def test_deterministic_extract_reads_iso_dates_adjacent_to_chinese_text():
+    extracted = deterministic_extract(
+        "2026-08-02从上海出发，2026-08-01返回",
+        date(2026, 8, 3),
+    )
+
+    assert extracted["start_date"] == "2026-08-02"
+    assert extracted["end_date"] == "2026-08-01"
+
+
 @pytest.mark.asyncio
 async def test_requirement_agent_decides_semantic_party_size(monkeypatch):
     class FakeResponse:

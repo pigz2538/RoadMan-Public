@@ -77,12 +77,13 @@ def test_tourism_scheduler_adds_attraction_and_overnight_hotel():
 
     scheduled = schedule_tourism_activities(days, candidates)
 
-    assert [item["type"] for item in scheduled[0]["activities"]] == [
-        "attraction",
-        "hotel",
-    ]
-    assert scheduled[0]["activities"][0]["ticket_or_price"]["minimum"] == 80
-    hotel = scheduled[0]["activities"][1]
+    first_day_types = [item["type"] for item in scheduled[0]["activities"]]
+    assert first_day_types.count("meal") == 3
+    assert "attraction" in first_day_types
+    assert "hotel" in first_day_types
+    attraction = next(item for item in scheduled[0]["activities"] if item["type"] == "attraction")
+    assert attraction["ticket_or_price"]["minimum"] == 80
+    hotel = next(item for item in scheduled[0]["activities"] if item["type"] == "hotel")
     assert hotel["required"] is True
     assert hotel["planned_end"].startswith("2026-08-03")
     assert hotel["source_records"][0]["provider"] == "高德地图"
@@ -148,6 +149,70 @@ def test_tourism_scheduler_materializes_missing_day_id():
 
     assert scheduled[0]["id"] == "day_1"
     assert scheduled[0]["title"] == "第 1 天"
+
+
+def test_tourism_scheduler_fills_meals_without_routes_and_rotates_attractions():
+    days = [
+        {"id": "day_1", "date": "2026-08-02", "items": [], "activities": [], "stages": []},
+        {"id": "day_2", "date": "2026-08-03", "items": [], "activities": [], "stages": []},
+    ]
+    candidates = {
+        "attractions": [
+            {"place": {"name": "古镇博物馆"}},
+            {"place": {"name": "水乡花园"}},
+            {"place": {"name": "运河夜景"}},
+        ],
+        "hotels": [],
+        "meals": [],
+    }
+
+    scheduled = schedule_tourism_activities(days, candidates)
+
+    for day in scheduled:
+        meals = [item for item in day["activities"] if item["type"] == "meal"]
+        assert len(meals) == 3
+        assert all(item["place"]["name"] for item in meals)
+    first_attractions = {
+        item["place"]["name"]
+        for item in scheduled[0]["activities"]
+        if item["type"] == "attraction"
+    }
+    second_attractions = {
+        item["place"]["name"]
+        for item in scheduled[1]["activities"]
+        if item["type"] == "attraction"
+    }
+    assert first_attractions.isdisjoint(second_attractions)
+
+
+def test_tourism_scheduler_removes_repeated_agent_attraction_activities():
+    repeated = lambda day_id, date_value: {
+        "id": day_id,
+        "date": date_value,
+        "items": [],
+        "stages": [],
+        "activities": [{
+            "id": f"activity_{day_id}",
+            "type": "attraction",
+            "place": {"name": "乌镇西栅景区"},
+            "planned_start": f"{date_value}T10:00:00+08:00",
+            "planned_end": f"{date_value}T11:00:00+08:00",
+            "duration_minutes": 60,
+        }],
+    }
+    days = [repeated("day_1", "2026-08-02"), repeated("day_2", "2026-08-03")]
+
+    scheduled = schedule_tourism_activities(
+        days,
+        {"attractions": [], "hotels": [], "meals": []},
+    )
+
+    assert sum(
+        item["place"]["name"] == "乌镇西栅景区"
+        for day in scheduled
+        for item in day["activities"]
+        if item["type"] == "attraction"
+    ) == 1
 
 
 @pytest.mark.asyncio

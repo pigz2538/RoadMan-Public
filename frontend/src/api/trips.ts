@@ -91,6 +91,7 @@ async function json<T>(response: Response): Promise<T> {
     const payload = await response.json().catch(() => null)
     throw new Error(payload?.error?.message || `请求失败（${response.status}）`)
   }
+  if (response.status === 204) return undefined as T
   return response.json()
 }
 
@@ -120,6 +121,12 @@ export async function createTrip(
 
 export async function listTrips(): Promise<Trip[]> {
   return json(await fetch(`${API_BASE}/api/v1/trips`))
+}
+
+export async function deleteTrip(tripId: string): Promise<void> {
+  await json(await fetch(`${API_BASE}/api/v1/trips/${tripId}`, {
+    method: 'DELETE',
+  }))
 }
 
 export async function fetchWeatherForecast(

@@ -85,10 +85,14 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .history-popover header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; color: #173458; }
 .history-popover header button { border: 0; border-radius: 999px; padding: 5px 9px; color: #3472d6; background: #eef5ff; cursor: pointer; font-size: 12px; }
 .history-empty { margin: 18px 5px; color: #8796aa; font-size: 13px; line-height: 1.6; }
-.history-item { width: 100%; display: grid; gap: 4px; margin-top: 7px; padding: 10px 11px; border: 1px solid #e0e9f5; border-radius: 12px; background: rgba(255,255,255,.75); text-align: left; cursor: pointer; }
+.history-item { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; margin-top: 7px; padding: 10px 11px; border: 1px solid #e0e9f5; border-radius: 12px; background: rgba(255,255,255,.75); text-align: left; cursor: pointer; }
 .history-item:hover { border-color: #9ec5ff; background: #f2f7ff; }
+.history-item-main { display: grid; gap: 4px; min-width: 0; }
 .history-item strong { overflow: hidden; color: #24496f; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
-.history-item span { color: #8191a6; font-size: 11px; }
+.history-item-main > span { color: #8191a6; font-size: 11px; }
+.history-item-actions { display: flex; align-items: center; }
+.history-item-actions button { display: grid; place-items: center; padding: 5px; border: 0; border-radius: 8px; color: #8a9bb1; background: transparent; cursor: pointer; }
+.history-item-actions button:hover { color: #c34747; background: #fff0ef; }
 .notification { position: relative; width: 48px; height: 48px; }
 .notification i { position: absolute; width: 9px; height: 9px; border-radius: 50%; background: #ff4d58; top: 7px; right: 7px; box-shadow: 0 0 0 3px white; }
 .account-dropdown {

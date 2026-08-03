@@ -294,7 +294,10 @@ def deterministic_extract(raw_text: str, today: date) -> dict[str, Any]:
     result: dict[str, Any] = {"preferences": []}
     explicit_dates = [
         date.fromisoformat(value).isoformat()
-        for value in re.findall(r"\b\d{4}-\d{2}-\d{2}\b", raw_text)
+        # Chinese characters are Unicode word characters, so ``\b`` does not
+        # form a boundary between a date and the adjacent character (for
+        # example ``2026-08-02从``).  Use digit lookarounds instead.
+        for value in re.findall(r"(?<!\d)\d{4}-\d{2}-\d{2}(?!\d)", raw_text)
     ]
     for month, day_value in re.findall(r"(?<!\d)(\d{1,2})[./](\d{1,2})(?!\d)", raw_text):
         try:

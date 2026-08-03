@@ -45,14 +45,13 @@ export const useTripStore = defineStore('trip', () => {
   }
 
   function addPlanningEvent(event: PlanningEvent) {
-    const previous = planningEvents.value.at(-1)
-    const duplicate = (item: PlanningEvent | undefined) => Boolean(
-      item?.event === event.event
-      && item?.node === event.node
-      && item?.label === event.label
-      && item?.progress === event.progress,
-    )
-    if (duplicate(previous) || duplicate(queuedPlanningEvents.value.at(-1))) return
+    // The worker emits a node_started/plan_updated pair for the same step.
+    // Treat that pair as one visible step; otherwise the progress page appears
+    // to refresh forever and shows duplicate entries such as “日程拆分”.
+    const eventKey = (item: PlanningEvent) =>
+      `${item.node || item.event}:${item.progress}:${item.tool || ''}`
+    const key = eventKey(event)
+    if ([...planningEvents.value, ...queuedPlanningEvents.value].some((item) => eventKey(item) === key)) return
     queuedPlanningEvents.value = [...queuedPlanningEvents.value, event]
     playNextPlanningEvent()
   }
