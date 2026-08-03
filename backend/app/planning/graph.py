@@ -28,8 +28,9 @@ from .deep_drive import (
     enrich_deep_drive_plan,
     verify_deep_drive_plan,
 )
-from .llm import OllamaPoiCurator, OllamaRequirementExtractor
-from .recommendations import rank_tourism_candidates
+from .event_research import event_research_summary, research_special_events
+from .llm import OllamaPoiCurator, OllamaPoiRanker, OllamaRequirementExtractor
+from .recommendations import apply_agent_ranking, rank_tourism_candidates
 from .poi_enrichment import enrich_tourism_candidates
 from .state import RoadManState
 from .tourism import review_daily_schedule, schedule_tourism_activities, verify_tourism_plan
@@ -45,6 +46,7 @@ def build_planning_graph(
 ):
     extractor = OllamaRequirementExtractor(settings)
     poi_curator = OllamaPoiCurator(settings)
+    poi_ranker = OllamaPoiRanker(settings)
 
     async def emit(
         state: RoadManState,
@@ -93,18 +95,64 @@ def build_planning_graph(
         current["preferences"] = list(
             dict.fromkeys([*current.get("preferences", []), *extracted.get("preferences", [])])
         )
+        current["special_events"] = list(
+            dict.fromkeys([*current.get("special_events", []), *extracted.get("special_events", [])])
+        )
         return {
             "trip_request": current,
             "progress": {"node": "extract_trip_request", "value": 15},
+        }
+
+    async def research_events(state: RoadManState) -> dict[str, Any]:
+        request = state.get("trip_request", {})
+        events = list(request.get("special_events", []))
+        if not events:
+            return {"special_event_research": [], "progress": {"node": "research_events", "value": 18}}
+        await emit(
+            state,
+            "research_events",
+            "事件 Agent 正在核对极大值、观测窗口与公开来源",
+            18,
+            event="tool_started",
+            tool="web.event_research",
+        )
+        try:
+            year = date.fromisoformat(request.get("start_date", "")).year
+        except (TypeError, ValueError):
+            year = date.today().year
+        research = await research_special_events(
+            events,
+            year=year,
+            destination=(request.get("destination") or {}).get("name"),
+        )
+        await emit(
+            state,
+            "research_events",
+            "事件 Agent 已返回公开资料，安排时会避开不可验证的硬时间承诺",
+            19,
+            event="tool_completed",
+            tool="web.event_research",
+        )
+        return {
+            "special_event_research": research,
+            "warnings": [
+                *state.get("warnings", []),
+                *[
+                    {
+                        "code": "SPECIAL_EVENT_REVIEW",
+                        "message": event_research_summary(item),
+                        "severity": "info",
+                    }
+                    for item in research
+                ],
+            ],
+            "progress": {"node": "research_events", "value": 19},
         }
 
     async def apply_defaults(state: RoadManState) -> dict[str, Any]:
         await emit(state, "apply_defaults", "正在应用可见默认值", 22)
         request = dict(state["trip_request"])
         defaults = list(request.get("defaults_applied", []))
-        if request.get("travelers") is None:
-            request["travelers"] = 1
-            defaults.append("travelers=1")
         if request.get("start_date") and not request.get("end_date"):
             request["end_date"] = (
                 date.fromisoformat(request["start_date"]) + timedelta(days=1)
@@ -590,6 +638,30 @@ def build_planning_graph(
                 event="tool_completed",
                 tool="baidu.baike",
             )
+        if settings.ollama_api_key:
+            await emit(
+                state,
+                "rank_tourism_candidates",
+                "POI Agent 姝ｅ湪鏍规嵁鍋忓ソ涓庣壒娈婁綋楠岄噸鎺掑€欓€夊苟璇存槑鐞嗙敱",
+                68,
+                event="tool_started",
+                tool="ollama.poi_ranker",
+            )
+            agent_decisions = await poi_ranker.rank(
+                candidates,
+                state["trip_request"].get("preferences", []),
+                state["trip_request"].get("special_events", []),
+            )
+            if agent_decisions:
+                candidates = apply_agent_ranking(candidates, agent_decisions)
+            await emit(
+                state,
+                "rank_tourism_candidates",
+                "POI Agent 宸插畬鎴愬€欓€夋帓搴忋€佹樉绀虹悊鐢变笌绛嗛€夊€�",
+                68,
+                event="tool_completed",
+                tool="ollama.poi_ranker",
+            )
         await emit(
             state,
             "discover_tourism",
@@ -598,14 +670,14 @@ def build_planning_graph(
                 f"{len(candidates['meals'])} 个餐饮和 "
                 f"{len(candidates['hotels'])} 个住宿候选"
             ),
-            67,
+            69,
             event="tool_completed",
             tool="amap.poi",
         )
         return {
             "tourism_candidates": candidates,
             "sources": [*state.get("sources", []), *tourism_sources],
-            "progress": {"node": "discover_tourism", "value": 67},
+            "progress": {"node": "discover_tourism", "value": 69},
         }
 
     async def build_local_routes(state: RoadManState) -> dict[str, Any]:
@@ -613,7 +685,7 @@ def build_planning_graph(
             state,
             "build_local_routes",
             "正在补充目的地公共交通、步行和骑行接驳",
-            68,
+            70,
             event="tool_started",
             tool="amap.poi/amap.route",
         )
@@ -1255,14 +1327,29 @@ def build_planning_graph(
     async def render_markdown(state: RoadManState) -> dict[str, Any]:
         await emit(state, "render_markdown", "正在生成 Markdown 行程安排", 94)
         request = state["trip_request"]
+        traveler_count = request.get("travelers")
+        traveler_label = f"{traveler_count} 人" if traveler_count else "待确认人数"
         lines = [
             f"# {request['origin']['name']}—{request['destination']['name']}自驾行程安排",
             "",
             f"- 日期：{request['start_date']} 至 {request['end_date']}",
-            f"- 出行人数：{request.get('travelers', 1)} 人",
+            f"- 出行人数：{traveler_label}",
             f"- 可见默认值：{', '.join(request.get('defaults_applied', [])) or '无'}",
             "",
         ]
+        if request.get("special_events"):
+            lines.extend([
+                f"- 重点体验：{'、'.join(request['special_events'])}",
+                "- 事件校验：出发前根据官方/专业天文或活动来源复核极大值、开放时间、天气与月相。",
+                "",
+            ])
+        if state.get("special_event_research"):
+            lines.extend(["### 特殊活动核验", ""])
+            for item in state["special_event_research"]:
+                lines.append(f"- {event_research_summary(item)}")
+                for source in (item.get("sources") or [])[:2]:
+                    lines.append(f"  - 来源：{source.get('title') or '公开网页'} {source.get('url') or ''}")
+            lines.append("")
         for day in state.get("day_plans", []):
             day_title = day.get("title") or f"第 {day.get('day_index', 1)} 天"
             lines.extend([f"## {day_title} · {day['date']}", ""])
@@ -1312,6 +1399,7 @@ def build_planning_graph(
     builder = StateGraph(RoadManState)
     builder.add_node("load_context", load_context)
     builder.add_node("extract_trip_request", extract_trip_request)
+    builder.add_node("research_events", research_events)
     builder.add_node("apply_defaults", apply_defaults)
     builder.add_node("validate_required_fields", validate_required_fields)
     builder.add_node("generate_clarification", generate_clarification)
@@ -1332,7 +1420,8 @@ def build_planning_graph(
     builder.add_node("persist_trip", persist_trip)
     builder.add_edge(START, "load_context")
     builder.add_edge("load_context", "extract_trip_request")
-    builder.add_edge("extract_trip_request", "apply_defaults")
+    builder.add_edge("extract_trip_request", "research_events")
+    builder.add_edge("research_events", "apply_defaults")
     builder.add_edge("apply_defaults", "validate_required_fields")
     builder.add_conditional_edges(
         "validate_required_fields",

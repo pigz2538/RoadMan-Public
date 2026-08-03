@@ -17,6 +17,7 @@ from reportlab.pdfbase.cidfonts import UnicodeCIDFont
 from reportlab.pdfbase.ttfonts import TTFError, TTFont
 from reportlab.pdfgen import canvas
 
+from ..core.config import get_settings
 from ..domain.models import Trip
 
 
@@ -45,6 +46,7 @@ def build_report_html(trip: Trip, markdown: str = "") -> str:
     same hierarchy: cover route, curated cards, then day-by-day details.
     """
     route_uri = _png_data_uri(_render_route_map(trip, 1440, 560).getvalue())
+    seen_image_urls: set[str] = set()
     all_activities = [
         activity
         for day in trip.days
@@ -53,7 +55,7 @@ def build_report_html(trip: Trip, markdown: str = "") -> str:
     ]
 
     def card(activity) -> str:
-        image = _download_activity_image(activity.image_url)
+        image = _activity_image(activity, seen_image_urls)
         image_markup = (
             f'<img src="{_image_data_uri(_image_bytes(image))}" alt="{escape(activity.place.name)}">'
             if image else "<div class=\"report-card-placeholder\">RoadMan 精选</div>"
@@ -78,10 +80,12 @@ def build_report_html(trip: Trip, markdown: str = "") -> str:
             for stage in day.stages
         )
         cards = "".join(card(activity) for activity in day.activities if activity.type in {"attraction", "meal", "hotel"})
+        day_route = _png_data_uri(_render_route_map(trip, 1100, 300, days=[day]).getvalue())
         day_sections.append(
             f'<section class="report-day"><div class="report-day-heading"><span>第 {day.day_index} 天</span>'
             f'<h2>{escape(day.title)}</h2><small>{day.date} · {day.total_distance_km:g} km · '
             f'{_format_duration(day.total_drive_minutes)}驾驶</small></div>'
+            f'<img class="day-route" src="{day_route}" alt="第 {day.day_index} 天路线图">'
             f'<ol class="report-stages">{stages}</ol><div class="report-cards">{cards}</div></section>'
         )
     cards = "".join(card(activity) for activity in all_activities[:4])
@@ -104,6 +108,7 @@ h1 {{ margin:16px 0 8px; font-size:42px; }} .subtitle {{ color:#d7e8fb; font-siz
 .report-card-type {{ position:absolute; left:12px; top:12px; padding:5px 9px; border-radius:999px; color:#fff; background:#2377e8dd; font-size:12px; font-weight:800; }}
 .report-card h3 {{ margin:14px 14px 5px; font-size:17px; }} .report-card time,.report-card p,.report-card a {{ display:block; margin:0 14px 9px; color:#657b98; font-size:13px; line-height:1.5; }} .report-card a {{ color:#176fe1; text-decoration:none; font-weight:700; }}
 .report-day {{ margin-top:28px; padding:26px; border:1px solid #d9e6f4; border-radius:24px; background:#f8fbff; }}
+.day-route {{ width:100%; margin:8px 0 18px; border-radius:16px; background:#eef5fc; }}
 .report-day-heading {{ display:flex; align-items:baseline; gap:12px; flex-wrap:wrap; }} .report-day-heading span {{ color:#176fe1; font-weight:800; }} .report-day-heading h2 {{ margin:0; font-size:25px; }} .report-day-heading small {{ color:#7186a0; }}
 .report-stages {{ margin:18px 0; padding-left:25px; color:#385a80; }} .report-stages li {{ margin:8px 0; }} .report-stages b {{ color:#10213e; margin-right:10px; }}
 @media(max-width:800px) {{ body {{ padding:16px; }} .report-cards {{ grid-template-columns:repeat(2,minmax(0,1fr)); }} h1 {{ font-size:30px; }} }}
@@ -240,9 +245,11 @@ def render_pdf(lines: Iterable[str], trip: Trip | None = None) -> bytes:
             document.setFillColorRGB(0.28, 0.39, 0.55)
             document.setFont(font_name, 11)
             document.drawString(42, 766, f"总里程 {day.total_distance_km:g} km   ·   驾驶 {day.total_drive_minutes // 60}h{day.total_drive_minutes % 60}m")
-            day_image = _render_activity_board(trip, 1200, 500, activities=day.activities)
-            document.drawImage(ImageReader(day_image), 42, 395, width=511, height=213, preserveAspectRatio=True)
-            y = 350
+            day_route = _render_route_map(trip, 1200, 300, days=[day])
+            document.drawImage(ImageReader(day_route), 42, 505, width=511, height=128, preserveAspectRatio=True)
+            day_image = _render_activity_board(trip, 1200, 420, activities=day.activities)
+            document.drawImage(ImageReader(day_image), 42, 315, width=511, height=179, preserveAspectRatio=True)
+            y = 275
             document.setFillColorRGB(0.10, 0.20, 0.34)
             for stage in day.stages:
                 line = f"{stage.planned_start:%H:%M}–{stage.planned_end:%H:%M}   {stage.origin.name} → {stage.destination.name}   {stage.distance_km:g} km"
@@ -301,10 +308,14 @@ def render_pptx(lines: Iterable[str], trip: Trip | None = None) -> bytes:
             subtitle.text_frame.text = f"{day.total_distance_km:g} km  ·  驾驶 {day.total_drive_minutes // 60}h{day.total_drive_minutes % 60}m  ·  {len(day.activities)} 项安排"
             subtitle.text_frame.paragraphs[0].font.size = Pt(12)
             slide.shapes.add_picture(
-                _render_activity_board(trip, 1600, 620, activities=day.activities),
-                Inches(0.65), Inches(1.35), width=Inches(12), height=Inches(4.65),
+                _render_route_map(trip, 1600, 300, days=[day]),
+                Inches(0.65), Inches(1.2), width=Inches(12), height=Inches(1.8),
             )
-            body = slide.shapes.add_textbox(Inches(0.85), Inches(6.15), Inches(11.5), Inches(0.9))
+            slide.shapes.add_picture(
+                _render_activity_board(trip, 1600, 620, activities=day.activities),
+                Inches(0.65), Inches(3.1), width=Inches(12), height=Inches(2.85),
+            )
+            body = slide.shapes.add_textbox(Inches(0.85), Inches(6.1), Inches(11.5), Inches(0.9))
             body.text_frame.text = "\n".join(
                 f"{stage.planned_start:%H:%M}–{stage.planned_end:%H:%M}  {stage.origin.name} → {stage.destination.name}  ·  {stage.mode}  ·  {stage.distance_km:g} km"
                 for stage in day.stages[:4]
@@ -337,7 +348,7 @@ def render_long_image(lines: Iterable[str], trip: Trip | None = None) -> bytes:
     width, line_height, padding = 1600, 34, 56
     visual_height = 1080 if trip and trip.days else 0
     if trip and trip.days:
-        visual_height += len(trip.days) * 620
+        visual_height += len(trip.days) * 900
     height = max(900, padding * 2 + visual_height + line_height * max(1, len(all_lines)))
     image = Image.new("RGB", (width, height), "#f4f8ff")
     draw = ImageDraw.Draw(image)
@@ -359,6 +370,11 @@ def render_long_image(lines: Iterable[str], trip: Trip | None = None) -> bytes:
         for day in trip.days:
             draw.text((padding, y), f"第 {day.day_index} 天 · {day.date} · {day.title}", fill="#10213e", font=_load_font(30))
             y += 48
+            day_route = Image.open(
+                _render_route_map(trip, width - padding * 2, 280, days=[day])
+            ).convert("RGB")
+            image.paste(day_route, (padding, y))
+            y += 300
             day_board = Image.open(
                 _render_activity_board(trip, width - padding * 2, 400, activities=day.activities)
             ).convert("RGB")
@@ -382,8 +398,15 @@ def render_long_image(lines: Iterable[str], trip: Trip | None = None) -> bytes:
     return output.getvalue()
 
 
-def _render_route_map(trip: Trip, width: int, height: int) -> BytesIO:
-    """Render a route overview image from the persisted road geometry."""
+def _render_route_map(
+    trip: Trip,
+    width: int,
+    height: int,
+    *,
+    days: list | None = None,
+) -> BytesIO:
+    """Render a route overview with an AMap geographic base when available."""
+    selected_days = days if days is not None else trip.days
     image = Image.new("RGB", (width, height), "#eef5fc")
     draw = ImageDraw.Draw(image)
     margin = max(34, width // 28)
@@ -393,7 +416,7 @@ def _render_route_map(trip: Trip, width: int, height: int) -> BytesIO:
         draw.line((margin, y, width - margin, y), fill="#dce8f3", width=1)
 
     routes: list[tuple[str, list[tuple[float, float]]]] = []
-    for day in trip.days:
+    for day in selected_days:
         for stage in day.stages:
             points = [
                 (point.longitude, point.latitude)
@@ -412,6 +435,21 @@ def _render_route_map(trip: Trip, width: int, height: int) -> BytesIO:
     min_lat, max_lat = min(p[1] for p in all_points), max(p[1] for p in all_points)
     lon_span = max(max_lon - min_lon, 0.01)
     lat_span = max(max_lat - min_lat, 0.01)
+
+    static_map = _fetch_amap_static_map(
+        routes,
+        width,
+        height,
+        center=((min_lon + max_lon) / 2, (min_lat + max_lat) / 2),
+        span=max(lon_span, lat_span),
+    )
+    if static_map is not None:
+        # AMap already paints the true route geometry over satellite tiles.
+        # Keep the local fallback renderer below for offline/export tests.
+        output = BytesIO()
+        static_map.save(output, format="PNG", optimize=True)
+        output.seek(0)
+        return output
 
     def project(point: tuple[float, float]) -> tuple[int, int]:
         x = margin + int((point[0] - min_lon) / lon_span * (width - margin * 2))
@@ -449,6 +487,88 @@ def _render_route_map(trip: Trip, width: int, height: int) -> BytesIO:
     return output
 
 
+def _fetch_amap_static_map(
+    routes: list[tuple[str, list[tuple[float, float]]]],
+    width: int,
+    height: int,
+    *,
+    center: tuple[float, float],
+    span: float,
+) -> Image.Image | None:
+    """Fetch an AMap geographic map with route paths, degrading to local map.
+
+    Static-map rendering is best effort: an export must remain usable when
+    the map provider is unavailable, while configured AMap credentials should
+    produce a geographic background instead of a bare grid.
+    """
+    key = get_settings().amap_webservice_key
+    if not key:
+        return None
+    zoom = (
+        5 if span > 8 else 6 if span > 4 else 7 if span > 2 else
+        8 if span > 1 else 9 if span > 0.5 else 10 if span > 0.2 else
+        11 if span > 0.1 else 13
+    )
+    path_specs: list[str] = []
+    colors = {
+        "driving": "0x1777e8",
+        "transit": "0x20a879",
+        "walking": "0xf2a51a",
+        "riding": "0xe6a11d",
+    }
+    for mode, points in routes:
+        sampled = _sample_route_points(points, 180)
+        if len(sampled) < 2:
+            continue
+        encoded_points = ";".join(f"{lon:.6f},{lat:.6f}" for lon, lat in sampled)
+        # AMap's web-service syntax is positional:
+        # weight,color,transparency,fillcolor,fillTransparency:points.
+        path_specs.append(f"6,{colors.get(mode, '0x72849a')},1,,:{encoded_points}")
+    if not path_specs:
+        return None
+    # The static-map endpoint accepts at most four paths.  Stages in a trip
+    # are contiguous, so when there are more segments keep one continuous
+    # geometry rather than silently dropping later stages.
+    if len(path_specs) > 4:
+        merged_points: list[tuple[float, float]] = []
+        for _, points in routes:
+            sampled = _sample_route_points(points, 180)
+            if merged_points and sampled and merged_points[-1] == sampled[0]:
+                sampled = sampled[1:]
+            merged_points.extend(sampled)
+        if len(merged_points) >= 2:
+            encoded_points = ";".join(f"{lon:.6f},{lat:.6f}" for lon, lat in _sample_route_points(merged_points, 500))
+            path_specs = [f"6,0x1777e8,1,,:{encoded_points}"]
+    map_width = min(1024, max(420, int(width)))
+    map_height = min(1024, max(280, int(height)))
+    try:
+        response = httpx.get(
+            "https://restapi.amap.com/v3/staticmap",
+            params={
+                "location": f"{center[0]:.6f},{center[1]:.6f}",
+                "zoom": zoom,
+                "size": f"{map_width}*{map_height}",
+                "scale": 1,
+                "paths": "|".join(path_specs),
+                "key": key,
+            },
+            timeout=2.5,
+            follow_redirects=True,
+        )
+        response.raise_for_status()
+        with Image.open(BytesIO(response.content)) as loaded:
+            return ImageOps.fit(loaded.convert("RGB"), (width, height), method=Image.Resampling.LANCZOS)
+    except (httpx.HTTPError, OSError, ValueError):
+        return None
+
+
+def _sample_route_points(points: list[tuple[float, float]], limit: int) -> list[tuple[float, float]]:
+    if len(points) <= limit:
+        return points
+    stride = (len(points) - 1) / (limit - 1)
+    return [points[round(index * stride)] for index in range(limit)]
+
+
 def _render_activity_board(
     trip: Trip,
     width: int,
@@ -462,6 +582,7 @@ def _render_activity_board(
     title_font = _load_font(max(20, width // 50))
     body_font = _load_font(max(14, width // 78))
     small_font = _load_font(max(12, width // 95))
+    seen_image_urls: set[str] = set()
     draw.text((28, 20), "Agent 精选行程安排", fill="#10213e", font=title_font)
     activities = sorted(
         activities
@@ -480,8 +601,6 @@ def _render_activity_board(
         gap = 24
         card_width = (width - 56 - gap * (len(activities) - 1)) // len(activities)
         card_top, card_bottom = 72, height - 24
-        colors = {"attraction": "#2377e8", "hotel": "#7457e8", "meal": "#e79424"}
-        labels = {"attraction": "景点", "hotel": "住宿", "meal": "餐饮"}
         for index, activity in enumerate(activities):
             left = 28 + index * (card_width + gap)
             right = left + card_width
@@ -489,26 +608,11 @@ def _render_activity_board(
                 (left, card_top, right, card_bottom), radius=18,
                 fill="#ffffff", outline="#dce7f4", width=2,
             )
-            photo = _download_activity_image(activity.image_url)
+            photo = _activity_image(activity, seen_image_urls)
             photo_height = max(80, int((card_bottom - card_top) * 0.43))
             if photo:
                 fitted = ImageOps.fit(photo.convert("RGB"), (card_width - 4, photo_height))
                 image.paste(fitted, (left + 2, card_top + 2))
-            else:
-                draw.rounded_rectangle(
-                    (left + 2, card_top + 2, right - 2, card_top + photo_height),
-                    radius=15, fill="#edf4ff", outline="#d8e7f7", width=2,
-                )
-                draw.text(
-                    (left + 18, card_top + 22), labels.get(activity.type, "安排"),
-                    fill=colors.get(activity.type, "#70839e"), font=title_font,
-                )
-                draw.text(
-                    (left + 18, card_top + 62),
-                    "RoadMan 精选安排",
-                    fill="#7890ad",
-                    font=small_font,
-                )
             text_y = card_top + photo_height + 14
             draw.text((left + 14, text_y), activity.place.name[:16], fill="#10213e", font=body_font)
             text_y += max(24, width // 60)
@@ -542,6 +646,42 @@ def _download_activity_image(url: str | None) -> Image.Image | None:
         return Image.open(BytesIO(response.content)).convert("RGB")
     except (httpx.HTTPError, OSError, ValueError):
         return None
+
+
+def _activity_image(activity, seen_image_urls: set[str]) -> Image.Image:
+    """Return a real, non-repeated image or a distinct visual placeholder."""
+    url = str(activity.image_url or "").strip()
+    if url and url not in seen_image_urls:
+        image = _download_activity_image(url)
+        if image is not None:
+            seen_image_urls.add(url)
+            return image
+    return _make_activity_placeholder(activity)
+
+
+def _make_activity_placeholder(activity, width: int = 960, height: int = 600) -> Image.Image:
+    """Create a stable card visual so missing/reused provider images differ."""
+    seed = sum((index + 1) * ord(char) for index, char in enumerate(activity.place.name))
+    palettes = ((35, 119, 232), (20, 155, 132), (116, 87, 232), (225, 148, 37), (34, 104, 145))
+    first = palettes[seed % len(palettes)]
+    second = palettes[(seed // 7 + 2) % len(palettes)]
+    image = Image.new("RGB", (width, height), first)
+    draw = ImageDraw.Draw(image)
+    for y in range(height):
+        ratio = y / max(1, height - 1)
+        color = tuple(int(first[index] * (1 - ratio) + second[index] * ratio) for index in range(3))
+        draw.line((0, y, width, y), fill=color)
+    draw.ellipse((width * 0.62, -height * 0.25, width * 1.15, height * 0.55), fill=(245, 252, 255))
+    draw.ellipse((-width * 0.2, height * 0.55, width * 0.45, height * 1.2), fill=(225, 241, 255))
+    label = _activity_label(activity.type)
+    title = activity.place.name[:14]
+    label_font = _load_font(max(26, width // 25))
+    title_font = _load_font(max(22, width // 34))
+    draw.rounded_rectangle((38, 38, 38 + max(120, len(label) * 42), 96), radius=28, fill="#ffffff")
+    draw.text((64, 49), label, fill="#173b68", font=label_font)
+    draw.text((48, height - 130), title, fill="#ffffff", font=title_font)
+    draw.text((48, height - 82), "RoadMan · 来源待确认", fill="#eaf4ff", font=_load_font(max(16, width // 58)))
+    return image
 
 
 def _wrap(value: str, width: int) -> list[str]:

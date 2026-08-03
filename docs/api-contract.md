@@ -27,7 +27,7 @@
 | GET/PATCH/DELETE | `/api/v1/trips/{trip_id}` | 查询、更新、删除 Trip |
 | GET | `/api/v1/trips/mock/wuhan-lushan` | 固定验收行程 |
 | GET | `/api/v1/trips/{trip_id}/recommendations` | 景点/住宿/餐饮排序备选 |
-| POST | `/api/v1/trips/{trip_id}/editing/interpret` | 结合当前选择理解局部修改意图 |
+| POST | `/api/v1/trips/{trip_id}/editing/interpret` | 优先由 Ollama Editing Agent 解析自然语言，再生成安全的局部修改意图 |
 | POST | `/api/v1/trips/{trip_id}/patches/preview` | 预览加入/替换，不修改 Trip |
 | POST | `/api/v1/trips/{trip_id}/patches/preview-map-point` | 将地图选点转为加入活动的预览补丁，不修改 Trip |
 | POST | `/api/v1/trips/{trip_id}/patches/preview-delete` | 预览删除活动，不修改 Trip |
@@ -57,6 +57,10 @@
 - `POST /api/v1/trips/{trip_id}/planning/start`：投递 Planning Job，返回 202。
 - `GET /api/v1/trips/{trip_id}/planning`：需求、默认值、追问、校验和 Markdown 快照。
 - `POST /api/v1/trips/{trip_id}/planning/clarifications`：补充答案并恢复规划。
+- 规划过程中若 Requirement Agent 返回 `special_events`，LangGraph 会追加事件研究节点，
+  保存公开检索摘要和来源链接；研究失败只生成待复核提示，不伪造极大值或活动时间。
+- POI 候选完成客观数据排序后，会由 Ollama POI Agent 根据已提取的 `preferences` 和
+  `special_events` 再排序并返回理由；模型不可用时保留距离、评分、价格基线，不执行本地偏好关键词匹配。
 - `GET /api/v1/trips/{trip_id}/planning/events`：跨进程 SSE 进度。
 - `GET /api/v1/trips/{trip_id}/roadbook`：`text/markdown` 路书。
 - `GET /api/v1/trips/{trip_id}/roadbook.pdf`：冻结快照 PDF 导出。
@@ -140,7 +144,7 @@ SSE 使用命名事件，每条事件包含单调递增的 `id:`。客户端断�
 - `GET /api/v1/trips` 返回已持久化的历史规划，首页历史规划下拉可直接恢复进行中或已完成行程。
 - `POST /api/v1/skills/weather/forecast` 接受浏览器定位或武汉回退坐标，首页展示当前温度、天气和位置来源。
 - LangGraph 的 `review_daily_schedule` 节点是首轮旅游编排后的第二次日程检查；它核验每日时间覆盖和三餐住宿，并在没有可安全插入候选时写入可调整的 `rest` 活动。
-- 规划任务对 Agent 生成的日期对象会补齐稳定 `day_id`；内部异常会转换为结构化的 `PLANNING_EXECUTION_FAILED` 中文说明。Requirement Agent 网络不可用时仅启用语义人数降级，不覆盖有效的 Agent 输出，也不把情侣需求伪装成“默认 1 人”。
+- 规划任务对 Agent 生成的日期对象会补齐稳定 `day_id`；内部异常会转换为结构化的 `PLANNING_EXECUTION_FAILED` 中文说明。Requirement Agent 网络不可用时不会猜测关系人数或体验偏好，人数保持“待确认”，避免把情侣需求伪装成“默认 1 人”。
 - 旅游编排同样会为漏出日期标题的对象补齐“第 N 天”，使缺少展示字段不会阻断最终 Trip 持久化。
 - `DELETE /api/v1/trips/{trip_id}` 用于删除历史规划；前端历史入口提供逐条删除并在成功后立即移除。
 - 行程编排会保证每日三餐活动（餐饮候选缺失时使用明确的待确认附近餐次），并在跨天候选选择时避免重复景点。

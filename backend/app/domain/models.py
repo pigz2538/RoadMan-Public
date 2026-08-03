@@ -180,6 +180,7 @@ class TripRequest(BaseModel):
     return_before: datetime | None = None
     travelers: int | None = Field(default=None, ge=1)
     preferences: list[str] = Field(default_factory=list)
+    special_events: list[str] = Field(default_factory=list)
     must_visit: list[PlaceRef] = Field(default_factory=list)
     budget: MoneyRange | None = None
     max_continuous_drive_minutes: int = Field(default=120, ge=30)

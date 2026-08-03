@@ -68,6 +68,7 @@ const planningComplete = computed(() =>
   && store.planningPresentationIdle
   && !contentHydrating.value,
 )
+const visiblePlanningEvents = computed(() => store.planningEvents.slice(-7))
 const planningFailure = computed(() => {
   if (planningSnapshot.value?.status !== 'failed') return null
   const description = planningSnapshot.value.verification_result?.issues?.[0]?.description
@@ -465,6 +466,10 @@ function planningEventLabel(event: { label?: string; tool?: string; node?: strin
   return label || `${planningAgentName(event)} 正在处理当前步骤`
 }
 
+function planningEventKey(event: { event: string; progress: number; node?: string; tool?: string }) {
+  return `${event.node || event.event}:${event.progress}:${event.tool || ''}`
+}
+
 function formatDuration(minutes: number) {
   const rounded = Math.max(0, Math.round(minutes))
   const hours = Math.floor(rounded / 60)
@@ -615,12 +620,14 @@ watch(
       <section class="planning-state glass-card">
       <span class="eyebrow">ROADMAN AGENTS 正在协作</span>
       <h2>{{ planningSnapshot.status === 'failed' ? '这次行程需要调整后再规划' : planningSnapshot.clarification_question || '正在把行程一项一项加入详情页' }}</h2>
-      <div v-if="planningSnapshot.status !== 'failed'" class="planning-event-list">
-        <article v-for="(event, index) in store.planningEvents.slice(-7)" :key="`${event.event}-${index}`" :style="{ '--item-index': index }">
-          <i :class="{ active: index === store.planningEvents.slice(-7).length - 1 }" />
+      <TransitionGroup v-if="planningSnapshot.status !== 'failed' && visiblePlanningEvents.length" name="planning-event" tag="div" class="planning-event-list">
+        <article v-for="(event, index) in visiblePlanningEvents" :key="planningEventKey(event)">
+          <i :class="{ active: index === visiblePlanningEvents.length - 1 }" />
           <div><strong>{{ planningEventLabel(event) }}</strong><span>{{ event.progress }}% · {{ planningAgentName(event) }}</span></div>
         </article>
-        <article v-if="!store.planningEvents.length">
+      </TransitionGroup>
+      <div v-else-if="planningSnapshot.status !== 'failed'" class="planning-event-list">
+        <article>
           <i class="active" /><div><strong>正在建立行程上下文</strong><span>需求 Agent</span></div>
         </article>
       </div>
@@ -822,10 +829,6 @@ watch(
             </small>
           </article>
         </div>
-      </details>
-      <details v-if="planningSnapshot?.plan_markdown" class="roadbook-card glass-card">
-        <summary>查看 Markdown 行程安排</summary>
-        <pre>{{ planningSnapshot.plan_markdown }}</pre>
       </details>
     </template>
     <div v-else class="page-state error">{{ planningError || '行程加载失败，请稍后重试。' }}</div>

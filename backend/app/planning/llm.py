@@ -18,17 +18,23 @@ class OllamaRequirementExtractor:
             not self.settings.enable_llm_requirement_extraction
             or not self.settings.ollama_api_key
         ):
-            return _offline_semantic_fallback(deterministic, raw_text)
+            # No cloud Agent means no semantic guess.  Keep only hard,
+            # structural fields from the offline parser and let preflight ask
+            # the user instead of silently inventing party size/preferences.
+            return deterministic
         prompt = (
             "You are RoadMan Requirement Agent. Extract requirements only; never plan a route. "
             f"Today is {today.isoformat()}. Return ONLY one valid JSON object (no markdown, no explanation) "
             "with exactly these keys: origin_name, destination_name, start_date, end_date, "
-            "departure_time, return_time, travelers, preferences. "
-            "Dates must be YYYY-MM-DD; unknown scalar fields must be null and preferences must be an array. "
+            "departure_time, return_time, travelers, preferences, special_events. "
+            "Dates must be YYYY-MM-DD; unknown scalar fields must be null and preferences/special_events must be arrays. "
             "Normalize Chinese time phrases: 中午=12:00, 下午=14:00, 晚上=19:00. "
             "Infer travelers semantically (情侣/夫妻=2, 一家三口=3); do not default to 1 when evidence is absent. "
             "请根据语义判断同行人数，不要机械默认 1。"
             "For text like 从A出发，在B及其周边旅游, use A as origin and B as destination. "
+            "Separate the destination from the experience: in 到九宫山看流星雨, destination_name is 九宫山, "
+            "special_events contains 流星雨. For astronomy, festivals, flowers or seasonal events, preserve the "
+            "event name and ask a later research step to verify date, peak time, cloud/moon conditions and visibility. "
             "User text: "
             + raw_text
         )
@@ -64,6 +70,7 @@ class OllamaRequirementExtractor:
                     merged["destination_name"] = _normalize_place_name(
                         str(merged["destination_name"])
                     )
+                merged["special_events"] = _normalize_special_events(merged.get("special_events"))
                 for clock_field in ("departure_time", "return_time"):
                     normalized_clock = _normalize_clock(merged.get(clock_field))
                     if normalized_clock:
@@ -81,9 +88,9 @@ class OllamaRequirementExtractor:
                     merged["travelers"] = _coerce_travelers(merged.get("travelers"))
                 if merged.get("travelers") is None:
                     merged.pop("travelers", None)
-                return _offline_semantic_fallback(merged, raw_text)
+                return merged
         except (httpx.HTTPError, ValueError, TypeError, json.JSONDecodeError):
-            return _offline_semantic_fallback(deterministic, raw_text)
+            return deterministic
 
 
 class OllamaRequirementValidator:
@@ -140,6 +147,81 @@ class OllamaRequirementValidator:
                 ]
         except (httpx.HTTPError, ValueError, TypeError, json.JSONDecodeError):
             return []
+
+
+class OllamaTripEditAgent:
+    """Interpret free-form edits before the deterministic patch builder runs.
+
+    The patch builder remains the only component allowed to mutate a trip.  This
+    Agent only turns natural language into a small, validated intent so the
+    chat panel can handle requests such as "多加一天" or "把第二天晚上换成
+    夜游" instead of falling back to a canned help sentence.
+    """
+
+    def __init__(self, settings: Settings) -> None:
+        self.settings = settings
+
+    async def interpret(
+        self,
+        message: str,
+        trip_context: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        if not self.settings.ollama_api_key:
+            return None
+        prompt = (
+            "你是 RoadMan 行程修改 Agent。你只能理解用户要如何调整已经存在的行程，"
+            "不能虚构不存在的景点、酒店或餐厅，也不能直接声称修改已经完成。"
+            "请只返回一个 JSON 对象，不要 Markdown："
+            '{"intent":"add|delete|replace|replan|adjust|question|unknown",'
+            '"day_index":1,"category":"attractions|hotels|meals|null",'
+            '"target_name":"","candidate_name":"","duration_delta_minutes":0,'
+            '"reply":"给用户的简短中文说明"}。'
+            "如果用户要求增加或减少天数、重排整体路线、改变出发/返回日期，intent 用 replan。"
+            "如果是加入/删除/替换一个已有候选，尽量填出对应第几天和名称；不确定时留空，"
+            "不要把‘看流星雨’、‘赏花’、‘泡温泉’等体验目标误当成景点名称。"
+            f"当前行程上下文：{json.dumps(trip_context, ensure_ascii=False)}；"
+            f"用户修改请求：{message}"
+        )
+        try:
+            async with httpx.AsyncClient(timeout=min(self.settings.ollama_timeout_seconds, 45)) as client:
+                response = await client.post(
+                    self.settings.ollama_api_url,
+                    headers={"Authorization": f"Bearer {self.settings.ollama_api_key}"},
+                    json={
+                        "model": self.settings.ollama_model,
+                        "prompt": prompt,
+                        "stream": False,
+                        "think": False,
+                        "format": "json",
+                    },
+                )
+                response.raise_for_status()
+                value = _parse_unfiltered_json_object(response.json().get("response", ""))
+        except (httpx.HTTPError, ValueError, TypeError, json.JSONDecodeError):
+            return None
+        intent = str(value.get("intent") or "unknown").strip().lower()
+        if intent not in {"add", "delete", "replace", "replan", "adjust", "question", "unknown"}:
+            intent = "unknown"
+        category = value.get("category")
+        if category not in {"attractions", "hotels", "meals"}:
+            category = None
+        try:
+            day_index = int(value.get("day_index")) if value.get("day_index") is not None else None
+        except (TypeError, ValueError):
+            day_index = None
+        try:
+            delta = int(value.get("duration_delta_minutes") or 0)
+        except (TypeError, ValueError):
+            delta = 0
+        return {
+            "intent": intent,
+            "day_index": day_index,
+            "category": category,
+            "target_name": str(value.get("target_name") or "").strip()[:120],
+            "candidate_name": str(value.get("candidate_name") or "").strip()[:120],
+            "duration_delta_minutes": max(-240, min(240, delta)),
+            "reply": str(value.get("reply") or "").strip()[:500],
+        }
 
 
 class OllamaPoiCurator:
@@ -224,6 +306,97 @@ class OllamaPoiCurator:
             return fallback
 
 
+class OllamaPoiRanker:
+    """Rank discovered POIs from the Agent's semantic requirements.
+
+    The local scorer is deliberately objective (distance, rating and price).
+    Preference words are not interpreted with a Python keyword table; when an
+    Ollama key is available this Agent decides the trade-offs and supplies the
+    human-readable reason shown in the UI.
+    """
+
+    def __init__(self, settings: Settings) -> None:
+        self.settings = settings
+
+    async def rank(
+        self,
+        candidates: dict[str, list[dict[str, Any]]],
+        preferences: list[str],
+        special_events: list[str],
+    ) -> list[dict[str, Any]]:
+        if not self.settings.ollama_api_key:
+            return []
+        compact: list[dict[str, Any]] = []
+        for category, items in candidates.items():
+            for item in items[:40]:
+                place = item.get("place") or {}
+                compact.append(
+                    {
+                        "candidate_id": item.get("candidate_id"),
+                        "category": category,
+                        "name": place.get("name"),
+                        "categories": item.get("categories"),
+                        "rating": item.get("rating"),
+                        "distance_km": item.get("distance_km"),
+                        "price": item.get("ticket_or_price"),
+                    }
+                )
+        if not compact:
+            return []
+        prompt = (
+            "你是 RoadMan POI 行程策展 Agent。请根据已经由 Requirement Agent 提取的偏好、特殊体验、"
+            "距离、评分、价格和类别，为候选景点、住宿、餐饮排序。不要从原始用户文本猜测偏好，"
+            "也不要凭空创造候选；只返回候选 ID 的 JSON 决策。可以遗漏不适合的候选。"
+            "返回格式：{\"decisions\":[{\"candidate_id\":\"...\",\"score\":0,"
+            "\"reason\":\"简短中文理由\"}]}。score 为 0-100 的相对匹配度。"
+            f"偏好：{json.dumps(preferences, ensure_ascii=False)}；"
+            f"特殊体验：{json.dumps(special_events, ensure_ascii=False)}；"
+            f"候选：{json.dumps(compact, ensure_ascii=False)}"
+        )
+        try:
+            async with httpx.AsyncClient(timeout=min(self.settings.ollama_timeout_seconds, 45)) as client:
+                response = await client.post(
+                    self.settings.ollama_api_url,
+                    headers={"Authorization": f"Bearer {self.settings.ollama_api_key}"},
+                    json={
+                        "model": self.settings.ollama_model,
+                        "prompt": prompt,
+                        "stream": False,
+                        "think": False,
+                        "format": "json",
+                    },
+                )
+                response.raise_for_status()
+                payload = _parse_unfiltered_json_object(response.json().get("response", ""))
+        except (httpx.HTTPError, ValueError, TypeError, json.JSONDecodeError):
+            return []
+        decisions = payload.get("decisions")
+        if not isinstance(decisions, list):
+            return []
+        valid_ids = {str(item.get("candidate_id")) for item in compact}
+        cleaned: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for item in decisions:
+            if not isinstance(item, dict):
+                continue
+            candidate_id = str(item.get("candidate_id") or "")
+            if not candidate_id or candidate_id not in valid_ids or candidate_id in seen:
+                continue
+            try:
+                score = float(item.get("score"))
+            except (TypeError, ValueError):
+                continue
+            seen.add(candidate_id)
+            cleaned.append(
+                {
+                    "candidate_id": candidate_id,
+                    "score": max(0.0, min(100.0, score)),
+                    "reason": str(item.get("reason") or "Agent 综合偏好、距离与数据质量").strip()[:120],
+                }
+            )
+        return cleaned
+
+
 def _parse_json_object(text: str) -> dict[str, Any]:
     value = _parse_unfiltered_json_object(text)
     allowed = {
@@ -235,6 +408,7 @@ def _parse_json_object(text: str) -> dict[str, Any]:
         "return_time",
         "travelers",
         "preferences",
+        "special_events",
         "issues",
     }
     return {key: value for key, value in value.items() if key in allowed}
@@ -338,7 +512,7 @@ def deterministic_extract(raw_text: str, today: date) -> dict[str, Any]:
         result["return_time"] = return_time
     route_match = re.search(
         r"从(?P<origin>[\u4e00-\u9fffA-Za-z0-9·]+?)(?:出发)?(?:去|到|前往)"
-        r"(?P<destination>[\u4e00-\u9fffA-Za-z0-9·]+?)(?=，|,|。|；|;|两天|一日|周[一二三四五六日天]|$)",
+        r"(?P<destination>[\u4e00-\u9fffA-Za-z0-9·]+?)(?=看|赏|观|参加|体验|游玩|旅游|露营|拍摄|追|，|,|。|；|;|最多|三天|两天|一日|周[一二三四五六日天]|$)",
         raw_text,
     )
     if route_match:
@@ -393,9 +567,10 @@ def deterministic_extract(raw_text: str, today: date) -> dict[str, Any]:
     traveler_match = re.search(r"([一二三四五六七八九十两\d]+)\s*(?:人|位|口)", raw_text)
     if traveler_match:
         result["travelers"] = _cn_number(traveler_match.group(1))
-    for keyword in ("自然风景", "自然景观", "山水风景", "亲子", "轻松", "省钱", "不走夜路", "新能源"):
-        if keyword in raw_text:
-            result["preferences"].append(keyword)
+    # Semantic preferences are intentionally left to the Requirement Agent.
+    # This offline parser only handles structural qualifiers such as a
+    # destination radius above; it must not decide what “舒服”“情侣” or
+    # “看流星雨” means by scanning keywords.
     return result
 
 
@@ -406,6 +581,11 @@ def _normalize_place_name(value: str) -> str:
         if normalized.endswith(suffix) and len(normalized) > len(suffix):
             return normalized[: -len(suffix)]
     return normalized
+
+
+def _normalize_special_events(value: Any) -> list[str]:
+    events = [str(item).strip() for item in value] if isinstance(value, list) else []
+    return list(dict.fromkeys(item for item in events if item))[:8]
 
 
 def _cn_number(value: str) -> int | None:
@@ -428,23 +608,6 @@ def _coerce_travelers(value: Any) -> int | None:
         if match:
             return _cn_number(match.group(1))
     return None
-
-
-def _offline_semantic_fallback(extracted: dict[str, Any], raw_text: str) -> dict[str, Any]:
-    """Keep semantic party-size hints usable when the cloud Agent is offline.
-
-    This is deliberately only a degradation path: the Requirement Agent's
-    value wins whenever it returns a valid count. It prevents a transient
-    Ollama/DNS failure from silently turning an explicit couple trip into the
-    visible default of one traveler.
-    """
-    result = dict(extracted)
-    if result.get("travelers") is None:
-        if re.search(r"情侣|夫妻|伴侣|二人|两人|两位", raw_text):
-            result["travelers"] = 2
-        elif re.search(r"一家三口|三人|三位", raw_text):
-            result["travelers"] = 3
-    return result
 
 
 def _normalize_clock(value: Any) -> str | None:

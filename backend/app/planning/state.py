@@ -26,3 +26,4 @@ class RoadManState(TypedDict, total=False):
     plan_markdown: str | None
     error: dict[str, Any] | None
     messages: list[dict[str, Any]]
+    special_event_research: list[dict[str, Any]]

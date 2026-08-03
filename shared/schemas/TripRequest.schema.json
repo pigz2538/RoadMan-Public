@@ -237,6 +237,13 @@
       "title": "Preferences",
       "type": "array"
     },
+    "special_events": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Special Events",
+      "type": "array"
+    },
     "must_visit": {
       "items": {
         "$ref": "#/$defs/PlaceRef"

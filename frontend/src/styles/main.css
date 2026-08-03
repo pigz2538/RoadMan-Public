@@ -549,8 +549,11 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 }
 .planning-live-layout .planning-state { width: auto; min-height: 560px; margin: 0; }
 .planning-live-layout .agent-panel { min-height: 560px; }
-.planning-event-list { width: min(720px, 92%); margin: 24px auto; display: grid; gap: 0; text-align: left; }
-.planning-event-list article { position: relative; display: flex; gap: 14px; min-height: 66px; animation: planning-item-in .72s cubic-bezier(.22,.8,.28,1) both; animation-delay: calc(var(--item-index, 0) * 90ms); }
+.planning-event-list { position: relative; width: min(720px, 92%); height: 462px; max-height: 462px; overflow: hidden; margin: 24px auto; display: grid; grid-auto-rows: minmax(66px, auto); align-content: end; gap: 0; text-align: left; }
+.planning-event-list article { position: relative; display: flex; gap: 14px; min-height: 66px; }
+.planning-event-enter-active, .planning-event-leave-active, .planning-event-move { transition: transform .72s cubic-bezier(.22,.8,.28,1), opacity .52s ease; }
+.planning-event-enter-from { opacity: 0; transform: translateY(32px); }
+.planning-event-leave-active { position: absolute; width: 100%; opacity: 0; transform: translateY(-32px); }
 .planning-event-list article:not(:last-child)::before { content: ''; position: absolute; left: 7px; top: 19px; bottom: -2px; width: 2px; background: #d9e7f8; }
 .planning-event-list i { z-index: 1; width: 16px; height: 16px; margin-top: 3px; border-radius: 50%; background: #8ab6f5; box-shadow: 0 0 0 5px #edf5ff; }
 .planning-event-list i.active { background: #28b9dc; box-shadow: 0 0 0 6px rgba(40,185,220,.15); animation: planning-pulse 1.4s ease-in-out infinite; }
@@ -570,6 +573,8 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 @media (max-width: 980px) {
   .planning-live-layout { grid-template-columns: 1fr; padding: 14px; }
   .planning-live-layout .agent-panel { min-height: 460px; }
+  .planning-event-list { height: 396px; max-height: 396px; grid-auto-rows: minmax(56px, auto); }
+  .planning-event-list article { min-height: 56px; }
 }
 
 .planning-state h2 {

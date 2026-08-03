@@ -23,7 +23,7 @@
 13. `render_markdown`
 14. `persist_trip`
 
-Requirement Agent 使用 Ollama Cloud `deepseek-v4-flash:cloud`。由于 Ollama Cloud
+Requirement Agent 使用 Ollama Cloud `deepseek-v4-flash:0731-cloud`。由于 Ollama Cloud
 当前不支持原生 structured outputs，RoadMan 使用严格 JSON 提示、白名单字段解析、
 Pydantic 校验和确定性中文解析回退；模型不能直接调用路线或写数据库。
 

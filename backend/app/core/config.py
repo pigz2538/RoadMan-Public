@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     )
     ollama_api_url: str = "https://ollama.com/api/generate"
     ollama_api_key: str = ""
-    ollama_model: str = "deepseek-v4-flash:cloud"
+    ollama_model: str = "deepseek-v4-flash:0731-cloud"
     ollama_timeout_seconds: float = 90
     enable_llm_requirement_extraction: bool = True
     enable_poi_web_enrichment: bool = True

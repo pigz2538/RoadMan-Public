@@ -51,8 +51,40 @@ def interpret_edit_intent(
     trip: Trip,
     state: dict[str, Any],
     request: EditIntentRequest,
+    *,
+    agent_intent: dict[str, Any] | None = None,
 ) -> tuple[str, PlanPatch | None, bool]:
     message = request.message.strip()
+    if agent_intent:
+        intent = str(agent_intent.get("intent") or "unknown")
+        reply = str(agent_intent.get("reply") or "").strip()
+        if intent == "replan":
+            return (
+                reply or "这个修改会影响日期、路线或整体节奏，需要重新生成整份行程安排。",
+                None,
+                True,
+            )
+        if intent == "question":
+            return reply or "我可以帮你调整景点、餐饮、住宿和交通，请告诉我希望改变哪一段。", None, False
+        if intent == "adjust":
+            return (
+                reply or "我会重新平衡这一天的停留时间和用餐窗口，请确认后重新规划。",
+                None,
+                True,
+            )
+        day_index = agent_intent.get("day_index")
+        semantic_prefix = f"第{day_index}天 " if day_index else ""
+        category_labels = {"attractions": "景点", "hotels": "酒店", "meals": "餐饮"}
+        category = agent_intent.get("category")
+        if intent == "add":
+            message = f"{message} {semantic_prefix}加入{category_labels.get(category, '安排')} {agent_intent.get('candidate_name') or ''}"
+        elif intent == "delete":
+            message = f"{message} {semantic_prefix}删除 {agent_intent.get('target_name') or ''}"
+        elif intent == "replace":
+            message = (
+                f"{message} {semantic_prefix}替换 {agent_intent.get('target_name') or ''} "
+                f"换成 {agent_intent.get('candidate_name') or ''}"
+            )
     if any(word in message for word in ("改日期", "换日期", "提前一天", "推迟一天")):
         return (
             "修改行程日期会影响全部路线、天气和住宿，需要重新生成整份行程安排。",

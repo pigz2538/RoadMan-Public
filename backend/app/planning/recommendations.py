@@ -10,7 +10,6 @@ def rank_tourism_candidates(
     preferences: list[str],
 ) -> dict[str, list[dict[str, Any]]]:
     center = destination.get("coordinates") or {}
-    preference_text = " ".join(preferences).lower()
     for category, items in candidates.items():
         for item in items:
             place = item.get("place") or {}
@@ -35,18 +34,6 @@ def rank_tourism_candidates(
             if price_mid is not None:
                 score += max(-10, 8 - price_mid / 80)
                 reasons.append(f"价格约 ¥{price_mid:.0f}")
-            name_text = f"{place.get('name', '')} {item.get('categories', '')}".lower()
-            nature_preferred = any(token in preference_text for token in ("自然", "风景", "山水"))
-            nature_match = any(
-                token in name_text
-                for token in ("山", "湖", "公园", "瀑布", "峡", "峰", "景区", "自然")
-            )
-            family_match = "亲子" in preference_text and any(
-                token in name_text for token in ("公园", "乐园", "动物", "博物馆")
-            )
-            if (nature_preferred and nature_match) or family_match:
-                score += 10
-                reasons.append("符合旅行偏好")
             if item.get("provider") in {"FlyAI / 飞猪", "OpenTripMap"}:
                 score += 3
                 reasons.append("含外部旅行来源")
@@ -61,6 +48,38 @@ def rank_tourism_candidates(
                 f"{category}:{item.get('provider', 'unknown')}:"
                 f"{item['place'].get('source_id') or item['place'].get('id') or index}"
             )
+    return candidates
+
+
+def apply_agent_ranking(
+    candidates: dict[str, list[dict[str, Any]]],
+    decisions: list[dict[str, Any]],
+) -> dict[str, list[dict[str, Any]]]:
+    """Apply validated Agent scores without allowing unknown IDs to mutate data."""
+    by_id = {
+        str(decision.get("candidate_id")): decision
+        for decision in decisions
+        if decision.get("candidate_id")
+    }
+    for category, items in candidates.items():
+        for item in items:
+            decision = by_id.get(str(item.get("candidate_id")))
+            if not decision:
+                continue
+            item["agent_score"] = decision["score"]
+            item["agent_reason"] = decision["reason"]
+            item["score"] = decision["score"]
+            item["recommendation_reasons"] = [decision["reason"]]
+        items.sort(
+            key=lambda item: (
+                -(item.get("agent_score") if item.get("agent_score") is not None else item.get("score", 0)),
+                -item.get("score", 0),
+                item["place"]["name"],
+            )
+        )
+        for index, item in enumerate(items):
+            item["rank"] = index + 1
+            item["backup"] = index > 0
     return candidates
 
 

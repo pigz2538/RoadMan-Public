@@ -25,6 +25,7 @@ from ..domain.models import (
 )
 from ..core.config import get_settings
 from ..planning.llm import (
+    OllamaTripEditAgent,
     OllamaRequirementExtractor,
     OllamaRequirementValidator,
     deterministic_extract,
@@ -109,6 +110,40 @@ def get_skill_registry() -> SkillRegistry:
     from ..main import registry
 
     return registry
+
+
+def _edit_agent_context(trip: Trip, state: dict[str, object], payload: EditIntentRequest) -> dict[str, object]:
+    return {
+        "days": [
+            {
+                "day_index": day.day_index,
+                "date": day.date.isoformat(),
+                "stages": [
+                    {"title": stage.title, "origin": stage.origin.name, "destination": stage.destination.name}
+                    for stage in day.stages
+                ],
+                "activities": [
+                    {"type": item.type, "name": item.place.name, "start": item.planned_start.isoformat()}
+                    for item in day.activities
+                ],
+            }
+            for day in trip.days
+        ],
+        "selected_day_id": payload.current_day_id,
+        "selected_target_id": payload.current_target_id,
+        "candidates": {
+            category: [
+                {
+                    "candidate_id": item.get("candidate_id"),
+                    "name": (item.get("place") or {}).get("name"),
+                    "type": category,
+                }
+                for item in items[:24]
+            ]
+            for category, items in state.get("tourism_candidates", {}).items()
+            if isinstance(items, list)
+        },
+    }
 
 
 async def _estimate_driving_minutes(
@@ -254,10 +289,11 @@ async def preflight_trip(
             )
         )
 
-    cross_sea = any(
-        keyword in payload.raw_text
-        for keyword in ("跨海", "海岛", "海南", "舟山", "涠洲岛", "台湾")
-    )
+    # A geography such as 海南/舟山 is not enough to infer a cross-sea
+    # requirement: the Requirement Guard Agent owns that semantic decision.
+    # Keep only the user's explicit structural phrase as an offline safety
+    # check, so a place name cannot accidentally trigger this question.
+    cross_sea = "跨海" in payload.raw_text
     explicit_cross_sea_mode = any(
         keyword in payload.raw_text
         for keyword in ("轮渡", "渡轮", "坐船", "飞机", "跨海大桥")
@@ -328,35 +364,9 @@ async def preflight_trip(
             extracted,
         )
 
-        def already_resolved_semantic_issue(item: dict[str, object]) -> bool:
-            message = str(item.get("message") or "")
-            date_resolved = any(
-                key.startswith((
-                    "INVALID_DATE_ORDER:",
-                    "TRIP_IN_PAST:",
-                    "PAST_RETURN_TIME:",
-                ))
-                and value.strip()
-                for key, value in payload.answers.items()
-            )
-            if date_resolved and any(
-                keyword in message for keyword in ("日期", "昨天", "返回", "出发日")
-            ):
-                return True
-            if answered("CROSS_SEA_MODE_REQUIRED", "preferences") and any(
-                keyword in message for keyword in ("跨海", "轮渡", "渡轮", "飞机", "海岛")
-            ):
-                return True
-            if answered("IMPOSSIBLE_TIME_WINDOW", "time_window") and any(
-                keyword in message for keyword in ("时间", "抵达", "到达", "车程", "按时")
-            ):
-                return True
-            return False
-
         deduped = [
             PreflightIssue.model_validate(item)
             for item in semantic_issues
-            if not already_resolved_semantic_issue(item)
             if not answered(str(item.get("code")), str(item.get("field") or "preferences"))
         ]
         semantic_checked = True
@@ -477,11 +487,33 @@ async def interpret_trip_edit(
         raise AppError("TRIP_NOT_FOUND", "行程不存在", 404, {"trip_id": trip_id})
     state, markdown = await repo.get_planning_snapshot(trip_id)
     state = state or {}
-    message, patch, global_replan_required = interpret_edit_intent(
-        trip,
-        state,
-        payload,
-    )
+    deterministic_error: AppError | None = None
+    settings = get_settings()
+    agent_intent = None
+    if settings.ollama_api_key:
+        agent_intent = await OllamaTripEditAgent(settings).interpret(
+            payload.message,
+            _edit_agent_context(trip, state, payload),
+        )
+    try:
+        if agent_intent and agent_intent.get("intent") not in {None, "unknown"}:
+            message, patch, global_replan_required = interpret_edit_intent(
+                trip,
+                state,
+                payload,
+                agent_intent=agent_intent,
+            )
+        else:
+            message, patch, global_replan_required = interpret_edit_intent(
+                trip,
+                state,
+                payload,
+            )
+    except AppError as exc:
+        deterministic_error = exc
+        message, patch, global_replan_required = "", None, False
+    if deterministic_error and patch is None and not message:
+        raise deterministic_error
     if patch:
         await repo.save_planning_result(trip, state, markdown)
     return {

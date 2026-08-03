@@ -52,7 +52,7 @@ Agent 使用：
 
 ```powershell
 $env:OLLAMA_API_KEY='...'
-$env:OLLAMA_MODEL='deepseek-v4-flash:cloud'
+$env:OLLAMA_MODEL='deepseek-v4-flash:0731-cloud'
 ```
 
 当前状态、完整接口和阶段验收分别见：

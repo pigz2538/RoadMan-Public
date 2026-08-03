@@ -9,7 +9,7 @@ from app.db import SessionLocal, create_tables
 from app.domain.models import SkillResult, TripCreate, TripRequest, VehicleProfile
 from app.planning.graph import _ensure_coordinates, _movement_stage, build_planning_graph
 from app.planning.deep_drive import _ensure_daily_meals
-from app.planning.llm import OllamaRequirementExtractor, _offline_semantic_fallback, deterministic_extract
+from app.planning.llm import OllamaRequirementExtractor, deterministic_extract
 from app.planning.runner import run_planning
 from app.repositories import TripRepository, VehicleRepository
 from app.services.sse import sse_manager
@@ -74,15 +74,6 @@ def test_deterministic_extractor_does_not_guess_relationship_based_party_size():
     assert "travelers" not in extracted
     assert extracted["destination_name"] == "乌镇"
     assert "目的地周边" in extracted["preferences"]
-
-
-def test_offline_requirement_fallback_keeps_semantic_couple_size():
-    extracted = _offline_semantic_fallback(
-        {"origin_name": "湖州南浔站"},
-        "情侣出游，从湖州南浔站出发去乌镇",
-    )
-
-    assert extracted["travelers"] == 2
 
 
 def test_deterministic_extract_reads_iso_dates_adjacent_to_chinese_text():
@@ -399,7 +390,8 @@ async def test_graph_builds_two_day_markdown_plan():
         for activity in day["activities"]
     )
     assert "武汉—庐山自驾行程安排" in result["plan_markdown"]
-    assert "travelers=1" in result["trip_request"]["defaults_applied"]
+    assert result["trip_request"].get("travelers") is None
+    assert "travelers=1" not in result["trip_request"]["defaults_applied"]
 
 
 @pytest.mark.asyncio
