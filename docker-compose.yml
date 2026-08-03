@@ -90,7 +90,9 @@ services:
       context: .
       dockerfile: frontend/Dockerfile
     ports:
-      - "8080:80"
+      # Bind the unified web entrypoint on every host interface so other
+      # devices on the same LAN can open http://<host-ip>:8080.
+      - "0.0.0.0:8080:80"
     depends_on:
       backend:
         condition: service_healthy

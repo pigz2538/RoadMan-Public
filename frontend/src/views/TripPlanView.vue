@@ -69,6 +69,10 @@ const planningComplete = computed(() =>
   && store.planningPresentationIdle
   && !contentHydrating.value,
 )
+const planningProgress = computed(() => {
+  const value = store.planningEvent?.progress ?? planningSnapshot.value?.progress.value ?? 1
+  return Math.max(0, Math.min(100, Number(value) || 1))
+})
 const visiblePlanningEvents = computed(() => store.planningEvents.slice(-7))
 const planningFailure = computed(() => {
   if (planningSnapshot.value?.status !== 'failed') return null
@@ -695,11 +699,19 @@ watch(
       <div v-if="degraded" class="degraded-banner">后端暂不可用，正在加载本地行程数据。</div>
       <section v-if="!planningComplete" class="planning-live-strip glass-card">
         <span class="planning-pulse" />
-        <div>
+        <div class="planning-live-copy">
           <strong>{{ store.planningEvent?.label || 'Agent 正在继续完善行程' }}</strong>
           <small>地图、阶段、景点、用餐、住宿和补能安排会继续逐项出现</small>
+          <div
+            class="planning-meter"
+            role="progressbar"
+            aria-label="规划进度"
+            :aria-valuenow="planningProgress"
+            aria-valuemin="0"
+            aria-valuemax="100"
+          ><i :style="{ width: `${planningProgress}%` }" /></div>
         </div>
-        <b>{{ store.planningEvent?.progress || planningSnapshot?.progress.value || 1 }}%</b>
+        <b>{{ planningProgress }}%</b>
       </section>
       <section class="plan-grid">
         <aside class="trip-sidebar glass-card">

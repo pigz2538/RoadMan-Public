@@ -131,6 +131,11 @@ docker compose up --build
 
 统一入口：`http://localhost:8080`。
 
+局域网访问：Frontend 容器现在显式绑定 `0.0.0.0:8080`，同一局域网设备可访问
+`http://<运行 Docker 主机的局域网 IP>:8080`（当前开发机以太网地址为
+`http://10.10.50.58:8080`）。应用 API 仍通过 Nginx 同源代理，不需要把后端端口直接暴露给局域网。
+如果 Windows 防火墙首次拦截访问，请仅为 Docker Desktop/8080 端口允许“专用网络”入站。
+
 Conda：
 
 ```powershell

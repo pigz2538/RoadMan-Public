@@ -23,6 +23,8 @@ const prompt = ref('')
 const historyOpen = ref(false)
 const historyTrips = ref<Trip[]>([])
 const historyDeletingId = ref<string | null>(null)
+const historySelectedIds = ref<string[]>([])
+const historyBulkDeleting = ref(false)
 const weather = ref({ temperature: '--', condition: '晴', location: '武汉' })
 const activeMenu = ref('账户设置')
 const drawerOpen = ref(false)
@@ -44,6 +46,10 @@ const isFirefox = ref(false)
 // without recreating the previous oversized canvas.
 const vehicleMotionAttributes = computed(() => ({}))
 const activeClarification = computed(() => preflight.value?.issues[clarificationIndex.value])
+const allHistorySelected = computed(() =>
+  historyTrips.value.length > 0
+  && historyTrips.value.every((trip) => historySelectedIds.value.includes(trip.id)),
+)
 
 const menus = [
   { label: '账户设置', icon: CircleUserRound },
@@ -79,10 +85,52 @@ async function loadHistory() {
     historyTrips.value = trips
       .filter((trip) => trip.id !== 'trip_wuhan_lushan_demo')
       .sort((left, right) => right.id.localeCompare(left.id))
-      .slice(0, 12)
+    historySelectedIds.value = historySelectedIds.value.filter((id) => historyTrips.value.some((trip) => trip.id === id))
   } catch {
     historyTrips.value = []
+    historySelectedIds.value = []
   }
+}
+
+function toggleHistorySelection(id: string) {
+  historySelectedIds.value = historySelectedIds.value.includes(id)
+    ? historySelectedIds.value.filter((item) => item !== id)
+    : [...historySelectedIds.value, id]
+}
+
+function toggleSelectAllHistory() {
+  historySelectedIds.value = allHistorySelected.value ? [] : historyTrips.value.map((trip) => trip.id)
+}
+
+async function deleteHistoryIds(ids: string[], confirmation: string) {
+  const uniqueIds = [...new Set(ids)].filter((id) => historyTrips.value.some((trip) => trip.id === id))
+  if (!uniqueIds.length || historyBulkDeleting.value) return
+  if (!window.confirm(confirmation)) return
+  historyBulkDeleting.value = true
+  try {
+    for (const id of uniqueIds) await deleteTrip(id)
+    historySelectedIds.value = historySelectedIds.value.filter((id) => !uniqueIds.includes(id))
+    await loadHistory()
+  } catch {
+    window.alert('批量删除失败，请稍后重试。')
+    await loadHistory()
+  } finally {
+    historyBulkDeleting.value = false
+  }
+}
+
+async function clearSelectedHistory() {
+  await deleteHistoryIds(
+    historySelectedIds.value,
+    `确定删除选中的 ${historySelectedIds.value.length} 条历史规划吗？删除后无法恢复。`,
+  )
+}
+
+async function clearAllHistory() {
+  await deleteHistoryIds(
+    historyTrips.value.map((trip) => trip.id),
+    `确定清空全部 ${historyTrips.value.length} 条历史规划吗？删除后无法恢复。`,
+  )
 }
 
 function weatherCondition(code: number | null | undefined) {
@@ -151,6 +199,7 @@ function openHistoryTrip(trip: Trip) {
 }
 
 async function removeHistoryTrip(trip: Trip) {
+  if (historyBulkDeleting.value) return
   if (!window.confirm(`确定删除“${trip.title}”吗？删除后无法从历史规划恢复。`)) return
   historyDeletingId.value = trip.id
   try {
@@ -278,17 +327,46 @@ function activate(label: string) {
 
     <Transition name="menu">
       <aside v-if="historyOpen" class="history-popover glass-card" aria-label="历史规划">
-        <header><strong>历史规划</strong><button type="button" @click="loadHistory">刷新</button></header>
+        <header>
+          <strong>历史规划</strong>
+          <div class="history-header-actions">
+            <button type="button" @click="loadHistory">刷新</button>
+            <button
+              type="button"
+              :disabled="!historyTrips.length || historyBulkDeleting"
+              @click="clearAllHistory"
+            >清空全部</button>
+          </div>
+        </header>
+        <div v-if="historyTrips.length" class="history-bulk-actions">
+          <button type="button" @click="toggleSelectAllHistory">
+            {{ allHistorySelected ? '取消全选' : '全选' }}
+          </button>
+          <button
+            type="button"
+            :disabled="!historySelectedIds.length || historyBulkDeleting"
+            @click="clearSelectedHistory"
+          >删除选中{{ historySelectedIds.length ? `（${historySelectedIds.length}）` : '' }}</button>
+        </div>
         <p v-if="!historyTrips.length" class="history-empty">还没有保存的规划，完成一次规划后会自动保存在这里。</p>
         <div
           v-for="trip in historyTrips"
           :key="trip.id"
-          class="history-item"
+          :class="['history-item', { selected: historySelectedIds.includes(trip.id) }]"
           role="button"
           tabindex="0"
           @click="openHistoryTrip(trip)"
           @keydown.enter="openHistoryTrip(trip)"
         >
+          <input
+            class="history-select"
+            type="checkbox"
+            :checked="historySelectedIds.includes(trip.id)"
+            :disabled="historyBulkDeleting"
+            :aria-label="`选择历史规划：${trip.title}`"
+            @click.stop
+            @change="toggleHistorySelection(trip.id)"
+          >
           <span class="history-item-main">
             <strong>{{ trip.title }}</strong>
             <span>{{ trip.status === 'completed' ? '规划完成' : trip.status === 'planning' ? '正在规划' : '待继续' }} · {{ trip.days.length }} 天</span>
@@ -298,8 +376,8 @@ function activate(label: string) {
               type="button"
               aria-label="删除历史规划"
               title="删除"
-              :disabled="historyDeletingId === trip.id"
-              :aria-busy="historyDeletingId === trip.id"
+              :disabled="historyDeletingId === trip.id || historyBulkDeleting"
+              :aria-busy="historyDeletingId === trip.id || historyBulkDeleting"
               @click.stop="removeHistoryTrip(trip)"
             ><Trash2 :size="15" /></button>
           </span>
