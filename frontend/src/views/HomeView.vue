@@ -256,7 +256,7 @@ function activate(label: string) {
 </script>
 
 <template>
-  <main class="home-shell">
+  <main class="home-shell" :class="{ 'home-confirming': Boolean(preflight && !preflight.ready) }">
     <header class="home-top glass-card">
       <button class="profile" aria-label="打开账户菜单" @click="accountMenuOpen = !accountMenuOpen">
         <div class="avatar">陈</div>
