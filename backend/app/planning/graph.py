@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import time as monotonic_time
 from collections.abc import Awaitable, Callable
 from datetime import date, datetime, time, timedelta
 from typing import Any, Literal
@@ -29,7 +31,9 @@ from .deep_drive import (
     verify_deep_drive_plan,
 )
 from .event_research import event_research_summary, research_special_events
+from .destination_research import research_destination
 from .llm import (
+    OllamaDestinationResearchAgent,
     OllamaEventResearchAgent,
     OllamaPoiCurator,
     OllamaPoiRanker,
@@ -61,6 +65,7 @@ def build_planning_graph(
     poi_curator = OllamaPoiCurator(settings)
     poi_ranker = OllamaPoiRanker(settings)
     poi_suitability_agent = OllamaPoiSuitabilityAgent(settings)
+    destination_research_agent = OllamaDestinationResearchAgent(settings)
 
     async def emit(
         state: RoadManState,
@@ -291,6 +296,40 @@ def build_planning_graph(
         }
 
     async def discover_tourism(state: RoadManState) -> dict[str, Any]:
+        destination = state["trip_request"]["destination"]
+        await emit(
+            state,
+            "destination_research",
+            "目的地研究 Agent 正在检索目的地必去景点、代表性美食与来源",
+            65,
+            event="tool_started",
+            tool="web.destination_research",
+        )
+        destination_research = await research_destination(
+            registry,
+            destination.get("city") or destination["name"],
+            state["trip_id"],
+        )
+        try:
+            destination_research["agent_recommendations"] = await asyncio.wait_for(
+                destination_research_agent.summarize(
+                    destination.get("city") or destination["name"],
+                    destination_research,
+                    state.get("trip_request", {}),
+                ),
+                timeout=min(30, max(8, int(settings.ollama_timeout_seconds))),
+            )
+        except asyncio.TimeoutError:
+            destination_research["agent_recommendations"] = []
+            destination_research["agent_error"] = "OLLAMA_DESTINATION_RESEARCH_TIMEOUT"
+        await emit(
+            state,
+            "destination_research",
+            f"目的地研究完成：找到 {len(destination_research.get('sources', []))} 条来源，交给 POI Agent 决定是否纳入",
+            66,
+            event="tool_completed",
+            tool="web.destination_research",
+        )
         await emit(
             state,
             "flyai_poi_attractions",
@@ -299,7 +338,6 @@ def build_planning_graph(
             event="tool_started",
             tool="flyai.poi",
         )
-        destination = state["trip_request"]["destination"]
         coordinates = destination.get("coordinates")
         categories = {
             "attractions": ("景点", 25),
@@ -780,6 +818,7 @@ def build_planning_graph(
                 state["trip_request"].get("special_events", []),
                 travel_start=state["trip_request"].get("start_date"),
                 travel_end=state["trip_request"].get("end_date"),
+                destination_research=destination_research,
             )
             if agent_decisions:
                 candidates = apply_agent_ranking(candidates, agent_decisions)
@@ -805,7 +844,12 @@ def build_planning_graph(
         )
         return {
             "tourism_candidates": candidates,
-            "sources": [*state.get("sources", []), *tourism_sources],
+            "destination_research": destination_research,
+            "sources": [
+                *state.get("sources", []),
+                *tourism_sources,
+                *destination_research.get("sources", []),
+            ],
             "progress": {"node": "discover_tourism", "value": 69},
         }
 
@@ -1178,11 +1222,59 @@ def build_planning_graph(
             tool="ollama.poi_suitability",
         )
         candidates = state.get("tourism_candidates", {})
-        decisions = await poi_suitability_agent.review(
-            candidates,
-            state.get("trip_request", {}),
-            state.get("day_plans", []),
-            state.get("weather_results", []),
+        # A cloud suitability pass can legitimately take longer than a single
+        # HTTP request. Keep the planning stream alive with bounded heartbeats
+        # instead of appearing frozen at 87%, while still enforcing a finite
+        # fallback window.
+        review_task = asyncio.create_task(
+            poi_suitability_agent.review(
+                candidates,
+                state.get("trip_request", {}),
+                state.get("day_plans", []),
+                state.get("weather_results", []),
+            )
+        )
+        started_at = monotonic_time.monotonic()
+        decisions: list[dict[str, Any]] = []
+        while not review_task.done():
+            try:
+                decisions = await asyncio.wait_for(asyncio.shield(review_task), timeout=4.0)
+            except asyncio.TimeoutError:
+                elapsed = int(monotonic_time.monotonic() - started_at)
+                await emit(
+                    state,
+                    "review_tourism_suitability_wait",
+                    f"候选适配 Agent 仍在核验（已等待 {elapsed} 秒），将保留可解释的保守候选",
+                    88,
+                    event="progress",
+                    tool="ollama.poi_suitability",
+                )
+                if elapsed >= min(45, max(12, int(settings.ollama_timeout_seconds))):
+                    review_task.cancel()
+                    await emit(
+                        state,
+                        "review_tourism_suitability_timeout",
+                        "候选适配 Agent 超时，已切换到逐候选保守复核",
+                        89,
+                        event="progress",
+                        tool="ollama.poi_suitability",
+                    )
+                    break
+            except (Exception, asyncio.CancelledError):
+                decisions = []
+                break
+        if review_task.done() and not decisions:
+            try:
+                decisions = await review_task
+            except (Exception, asyncio.CancelledError):
+                decisions = []
+        await emit(
+            state,
+            "review_tourism_suitability_finalize",
+            "候选适配 Agent 已返回，正在合并每个景点的日期与天气结论",
+            89,
+            event="progress",
+            tool="ollama.poi_suitability",
         )
         if decisions:
             candidates = apply_agent_suitability(candidates, decisions)
@@ -1198,14 +1290,14 @@ def build_planning_graph(
                 f"候选逐项复核完成：Agent 返回 {len(decisions)} 条判断，"
                 f"{len(seasonal_review)} 项降为备选"
             ),
-            87,
+            89,
             event="tool_completed",
             tool="ollama.poi_suitability",
         )
         return {
             "tourism_candidates": candidates,
             "seasonal_review": seasonal_review,
-            "progress": {"node": "review_tourism_suitability", "value": 87},
+            "progress": {"node": "review_tourism_suitability", "value": 89},
         }
 
     async def load_vehicle_profile(state: RoadManState) -> dict[str, Any]:
@@ -1364,7 +1456,7 @@ def build_planning_graph(
             state,
             "enrich_deep_drive",
             "正在合并补能、驾驶休息、午餐与天气风险",
-            88,
+            90,
         )
         plans, warnings = enrich_deep_drive_plan(
             state.get("day_plans", []),
@@ -1395,7 +1487,7 @@ def build_planning_graph(
         return {
             "day_plans": plans,
             "warnings": [*state.get("warnings", []), *warnings],
-            "progress": {"node": "enrich_deep_drive", "value": 88},
+            "progress": {"node": "enrich_deep_drive", "value": 90},
         }
 
     async def schedule_tourism(state: RoadManState) -> dict[str, Any]:
@@ -1403,7 +1495,7 @@ def build_planning_graph(
             state,
             "schedule_tourism",
             "正在安排景点停留、每日餐食与过夜住宿",
-            88,
+            91,
         )
         plans = schedule_tourism_activities(
             state.get("day_plans", []),
@@ -1411,7 +1503,7 @@ def build_planning_graph(
         )
         return {
             "day_plans": plans,
-            "progress": {"node": "schedule_tourism", "value": 88},
+            "progress": {"node": "schedule_tourism", "value": 91},
         }
 
     async def review_daily_schedule_node(state: RoadManState) -> dict[str, Any]:
@@ -1419,7 +1511,7 @@ def build_planning_graph(
             state,
             "review_daily_schedule",
             "每日复核 Agent 正在检查上午、下午、晚间与三餐住宿",
-            90,
+            93,
         )
         plans, review_notes = review_daily_schedule(
             state.get("day_plans", []),
@@ -1428,11 +1520,11 @@ def build_planning_graph(
         return {
             "day_plans": plans,
             "warnings": [*state.get("warnings", []), *review_notes],
-            "progress": {"node": "review_daily_schedule", "value": 90},
+            "progress": {"node": "review_daily_schedule", "value": 93},
         }
 
     async def verify_plan(state: RoadManState) -> dict[str, Any]:
-        await emit(state, "verify_plan", "正在校验路线、交通方式、天气与时间约束", 92)
+        await emit(state, "verify_plan", "正在校验路线、交通方式、天气与时间约束", 95)
         # Normalize provider timestamps before enforcing hard constraints.
         # A service or meal can be returned at the exact start of the next
         # movement segment; move that segment forward to avoid a false blocker.
@@ -1474,11 +1566,18 @@ def build_planning_graph(
                 "passed": not any(item["severity"] == "blocker" for item in issues),
                 "issues": issues,
             },
-            "progress": {"node": "verify_plan", "value": 92},
+            "progress": {"node": "verify_plan", "value": 95},
         }
 
     async def repair_plan(state: RoadManState) -> dict[str, Any]:
-        await emit(state, "repair_plan", "正在执行一次确定性自动修复", 88)
+        await emit(
+            state,
+            "repair_plan_refined",
+            "路线复核完成，正在把修复后的阶段重新送入校验",
+            95,
+            event="progress",
+        )
+        await emit(state, "repair_plan", "正在执行一次确定性自动修复", 96)
         repaired_days = _repair_activity_stage_overlaps(state.get("day_plans", []))
         return {
             "day_plans": repaired_days,
@@ -1494,7 +1593,7 @@ def build_planning_graph(
         }
 
     async def render_markdown(state: RoadManState) -> dict[str, Any]:
-        await emit(state, "render_markdown", "正在生成 Markdown 行程安排", 94)
+        await emit(state, "render_markdown", "正在生成 Markdown 行程安排", 97)
         request = state["trip_request"]
         traveler_count = request.get("travelers")
         traveler_label = f"{traveler_count} 人" if traveler_count else "待确认人数"
@@ -1552,12 +1651,12 @@ def build_planning_graph(
             )
         return {
             "plan_markdown": "\n".join(lines),
-            "progress": {"node": "render_markdown", "value": 94},
+            "progress": {"node": "render_markdown", "value": 97},
         }
 
     async def persist_trip(state: RoadManState) -> dict[str, Any]:
-        await emit(state, "persist_trip", "正在保存并核对行程安排", 96, event="progress")
-        return {"progress": {"node": "persist_trip", "value": 96}}
+        await emit(state, "persist_trip", "正在保存并核对行程安排", 99, event="progress")
+        return {"progress": {"node": "persist_trip", "value": 99}}
 
     def after_validation(state: RoadManState) -> Literal["clarify", "route"]:
         return "clarify" if state.get("missing_fields") else "route"

@@ -47,6 +47,7 @@ const mapPickMode = ref(false)
 const mapPickCategory = ref<'attractions' | 'hotels' | 'meals'>('attractions')
 const mapPickMessage = ref('')
 const planningRestarting = ref(false)
+const historyView = computed(() => route.query.history === '1')
 let pollingTimer: number | undefined
 let refreshInFlight = false
 let refreshQueued = false
@@ -160,8 +161,16 @@ async function load() {
       store.trip = await fetchMockTrip()
     } else {
       store.trip = await fetchTrip(tripId)
-      connect(tripId)
-      await refreshPlanning()
+      const status = store.trip.status
+      const isActivePlanning = status === 'collecting' || status === 'planning'
+      // Opening a saved completed/failed trip is read-only. Do not subscribe
+      // to the old SSE backlog or replay the progressive planning animation.
+      // A historical task that is genuinely still running remains live.
+      planningSnapshot.value = await fetchPlanning(tripId)
+      if (isActivePlanning) {
+        connect(tripId, { live: historyView.value })
+        await refreshPlanning()
+      }
     }
     ensureCurrentSelection()
   } catch {
@@ -432,6 +441,9 @@ function formatTime(value: string) {
 
 function planningAgentName(event: { tool?: string; node?: string }) {
   const tools: Record<string, string> = {
+    'flyai.keyword_search': 'FlyAI 目的地检索 Agent',
+    'flyai.ai_search': 'FlyAI 语义检索 Agent',
+    'web.destination_research': '目的地研究 Agent',
     'amap.route': '高德路线 Agent',
     'amap.poi': '高德地点 Agent',
     'flyai.poi': 'FlyAI 旅行搜索 Agent',
@@ -442,6 +454,10 @@ function planningAgentName(event: { tool?: string; node?: string }) {
     'open_meteo.forecast': '天气 Agent',
   }
   const nodes: Record<string, string> = {
+    destination_research: '目的地研究 Agent',
+    review_tourism_suitability: '候选适配 Agent',
+    review_tourism_suitability_wait: '候选适配 Agent',
+    review_tourism_suitability_finalize: '候选适配 Agent',
     load_context: '上下文 Agent',
     extract_trip_request: '需求 Agent',
     apply_defaults: '需求校验 Agent',

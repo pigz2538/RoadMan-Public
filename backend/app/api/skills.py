@@ -108,6 +108,24 @@ async def flyai_hotel(
     return await registry.execute("flyai.hotel", payload, context)
 
 
+@router.post("/flyai/keyword-search")
+async def flyai_keyword_search(
+    payload: dict,
+    context: SkillContext = Depends(context_from_request),
+    registry: SkillRegistry = Depends(get_registry),
+):
+    return await registry.execute("flyai.keyword_search", payload, context)
+
+
+@router.post("/flyai/ai-search")
+async def flyai_ai_search(
+    payload: dict,
+    context: SkillContext = Depends(context_from_request),
+    registry: SkillRegistry = Depends(get_registry),
+):
+    return await registry.execute("flyai.ai_search", payload, context)
+
+
 @router.post("/opentripmap/nearby")
 async def opentripmap_nearby(
     payload: dict,

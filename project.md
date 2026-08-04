@@ -1,6 +1,16 @@
 # RoadMan 当前项目说明
 
-更新日期：2026-07-31
+## 本轮需求落实（2026-08-04）
+
+- 已新增根目录《需求落实计划.md》，把历史读取、进度心跳、目的地研究、住宿复用、餐饮轮换、导出与回归拆成可验收项。
+- 历史行程以 `history=1` 只读取持久化快照；完成/失败状态不会重新订阅旧 SSE，进行中的任务从当前游标接入。
+- 候选适配 Agent 增加等待心跳与有限超时，规划进度拆到 87/88/89，后续阶段使用 90/91/93/95/97/99，避免长时间停在 87%。
+- 住宿调度会复用同城/近距离的舒适型酒店，并过滤青旅、青年旅舍、旅舍、hostel；餐饮按评分/Agent 分数排序，三餐轮换，候选不足时明确标注复用。
+- 新增 `flyai.keyword_search` 与 `flyai.ai_search` Skill，采用 FlyAI CLI 的 `keyword-search`/`ai-search --query`，保留来源、图片、详情链接、健康状态和 SkillCall 审计。
+- 目的地研究 Agent 在 POI 检索前收集公开网页与 FlyAI 的“必去/必吃”证据，再交给 Ollama POI Ranker 决定是否纳入，不使用固定目的地名单。
+- Docker backend/worker 支持 `FLYAI_API_KEY`；当前模型默认 `deepseek-v4-flash:0731-cloud`。
+
+更新日期：2026-08-04
 
 当前版本：`0.7.0-dev`
 
@@ -28,8 +38,9 @@
 - 长途驾车按真实道路走廊上的服务区、休息点或充电站拆成独立
   `MovementStage`，每段都有独立起终点、道路点列和休息/补能间隔，不再把停靠点
   仅作为一条超长阶段中的附注。
-- 规划进度在图计算结束后停留于 96%“正在保存并核对行程安排”；只有数据库保存成功、
-  行程可立即读取后才发布 100%“规划完成”。
+- 规划进度拆分到候选研究、天气、逐项适配、日程复核、校验、渲染和持久化；候选
+  适配阶段以心跳和有限超时降级避免卡在 87%，公开 SSE 进度始终单调递增，只有
+  数据库保存成功、行程可立即读取后才发布 100%“规划完成”。
 - 真实规划 SSE 改为持续事件流，进度单调递增；不再向真实行程注入演示事件，终态为“规划完成”并立即清除进度 UI。
 - 页面统一使用“行程/行程安排”文案，移除完成后的悬浮进度条和“查看规划进度”按钮。
 - 每个目的地游览日增加返回核心区阶段，最后返回总出发点；Verification Agent 会阻断阶段断链和未闭环路线。
@@ -99,6 +110,10 @@
 - `flyai.hotel`：按目的地和入住日期搜索飞猪酒店，返回坐标、星级、实时价格区间
   与详情来源；不可用时自动降级为高德住宿 POI。
 - `flyai.poi`：按城市和关键词搜索景点与门票，支持 `¥2x` 一类脱敏价格解析。
+- `flyai.keyword_search`：FlyAI `keyword-search --query` 目的地广搜，返回景点、
+  美食等候选的标题、摘要、图片和详情链接。
+- `flyai.ai_search`：FlyAI `ai-search --query` 语义目的地检索；与公开网页结果一起
+  交给目的地研究 Agent，不直接替代 POI 策展决策。
 - `opentripmap.nearby`：境外坐标周边景点，保留英文/原始名称、距离、评分和来源。
 
 驾驶没有路线时按距离和同城条件尝试骑行、步行或公交；全部方式失败才返回
@@ -114,6 +129,7 @@
 | `AMAP_WEBSERVICE_KEY` | 后端高德 WebService |
 | `OLLAMA_API_KEY` | Ollama Cloud Requirement Agent |
 | `OLLAMA_MODEL` | Ollama Cloud 模型，默认 `deepseek-v4-flash:0731-cloud` |
+| `FLYAI_API_KEY` | FlyAI CLI/API Key（容器传给 backend/worker；也可由 FlyAI 本地配置提供） |
 | `VITE_AMAP_JSAPI_KEY` | 前端高德 JSAPI |
 | `VITE_AMAP_SECURITY_JS_CODE` | 前端高德安全码 |
 | `UPLOAD_DIR` | 上传内容目录 |
@@ -258,4 +274,5 @@ npm run dev
 - Requirement Agent 禁止把“今年暑假”“最多三天”“玩三天”等时长/季节描述擅自转换成日期；新增 `TripRequest.max_days` 保存时长上限，情侣等同行关系仍由 Ollama 语义判断人数。
 - 新增事件事实核验 Agent：Requirement preflight 和 LangGraph 都会根据 Agent 识别出的 `special_events` 做多组中文、官方天文台和 UTC/IMO 检索，保存来源链接、峰值日期、来源时间表述、观测窗口、活跃期、ZHR 与置信度；检索结果会在确认区和规划页展示。
 - 事件研究只提取来源明确的事实，无法确认小时或时区时显示原文时间表述并提示临近出发复核，不伪造具体时刻。
-- 本轮验证：后端 `68 passed, 1 skipped`；前端 `npm run build` 通过；Docker Backend/Worker/Frontend、PostgreSQL、Redis 健康，模型为 `deepseek-v4-flash:0731-cloud`。
+- 本轮验证：后端 `84 passed, 1 skipped`；`python -m compileall` 通过；前端 `npm run build` 通过；Docker Backend/Worker/Frontend、PostgreSQL、Redis 健康，模型为 `deepseek-v4-flash:0731-cloud`。
+- 真实容器冒烟：`flyai.keyword_search` 对“南京 必去景点 必吃美食”返回 10 条候选并保留图片/详情链接；`flyai.ai_search` 在当前试用服务超时后记录 `SKILL_TIMEOUT` 并降级，`/api/v1/skills/metrics` 可看到两种适配器的调用审计；Ollama Cloud 返回 200。

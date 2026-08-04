@@ -31,6 +31,10 @@ class FlyAIPoiInput(BaseModel):
     poi_level: int | None = Field(default=None, ge=1, le=5)
 
 
+class FlyAISearchInput(BaseModel):
+    query: str = Field(min_length=2, max_length=240)
+
+
 FLYAI_POI_CATEGORIES = {
     "自然风光", "山湖田园", "森林丛林", "峡谷瀑布", "沙滩海岛", "沙漠草原",
     "人文古迹", "古镇古村", "历史古迹", "园林花园", "宗教场所", "公园乐园",
@@ -278,6 +282,113 @@ class FlyAIPoiAdapter(SkillAdapter):
             "status": "ready" if shutil.which("flyai") else "degraded",
             "configured": bool(shutil.which("flyai")),
         }
+
+
+class _FlyAISearchAdapter(SkillAdapter):
+    """Shared CLI adapter for FlyAI broad and semantic destination search."""
+
+    command_name: str
+
+    async def validate_input(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return FlyAISearchInput.model_validate(payload).model_dump(mode="json")
+
+    async def execute(self, payload: dict[str, Any], _: SkillContext) -> SkillResult:
+        command = shutil.which("flyai")
+        if not command:
+            return SkillResult(
+                success=False,
+                provider="FlyAI / 飞猪",
+                warnings=["运行环境未安装 flyai CLI"],
+                error_code="SKILL_NOT_CONFIGURED",
+            )
+        request = FlyAISearchInput.model_validate(payload)
+        started = time.perf_counter()
+        process = await asyncio.create_subprocess_exec(
+            command,
+            self.command_name,
+            "--query",
+            request.query,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=_flyai_process_env(),
+        )
+        stdout, stderr = await process.communicate()
+        raw_text = stdout.decode("utf-8", errors="replace").strip()
+        try:
+            body = json.loads(raw_text)
+        except json.JSONDecodeError:
+            return SkillResult(
+                success=False,
+                provider="FlyAI / 飞猪",
+                warnings=["FlyAI 搜索未返回可解析 JSON", stderr.decode("utf-8", errors="replace")[:160]],
+                error_code="FLYAI_INVALID_RESPONSE",
+            )
+        raw_items = (body.get("data") or {}).get("itemList", [])
+        items: list[dict[str, Any]] = []
+        for raw in raw_items if isinstance(raw_items, list) else []:
+            item = raw.get("info") if isinstance(raw, dict) and isinstance(raw.get("info"), dict) else raw
+            if not isinstance(item, dict):
+                continue
+            title = str(item.get("title") or item.get("name") or "").strip()
+            if not title:
+                continue
+            items.append(
+                {
+                    "title": title[:240],
+                    "snippet": str(item.get("description") or item.get("summary") or item.get("tags") or "").strip()[:500],
+                    "detail_url": item.get("jumpUrl") or item.get("detailUrl") or item.get("url"),
+                    "image_url": item.get("picUrl") or item.get("mainPic") or item.get("imageUrl"),
+                    "rating": _float_or_none(item.get("rate") or item.get("rating")),
+                }
+            )
+        if not items:
+            return SkillResult(
+                success=False,
+                provider="FlyAI / 飞猪",
+                warnings=["FlyAI 搜索没有返回可用候选"],
+                error_code="FLYAI_NO_RESULTS",
+            )
+        return SkillResult(
+            success=True,
+            provider="FlyAI / 飞猪",
+            data={"query": request.query, "items": items, "count": len(items)},
+            sources=[
+                SourceRecord(
+                    provider="FlyAI / 飞猪",
+                    title=f"FlyAI {self.command_name} 目的地搜索",
+                    url="https://flyai.open.fliggy.com/",
+                )
+            ],
+            latency_ms=int((time.perf_counter() - started) * 1000),
+        )
+
+    async def health_check(self) -> dict[str, Any]:
+        return {
+            "status": "ready" if shutil.which("flyai") else "degraded",
+            "configured": bool(shutil.which("flyai")),
+            "command": self.command_name,
+            "api_key_configured": bool(os.getenv("FLYAI_API_KEY")),
+        }
+
+
+class FlyAIKeywordSearchAdapter(_FlyAISearchAdapter):
+    name = "flyai.keyword_search"
+    version = "1.0.0"
+    category = "travel_search"
+    command_name = "keyword-search"
+    timeout_seconds = 25
+    max_retries = 0
+    cache_ttl_seconds = 30 * 60
+
+
+class FlyAISemanticSearchAdapter(_FlyAISearchAdapter):
+    name = "flyai.ai_search"
+    version = "1.0.0"
+    category = "travel_search"
+    command_name = "ai-search"
+    timeout_seconds = 20
+    max_retries = 0
+    cache_ttl_seconds = 30 * 60
 
 
 def _float_or_none(value: object) -> float | None:

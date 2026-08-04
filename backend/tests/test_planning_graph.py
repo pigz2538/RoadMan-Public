@@ -633,7 +633,7 @@ async def test_runner_persists_state_markdown_and_trip_days():
     events = await sse_manager.after(trip.id)
     progress_values = [item.payload.progress for item in events]
     assert progress_values == sorted(progress_values)
-    assert events[-2].payload.progress == 96
+    assert events[-2].payload.progress == 99
     assert events[-1].payload.event == "planning_completed"
     assert events[-1].payload.progress == 100
     assert result["plan_markdown"].startswith("# 武汉—庐山")

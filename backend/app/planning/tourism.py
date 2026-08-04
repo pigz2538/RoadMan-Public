@@ -1,10 +1,78 @@
 from __future__ import annotations
 
 from datetime import datetime, time, timedelta
+import re
 from typing import Any
 from zoneinfo import ZoneInfo
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
+
+_INCOMFORTABLE_LODGING_RE = re.compile(
+    r"(?:青旅|青年旅舍|青年旅社|旅舍|背包客栈|hostel|backpacker)",
+    re.IGNORECASE,
+)
+
+
+def _comfortable_hotel(candidate: dict[str, Any]) -> bool:
+    """Exclude hostels from the default comfortable overnight plan."""
+    place = candidate.get("place") or {}
+    text = " ".join(str(place.get(key) or "") for key in ("name", "address"))
+    return not _INCOMFORTABLE_LODGING_RE.search(text)
+
+
+def _candidate_quality(candidate: dict[str, Any]) -> tuple[float, float, str]:
+    try:
+        score = float(candidate.get("score") or 0)
+    except (TypeError, ValueError):
+        score = 0.0
+    try:
+        rating = float(candidate.get("rating") or 0)
+    except (TypeError, ValueError):
+        rating = 0.0
+    return (-score, -rating, str((candidate.get("place") or {}).get("name") or ""))
+
+
+def _place_distance_km(left: dict[str, Any] | None, right: dict[str, Any] | None) -> float | None:
+    if not left or not right:
+        return None
+    first = left.get("coordinates") or {}
+    second = right.get("coordinates") or {}
+    try:
+        from math import asin, cos, radians, sin, sqrt
+
+        lon1, lat1 = float(first["longitude"]), float(first["latitude"])
+        lon2, lat2 = float(second["longitude"]), float(second["latitude"])
+        dlon, dlat = radians(lon2 - lon1), radians(lat2 - lat1)
+        value = sin(dlat / 2) ** 2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(dlon / 2) ** 2
+        return 6371.0088 * 2 * asin(sqrt(value))
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def _hotel_for_day(
+    hotels: list[dict[str, Any]],
+    anchor: dict[str, Any] | None,
+    previous: list[tuple[dict[str, Any], dict[str, Any] | None]],
+) -> dict[str, Any] | None:
+    """Reuse one hotel while consecutive days stay in the same area."""
+    pool = [item for item in hotels if _comfortable_hotel(item)]
+    if not pool:
+        return None
+    for selected, _selected_anchor in reversed(previous):
+        selected_place = selected.get("place") or {}
+        same_city = bool(
+            anchor
+            and selected_place.get("city")
+            and str(selected_place.get("city")).casefold() == str(anchor.get("city") or "").casefold()
+        )
+        close = _place_distance_km(selected_place, anchor)
+        if same_city or (close is not None and close <= 20):
+            return selected
+    def distance_key(item: dict[str, Any]) -> tuple[float, tuple[float, float, str]]:
+        distance = _place_distance_km(item.get("place"), anchor)
+        return (distance if distance is not None else 9999, _candidate_quality(item))
+
+    return min(pool, key=distance_key)
 
 
 def schedule_tourism_activities(
@@ -12,7 +80,7 @@ def schedule_tourism_activities(
     candidates: dict[str, list[dict[str, Any]]],
 ) -> list[dict[str, Any]]:
     """Attach executable attraction and overnight hotel activities to day plans."""
-    hotels = candidates.get("hotels", [])
+    hotels = [item for item in candidates.get("hotels", []) if _comfortable_hotel(item)]
     attraction_sources = {
         item["place"]["name"]: item
         for item in candidates.get("attractions", [])
@@ -31,6 +99,7 @@ def schedule_tourism_activities(
         for item in day.get("activities", [])
         if item.get("type") == "meal" and item.get("place", {}).get("name")
     }
+    selected_hotels: list[tuple[dict[str, Any], dict[str, Any] | None]] = []
 
     for day_index, day in enumerate(day_plans):
         # Some agent-produced day dictionaries omit the optional model id.
@@ -46,6 +115,13 @@ def schedule_tourism_activities(
         activities: list[dict[str, Any]] = []
         for activity in list(day.get("activities", [])):
             name = activity.get("place", {}).get("name")
+            if activity.get("type") == "hotel" and not _comfortable_hotel(
+                {"place": activity.get("place") or {}}
+            ):
+                # A previous snapshot may contain a hostel from before the
+                # comfort policy was enabled. Remove it so this pass can pick
+                # a valid replacement.
+                continue
             if activity.get("type") == "attraction" and name:
                 if name in seasonal_excluded_names:
                     # A re-run of the review pass can encounter a stale
@@ -69,6 +145,24 @@ def schedule_tourism_activities(
             used_names=used_meal_names,
         )
         _reschedule_meals(day, activities, stages)
+        existing_hotel = next(
+            (item for item in activities if item.get("type") == "hotel"),
+            None,
+        )
+        if existing_hotel:
+            selected_hotels.append(
+                (
+                    {"place": existing_hotel.get("place") or {}},
+                    next(
+                        (
+                            stage.get("destination")
+                            for stage in reversed(stages)
+                            if stage.get("destination")
+                        ),
+                        None,
+                    ),
+                )
+            )
         existing_names = {
             item.get("place", {}).get("name")
             for item in activities
@@ -219,7 +313,18 @@ def schedule_tourism_activities(
             and hotels
             and not any(item.get("type") == "hotel" for item in activities)
         ):
-            hotel = hotels[day_index % len(hotels)]
+            hotel_anchor = next(
+                (
+                    stage.get("destination")
+                    for stage in reversed(stages)
+                    if stage.get("destination")
+                ),
+                None,
+            )
+            hotel = _hotel_for_day(hotels, hotel_anchor, selected_hotels)
+            if hotel is None:
+                continue
+            selected_hotels.append((hotel, hotel_anchor))
             day_date = datetime.fromisoformat(f"{day['date']}T00:00:00+08:00").date()
             last_end = max(
                 (
@@ -315,7 +420,10 @@ def _ensure_meals(
         *_occupied_ranges([item for item in activities if item.get("type") != "meal"]),
         *_occupied_ranges(existing_meals),
     ]
-    available = [item for item in candidates if item.get("place", {}).get("name")]
+    available = sorted(
+        (item for item in candidates if item.get("place", {}).get("name")),
+        key=_candidate_quality,
+    )
     candidate_cursor = 0
     for meal_index, (label, window_start, window_end, preferred_time) in enumerate(definitions):
         if meal_index < len(existing_meals):
@@ -329,6 +437,17 @@ def _ensure_meals(
             ),
             None,
         )
+        reused_candidate = False
+        if candidate is None and available:
+            # Small destinations may return fewer restaurants than meal
+            # slots. Reuse the best sourced option instead of leaving a meal
+            # blank, and expose the reuse in the activity note.
+            candidate = available[candidate_cursor % len(available)]
+            reused_candidate = True
+        if reused_candidate and candidate:
+            candidate["user_note"] = (
+                f"{candidate.get('user_note') or ''}；候选池不足，已轮换复用有来源餐厅"
+            )
         if candidate:
             candidate_cursor = (available.index(candidate) + 1) % len(available)
             place = dict(candidate["place"])

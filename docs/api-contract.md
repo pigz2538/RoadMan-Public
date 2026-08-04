@@ -78,8 +78,8 @@ SSE 使用命名事件，每条事件包含单调递增的 `id:`。客户端断�
 明显不可能的移动时间窗口会在输入框上方逐题询问；Requirement Guard 还会检查
 规则库之外的语义矛盾。后续轮次复用 `previous_extracted`，已回答问题不会因换一种
 说法重复出现。所有问题解决后接口返回 `confirmation_required=true`，只有用户携带
-`confirmed=true` 再次请求并获得 `ready=true` 才能创建 Trip。图执行结束
-先发布 96% 的保存核对状态，Trip 和规划快照持久化成功后才发布 100% 终态。
+`confirmed=true` 再次请求并获得 `ready=true` 才能创建 Trip。图执行结束会先发布
+候选复核、渲染和 99% 持久化核对状态，Trip 和规划快照持久化成功后才发布 100% 终态。
 
 ## Skill Registry
 
@@ -97,6 +97,8 @@ SSE 使用命名事件，每条事件包含单调递增的 `id:`。客户端断�
 | POST | `/api/v1/skills/carinfo/search` | 固定车型样本与能耗参数 |
 | POST | `/api/v1/skills/flyai/poi` | FlyAI / 飞猪景点与门票搜索 |
 | POST | `/api/v1/skills/flyai/hotel` | FlyAI / 飞猪住宿搜索 |
+| POST | `/api/v1/skills/flyai/keyword-search` | FlyAI `keyword-search --query` 目的地广搜 |
+| POST | `/api/v1/skills/flyai/ai-search` | FlyAI `ai-search --query` 目的地语义检索 |
 | POST | `/api/v1/skills/opentripmap/nearby` | OpenTripMap 境外周边景点 |
 
 所有 Adapter 返回统一 `SkillResult`。缓存键包含 Adapter 版本与规范化参数；Redis

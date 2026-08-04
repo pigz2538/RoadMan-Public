@@ -325,10 +325,11 @@ async function loadHomeWeather() {
 
 function openHistoryTrip(trip: Trip) {
   historyOpen.value = false
+  const historyQuery = 'history=1'
   if (trip.status === 'collecting' || trip.status === 'planning') {
-    router.push(`/trips/${trip.id}/plan?planning=1`)
+    router.push(`/trips/${trip.id}/plan?planning=1&${historyQuery}`)
   } else {
-    router.push(`/trips/${trip.id}/plan`)
+    router.push(`/trips/${trip.id}/plan?${historyQuery}`)
   }
 }
 

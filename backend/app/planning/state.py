@@ -28,3 +28,4 @@ class RoadManState(TypedDict, total=False):
     messages: list[dict[str, Any]]
     special_event_research: list[dict[str, Any]]
     seasonal_review: list[dict[str, Any]]
+    destination_research: dict[str, Any]

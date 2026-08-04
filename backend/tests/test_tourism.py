@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from app.planning.recommendations import rank_tourism_candidates
@@ -5,7 +7,9 @@ from app.planning.tourism import review_daily_schedule, schedule_tourism_activit
 from app.skills.base import SkillContext
 from app.skills.flyai import (
     FlyAIHotelAdapter,
+    FlyAIKeywordSearchAdapter,
     FlyAIPoiAdapter,
+    FlyAISemanticSearchAdapter,
     _flyai_process_env,
     _parse_price,
 )
@@ -93,6 +97,118 @@ def test_tourism_scheduler_adds_attraction_and_overnight_hotel():
     assert hotel["planned_end"].startswith("2026-08-03")
     assert hotel["source_records"][0]["provider"] == "高德地图"
     assert verify_tourism_plan(scheduled, candidates) == []
+
+
+def test_tourism_scheduler_reuses_comfortable_hotel_in_same_city_and_filters_hostel():
+    days = [
+        {
+            "id": "day_1",
+            "date": "2026-08-02",
+            "items": [],
+            "activities": [],
+            "stages": [{
+                "id": "stage_1",
+                "sequence": 0,
+                "origin": {"name": "武汉", "city": "武汉市"},
+                "destination": {
+                    "name": "乌镇西栅",
+                    "city": "桐乡市",
+                    "coordinates": {"longitude": 120.48, "latitude": 30.74},
+                },
+                "planned_start": "2026-08-02T08:00:00+08:00",
+                "planned_end": "2026-08-02T10:00:00+08:00",
+            }],
+        },
+        {
+            "id": "day_2",
+            "date": "2026-08-03",
+            "items": [],
+            "activities": [],
+            "stages": [{
+                "id": "stage_2",
+                "sequence": 0,
+                "origin": {
+                    "name": "乌镇西栅",
+                    "city": "桐乡市",
+                    "coordinates": {"longitude": 120.48, "latitude": 30.74},
+                },
+                "destination": {
+                    "name": "乌镇东栅",
+                    "city": "桐乡市",
+                    "coordinates": {"longitude": 120.49, "latitude": 30.75},
+                },
+                "planned_start": "2026-08-03T09:00:00+08:00",
+                "planned_end": "2026-08-03T10:00:00+08:00",
+            }],
+        },
+        {
+            "id": "day_3",
+            "date": "2026-08-04",
+            "items": [],
+            "activities": [],
+            "stages": [],
+        },
+    ]
+    candidates = {
+        "attractions": [],
+        "meals": [],
+        "hotels": [
+            {"place": {"name": "乌镇青年旅舍", "city": "桐乡市"}, "rating": 5},
+            {
+                "place": {
+                    "name": "乌镇云水舒适酒店",
+                    "city": "桐乡市",
+                    "coordinates": {"longitude": 120.48, "latitude": 30.74},
+                },
+                "rating": 4.7,
+            },
+            {
+                "place": {
+                    "name": "乌镇另一家舒适酒店",
+                    "city": "桐乡市",
+                    "coordinates": {"longitude": 120.50, "latitude": 30.76},
+                },
+                "rating": 4.9,
+            },
+        ],
+    }
+
+    scheduled = schedule_tourism_activities(days, candidates)
+    hotel_names = [
+        next(item["place"]["name"] for item in day["activities"] if item["type"] == "hotel")
+        for day in scheduled[:2]
+    ]
+    assert hotel_names == ["乌镇云水舒适酒店", "乌镇云水舒适酒店"]
+    assert all("旅舍" not in name and "青年" not in name for name in hotel_names)
+
+
+def test_tourism_scheduler_rotates_high_quality_meals_across_days():
+    days = [
+        {"id": f"day_{index}", "date": f"2026-08-{index + 1:02d}", "items": [], "activities": [], "stages": []}
+        for index in range(2)
+    ]
+    candidates = {
+        "attractions": [],
+        "hotels": [],
+        "meals": [
+            {
+                "place": {"name": f"地方名店{index}", "city": "乌镇"},
+                "rating": 4.0 + index / 10,
+                "source_records": [{"provider": "FlyAI / 飞猪"}],
+            }
+            for index in range(6)
+        ],
+    }
+
+    scheduled = schedule_tourism_activities(days, candidates)
+    meal_names = [
+        item["place"]["name"]
+        for day in scheduled
+        for item in day["activities"]
+        if item["type"] == "meal"
+    ]
+    assert len(meal_names) == 6
+    assert len(set(meal_names)) == 6
 
 
 def test_tourism_verifier_blocks_missing_hotel_when_candidates_exist():
@@ -296,3 +412,48 @@ async def test_flyai_poi_adapter_degrades_when_cli_is_missing(monkeypatch):
     )
     assert result.success is False
     assert result.error_code == "SKILL_NOT_CONFIGURED"
+
+
+@pytest.mark.asyncio
+async def test_flyai_destination_search_adapters_execute_cli_and_keep_sources(monkeypatch):
+    calls = []
+
+    class FakeProcess:
+        async def communicate(self):
+            return (
+                json.dumps(
+                    {
+                        "data": {
+                            "itemList": [{
+                                "info": {
+                                    "title": "夫子庙",
+                                    "description": "秦淮名胜",
+                                    "jumpUrl": "https://example.test/poi",
+                                    "picUrl": "https://example.test/poi.jpg",
+                                    "rate": "4.8",
+                                }
+                            }]
+                        }
+                    },
+                    ensure_ascii=False,
+                ).encode("utf-8"),
+                b"",
+            )
+
+    monkeypatch.setattr("app.skills.flyai.shutil.which", lambda _: "flyai")
+
+    async def fake_create(*args, **kwargs):
+        calls.append(args)
+        return FakeProcess()
+
+    monkeypatch.setattr("app.skills.flyai.asyncio.create_subprocess_exec", fake_create)
+    context = SkillContext(trip_id="trip-research", metadata={"purpose": "destination_research"})
+    keyword = await FlyAIKeywordSearchAdapter().execute({"query": "南京必去景点"}, context)
+    semantic = await FlyAISemanticSearchAdapter().execute({"query": "南京代表性美食"}, context)
+
+    assert keyword.success and semantic.success
+    assert keyword.data["items"][0]["title"] == "夫子庙"
+    assert keyword.data["items"][0]["image_url"]
+    assert keyword.sources[0].provider == "FlyAI / 飞猪"
+    assert calls[0][1:3] == ("keyword-search", "--query")
+    assert calls[1][1:3] == ("ai-search", "--query")

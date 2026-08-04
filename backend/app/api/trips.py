@@ -846,6 +846,7 @@ async def planning_events(
     repo: TripRepository = Depends(get_repo),
     last_event_id: str | None = Header(default=None, alias="Last-Event-ID"),
     after: int | None = Query(default=None, ge=0),
+    live: bool = Query(default=False),
 ) -> StreamingResponse:
     if not await repo.get(trip_id) and trip_id != "trip_wuhan_lushan_demo":
         raise AppError("TRIP_NOT_FOUND", "行程不存在", 404, {"trip_id": trip_id})
@@ -853,6 +854,12 @@ async def planning_events(
         cursor = max(int(last_event_id or 0), after or 0)
     except ValueError:
         raise AppError("INVALID_LAST_EVENT_ID", "Last-Event-ID 必须为整数", 400)
+    # Historical pages can attach to an in-progress job without replaying its
+    # already persisted animation. Once the browser reconnects it supplies a
+    # Last-Event-ID, so only the initial live connection skips the backlog.
+    if live and not last_event_id and after is None:
+        existing = await sse_manager.after(trip_id, 0)
+        cursor = existing[-1].id if existing else 0
     if trip_id == "trip_wuhan_lushan_demo":
         await sse_manager.seed_planning_demo(trip_id)
 

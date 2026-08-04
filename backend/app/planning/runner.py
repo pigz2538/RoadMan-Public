@@ -21,6 +21,9 @@ from ..skills.registry import SkillRegistry
 from .graph import build_planning_graph
 
 
+_progress_floor: dict[str, int] = {}
+
+
 async def run_planning(
     trip_id: str,
     clarification_answer: str | None = None,
@@ -68,6 +71,7 @@ async def run_planning(
                     progress=1,
                 )
             )
+            _progress_floor[trip_id] = 1
 
             graph = build_planning_graph(
                 skill_registry,
@@ -183,6 +187,11 @@ async def _publish_progress(
     event: str,
     tool: str | None,
 ) -> None:
+    # Partial persistence publishes its own snapshot event in addition to the
+    # graph callback. Keep the public stream monotonic even when a repair node
+    # returns the previous snapshot value after emitting a heartbeat.
+    progress = max(_progress_floor.get(trip_id, 0), progress)
+    _progress_floor[trip_id] = progress
     await sse_manager.publish(
         SSEEvent(
             event=event,
@@ -193,6 +202,8 @@ async def _publish_progress(
             progress=progress,
         )
     )
+    if event in {"planning_completed", "planning_failed", "planning_paused"}:
+        _progress_floor.pop(trip_id, None)
 
 
 def _job_aware_progress(job_id: str | None):
@@ -257,6 +268,7 @@ async def _mark_failed(trip_id: str, exc: Exception) -> None:
         if trip:
             trip.status = TripStatus.failed
             await repo.save(trip)
+    _progress_floor.pop(trip_id, None)
     await sse_manager.publish(
         SSEEvent(
             event="planning_failed",
@@ -275,6 +287,7 @@ async def pause_planning(trip_id: str) -> None:
         if trip:
             trip.status = TripStatus.paused
             await repo.save(trip)
+    _progress_floor.pop(trip_id, None)
     await sse_manager.publish(
         SSEEvent(
             event="planning_paused",

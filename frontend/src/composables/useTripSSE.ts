@@ -18,11 +18,15 @@ export function useTripSSE(onEvent: (event: PlanningEvent) => void) {
     'clarification_required',
   ]
 
-  function connect(tripId: string) {
+  function connect(tripId: string, options: { live?: boolean } = {}) {
     source?.close()
     if (connectedTripId && connectedTripId !== tripId) lastEventId = 0
     connectedTripId = tripId
-    const cursor = lastEventId ? `?after=${lastEventId}` : ''
+    const cursor = lastEventId
+      ? `?after=${lastEventId}`
+      : options.live
+        ? '?live=1'
+        : ''
     source = new EventSource(`/api/v1/trips/${tripId}/planning/events${cursor}`)
     eventNames.forEach((name) => {
       source?.addEventListener(name, (event) => {

@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     enable_job_queue: bool = True
     amap_webservice_key: str = ""
     opentripmap_api_key: str = ""
+    flyai_api_key: str = ""
     load_local_skill_credentials: bool = True
     cors_origins: str = "http://localhost:5173"
     upload_dir: str = "./data/uploads"

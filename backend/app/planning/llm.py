@@ -353,6 +353,95 @@ class OllamaPoiCurator:
             return []
 
 
+class OllamaDestinationResearchAgent:
+    """Turn destination search evidence into source-backed highlights."""
+
+    def __init__(self, settings: Settings) -> None:
+        self.settings = settings
+
+    async def summarize(
+        self,
+        destination: str,
+        research: dict[str, Any],
+        trip_request: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        if not self.settings.ollama_api_key:
+            return []
+        evidence = [
+            {
+                "index": index,
+                "title": item.get("title"),
+                "snippet": item.get("snippet"),
+                "url": item.get("url") or item.get("detail_url"),
+                "category_hint": item.get("category_hint"),
+            }
+            for index, item in enumerate(
+                [*(research.get("web_sources") or []), *(research.get("flyai_items") or [])][:36]
+            )
+        ]
+        if not evidence:
+            return []
+        prompt = (
+            "You are RoadMan Destination Research Agent. Based ONLY on supplied web/FlyAI evidence, "
+            "identify famous, source-backed must-see attractions and representative local foods. "
+            "Do not invent names or promote obscure nearby POIs. Do not turn an experience into a place name. "
+            "Return JSON only: {\"recommendations\":[{\"name\":\"...\",\"category\":\"attractions|meals\","
+            "\"importance\":0,\"reason\":\"中文依据\",\"source_indexes\":[0]}]}. "
+            "importance is 0-100 and reflects local fame and evidence quality. "
+            f"Destination: {destination}; trip request: {json.dumps(trip_request, ensure_ascii=False)}; "
+            f"evidence: {json.dumps(evidence, ensure_ascii=False)}"
+        )
+        try:
+            async with httpx.AsyncClient(timeout=min(self.settings.ollama_timeout_seconds, 45)) as client:
+                response = await client.post(
+                    self.settings.ollama_api_url,
+                    headers={"Authorization": f"Bearer {self.settings.ollama_api_key}"},
+                    json={
+                        "model": self.settings.ollama_model,
+                        "prompt": prompt,
+                        "stream": False,
+                        "think": False,
+                        "format": "json",
+                    },
+                )
+                response.raise_for_status()
+                payload = _parse_unfiltered_json_object(response.json().get("response", ""))
+        except (httpx.HTTPError, ValueError, TypeError, json.JSONDecodeError):
+            return []
+        raw = payload.get("recommendations")
+        if not isinstance(raw, list):
+            return []
+        cleaned: list[dict[str, Any]] = []
+        for item in raw[:24]:
+            if not isinstance(item, dict):
+                continue
+            category = item.get("category")
+            name = str(item.get("name") or "").strip()
+            if category not in {"attractions", "meals"} or not name:
+                continue
+            try:
+                importance = float(item.get("importance") or 0)
+            except (TypeError, ValueError):
+                importance = 0
+            indexes = item.get("source_indexes")
+            cleaned.append(
+                {
+                    "name": name[:120],
+                    "category": category,
+                    "importance": max(0.0, min(100.0, importance)),
+                    "reason": str(item.get("reason") or "来源支持的目的地推荐").strip()[:240],
+                    "source_indexes": [
+                        int(index)
+                        for index in indexes
+                        if isinstance(index, int) and 0 <= index < len(evidence)
+                    ][:8]
+                    if isinstance(indexes, list)
+                    else [],
+                }
+            )
+        return cleaned
+
+
 class OllamaPoiRanker:
     """Rank discovered POIs from the Agent's semantic requirements.
 
@@ -373,6 +462,7 @@ class OllamaPoiRanker:
         *,
         travel_start: str | None = None,
         travel_end: str | None = None,
+        destination_research: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         if not self.settings.ollama_api_key:
             return []
@@ -400,6 +490,7 @@ class OllamaPoiRanker:
             "Assess seasonal_fit for every candidate; reject clearly off-season outdoor activities, "
             "but keep indoor or all-season venues when provider details support them. "
             "Return seasonal_fit and seasonal_reason in each decision. "
+            f"Destination research evidence (use it to prioritize famous source-backed places, never as a hard-coded list): {json.dumps(destination_research or {}, ensure_ascii=False)}. "
             "你是 RoadMan POI 行程策展 Agent。请根据已经由 Requirement Agent 提取的偏好、特殊体验、"
             "距离、评分、价格和类别，为候选景点、住宿、餐饮排序。不要从原始用户文本猜测偏好，"
             "也不要凭空创造候选；只返回候选 ID 的 JSON 决策。可以遗漏不适合的候选。"
@@ -539,7 +630,7 @@ class OllamaPoiSuitabilityAgent:
             f"\n路线地形与阶段天气：{json.dumps(route_context, ensure_ascii=False)}"
         )
         try:
-            async with httpx.AsyncClient(timeout=min(self.settings.ollama_timeout_seconds, 60)) as client:
+            async with httpx.AsyncClient(timeout=min(self.settings.ollama_timeout_seconds, 45)) as client:
                 response = await client.post(
                     self.settings.ollama_api_url,
                     headers={"Authorization": f"Bearer {self.settings.ollama_api_key}"},

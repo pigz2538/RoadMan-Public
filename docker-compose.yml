@@ -34,6 +34,7 @@ services:
       REDIS_URL: redis://redis:6379/0
       AMAP_WEBSERVICE_KEY: ${AMAP_WEBSERVICE_KEY:-}
       OPENTRIPMAP_API_KEY: ${OPENTRIPMAP_API_KEY:-}
+      FLYAI_API_KEY: ${FLYAI_API_KEY:-}
       OLLAMA_API_KEY: ${OLLAMA_API_KEY:-}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-deepseek-v4-flash:0731-cloud}
       # Docker Desktop cannot use a host-only 127.0.0.1 proxy address. Set
@@ -74,6 +75,7 @@ services:
       REDIS_URL: redis://redis:6379/0
       AMAP_WEBSERVICE_KEY: ${AMAP_WEBSERVICE_KEY:-}
       OPENTRIPMAP_API_KEY: ${OPENTRIPMAP_API_KEY:-}
+      FLYAI_API_KEY: ${FLYAI_API_KEY:-}
       OLLAMA_API_KEY: ${OLLAMA_API_KEY:-}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-deepseek-v4-flash:0731-cloud}
       HTTP_PROXY: ${ROADMAN_HTTP_PROXY:-}
