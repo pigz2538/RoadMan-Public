@@ -42,6 +42,7 @@ services:
       HTTP_PROXY: ${ROADMAN_HTTP_PROXY:-}
       HTTPS_PROXY: ${ROADMAN_HTTP_PROXY:-}
       NO_PROXY: ${ROADMAN_NO_PROXY:-localhost,127.0.0.1,postgres,redis}
+      NODE_USE_ENV_PROXY: "1"
       ENABLE_ROUTE_ELEVATION: "true"
       LOAD_LOCAL_SKILL_CREDENTIALS: "true"
       CORS_ORIGINS: http://localhost:8080
@@ -78,6 +79,7 @@ services:
       HTTP_PROXY: ${ROADMAN_HTTP_PROXY:-}
       HTTPS_PROXY: ${ROADMAN_HTTP_PROXY:-}
       NO_PROXY: ${ROADMAN_NO_PROXY:-localhost,127.0.0.1,postgres,redis}
+      NODE_USE_ENV_PROXY: "1"
       ENABLE_ROUTE_ELEVATION: "true"
       LOAD_LOCAL_SKILL_CREDENTIALS: "true"
       UPLOAD_DIR: /app/data/uploads

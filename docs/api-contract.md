@@ -96,6 +96,7 @@ SSE 使用命名事件，每条事件包含单调递增的 `id:`。客户端断�
 | POST | `/api/v1/skills/weather/forecast` | Open-Meteo 坐标天气预报 |
 | POST | `/api/v1/skills/carinfo/search` | 固定车型样本与能耗参数 |
 | POST | `/api/v1/skills/flyai/poi` | FlyAI / 飞猪景点与门票搜索 |
+| POST | `/api/v1/skills/flyai/hotel` | FlyAI / 飞猪住宿搜索 |
 | POST | `/api/v1/skills/opentripmap/nearby` | OpenTripMap 境外周边景点 |
 
 所有 Adapter 返回统一 `SkillResult`。缓存键包含 Adapter 版本与规范化参数；Redis

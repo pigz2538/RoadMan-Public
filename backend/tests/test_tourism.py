@@ -3,7 +3,12 @@ import pytest
 from app.planning.recommendations import rank_tourism_candidates
 from app.planning.tourism import review_daily_schedule, schedule_tourism_activities, verify_tourism_plan
 from app.skills.base import SkillContext
-from app.skills.flyai import FlyAIHotelAdapter, FlyAIPoiAdapter, _parse_price
+from app.skills.flyai import (
+    FlyAIHotelAdapter,
+    FlyAIPoiAdapter,
+    _flyai_process_env,
+    _parse_price,
+)
 
 
 def test_tourism_scheduler_adds_attraction_and_overnight_hotel():
@@ -235,6 +240,13 @@ async def test_flyai_hotel_adapter_degrades_when_cli_is_missing(monkeypatch):
 def test_flyai_masked_price_is_a_range_not_a_fake_exact_amount():
     assert _parse_price("¥3xx") == (300.0, 399.0, True)
     assert _parse_price("¥618") == (618.0, 618.0, False)
+
+
+def test_flyai_cli_receives_node_proxy_switch(monkeypatch):
+    monkeypatch.delenv("NODE_USE_ENV_PROXY", raising=False)
+    assert _flyai_process_env()["NODE_USE_ENV_PROXY"] == "1"
+    monkeypatch.setenv("NODE_USE_ENV_PROXY", "0")
+    assert _flyai_process_env()["NODE_USE_ENV_PROXY"] == "0"
 
 
 def test_tourism_candidates_are_ranked_by_rating_distance_and_preference():

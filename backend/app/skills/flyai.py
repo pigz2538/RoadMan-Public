@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 import shutil
 import time
@@ -38,6 +39,16 @@ FLYAI_POI_CATEGORIES = {
     "地标建筑", "市集", "文创街区", "城市观光", "户外活动", "滑雪",
     "漂流", "冲浪", "潜水", "露营", "温泉",
 }
+
+
+def _flyai_process_env() -> dict[str, str]:
+    """Pass Docker/host proxy settings to Node's built-in fetch client."""
+    environment = os.environ.copy()
+    # Node 22's undici fetch does not consume HTTP_PROXY by default.  The
+    # CLI needs this switch in the container, otherwise every call fails at
+    # DNS resolution before the FlyAI service can be reached.
+    environment.setdefault("NODE_USE_ENV_PROXY", "1")
+    return environment
 
 
 class FlyAIHotelAdapter(SkillAdapter):
@@ -86,6 +97,7 @@ class FlyAIHotelAdapter(SkillAdapter):
             *arguments,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            env=_flyai_process_env(),
         )
         stdout, _ = await process.communicate()
         text = stdout.decode("utf-8", errors="replace").strip()
@@ -192,6 +204,7 @@ class FlyAIPoiAdapter(SkillAdapter):
             *arguments,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            env=_flyai_process_env(),
         )
         stdout, _ = await process.communicate()
         try:

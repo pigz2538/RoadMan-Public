@@ -99,6 +99,15 @@ async def flyai_poi(
     return await registry.execute("flyai.poi", payload, context)
 
 
+@router.post("/flyai/hotel")
+async def flyai_hotel(
+    payload: dict,
+    context: SkillContext = Depends(context_from_request),
+    registry: SkillRegistry = Depends(get_registry),
+):
+    return await registry.execute("flyai.hotel", payload, context)
+
+
 @router.post("/opentripmap/nearby")
 async def opentripmap_nearby(
     payload: dict,
