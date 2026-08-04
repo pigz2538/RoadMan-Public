@@ -368,6 +368,33 @@ async def test_preflight_blocks_temporal_and_cross_sea_conflicts(client):
 
 
 @pytest.mark.asyncio
+async def test_preflight_resolves_chinese_weekday_return_without_clarification(client):
+    """A weekday range in the original request must survive Agent/offline parsing."""
+    today = date.today()
+    monday = today - timedelta(days=today.weekday())
+    if monday < today:
+        monday += timedelta(days=7)
+    friday = monday + timedelta(days=4)
+    response = await client.post(
+        "/api/v1/trips/preflight",
+        json={
+            "raw_text": "周一早上从武汉出发，去九宫山，周五晚上八点回来，喜欢自然景观",
+            "previous_extracted": {},
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["extracted"]["start_date"] == monday.isoformat()
+    assert body["extracted"]["end_date"] == friday.isoformat()
+    assert not {
+        (item["code"], item.get("field"))
+        for item in body["issues"]
+        if item["code"] == "MISSING_FIELD"
+    }
+
+
+@pytest.mark.asyncio
 async def test_preflight_understands_departure_then_arrival_clock_order(client):
     response = await client.post(
         "/api/v1/trips/preflight",
