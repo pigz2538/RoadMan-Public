@@ -837,11 +837,12 @@ async def planning_events(
     trip_id: str,
     repo: TripRepository = Depends(get_repo),
     last_event_id: str | None = Header(default=None, alias="Last-Event-ID"),
+    after: int | None = Query(default=None, ge=0),
 ) -> StreamingResponse:
     if not await repo.get(trip_id) and trip_id != "trip_wuhan_lushan_demo":
         raise AppError("TRIP_NOT_FOUND", "行程不存在", 404, {"trip_id": trip_id})
     try:
-        cursor = int(last_event_id or 0)
+        cursor = max(int(last_event_id or 0), after or 0)
     except ValueError:
         raise AppError("INVALID_LAST_EVENT_ID", "Last-Event-ID 必须为整数", 400)
     if trip_id == "trip_wuhan_lushan_demo":

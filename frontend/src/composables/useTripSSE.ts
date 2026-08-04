@@ -3,6 +3,8 @@ import type { PlanningEvent } from '../types/trip'
 
 export function useTripSSE(onEvent: (event: PlanningEvent) => void) {
   let source: EventSource | null = null
+  let lastEventId = 0
+  let connectedTripId = ''
   const eventNames = [
     'planning_started',
     'node_started',
@@ -18,9 +20,17 @@ export function useTripSSE(onEvent: (event: PlanningEvent) => void) {
 
   function connect(tripId: string) {
     source?.close()
-    source = new EventSource(`/api/v1/trips/${tripId}/planning/events`)
+    if (connectedTripId && connectedTripId !== tripId) lastEventId = 0
+    connectedTripId = tripId
+    const cursor = lastEventId ? `?after=${lastEventId}` : ''
+    source = new EventSource(`/api/v1/trips/${tripId}/planning/events${cursor}`)
     eventNames.forEach((name) => {
-      source?.addEventListener(name, (event) => onEvent(JSON.parse((event as MessageEvent).data)))
+      source?.addEventListener(name, (event) => {
+        const message = event as MessageEvent
+        const parsedId = Number(message.lastEventId)
+        if (Number.isFinite(parsedId) && parsedId > 0) lastEventId = parsedId
+        onEvent(JSON.parse(message.data))
+      })
     })
     // EventSource reconnects automatically after transient network failures.
     // Closing it here made the progressive plan appear permanently stalled.

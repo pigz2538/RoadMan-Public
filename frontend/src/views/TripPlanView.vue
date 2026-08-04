@@ -46,6 +46,7 @@ const attachmentMessage = ref('')
 const mapPickMode = ref(false)
 const mapPickCategory = ref<'attractions' | 'hotels' | 'meals'>('attractions')
 const mapPickMessage = ref('')
+const planningRestarting = ref(false)
 let pollingTimer: number | undefined
 let refreshInFlight = false
 let refreshQueued = false
@@ -69,6 +70,12 @@ const planningComplete = computed(() =>
   && store.planningPresentationIdle
   && !contentHydrating.value,
 )
+const planningBusy = computed(() => {
+  const status = planningSnapshot.value?.status || store.trip?.status
+  return planningRestarting.value
+    || (loading.value && route.query.planning === '1')
+    || (['planning', 'collecting'].includes(status || '') && !planningComplete.value)
+})
 const planningProgress = computed(() => {
   const value = store.planningEvent?.progress ?? planningSnapshot.value?.progress.value ?? 1
   return Math.max(0, Math.min(100, Number(value) || 1))
@@ -427,6 +434,8 @@ function planningAgentName(event: { tool?: string; node?: string }) {
   const tools: Record<string, string> = {
     'amap.route': '高德路线 Agent',
     'amap.poi': '高德地点 Agent',
+    'flyai.poi': 'FlyAI 旅行搜索 Agent',
+    'flyai.hotel': 'FlyAI 住宿搜索 Agent',
     'amap.poi/amap.route': '地图路线 Agent',
     'baidu.baike': '百科详情 Agent',
     'ollama.poi_curator': 'POI 策展 Agent',
@@ -509,11 +518,18 @@ function eventResearchDetails(item: SpecialEventResearch) {
 
 async function retryPlanning() {
   planningError.value = ''
+  planningRestarting.value = true
+  store.resetPlanningEvents()
   try {
     planningSnapshot.value = await startPlanning(String(route.params.tripId))
+    // The SSE stream closes after every terminal planning event. Reconnect so
+    // a chat-triggered global replan receives a fresh progressive timeline.
+    connect(String(route.params.tripId))
     queuePlanningRefresh(500)
   } catch (error) {
     planningError.value = error instanceof Error ? error.message : '规划任务无法重新启动'
+  } finally {
+    planningRestarting.value = false
   }
 }
 
@@ -605,6 +621,17 @@ watch(
 
 <template>
   <main class="plan-shell">
+    <Transition name="planning-overlay">
+      <div v-if="planningBusy" class="planning-overlay" role="status" aria-live="polite">
+        <section class="planning-wait-dialog glass-card">
+          <span class="planning-spinner" aria-hidden="true" />
+          <strong>{{ planningRestarting ? '正在重新规划整段行程…' : 'Agent 正在完善行程…' }}</strong>
+          <small>路线、景点、餐饮、住宿与补能安排会逐项复核，请稍候</small>
+          <div class="planning-overlay-meter" aria-hidden="true"><i :style="{ width: `${planningProgress}%` }" /></div>
+          <b>{{ planningProgress }}%</b>
+        </section>
+      </div>
+    </Transition>
     <header class="plan-top">
       <button class="ghost-button" @click="router.push('/home')"><ArrowLeft />返回主页</button>
       <div>
@@ -693,7 +720,7 @@ watch(
       </form>
       <p v-if="planningError && planningSnapshot.status !== 'failed'" class="planning-error">{{ planningError }}</p>
       </section>
-      <AgentPanel />
+      <AgentPanel @replan-requested="retryPlanning" />
     </section>
     <template v-else-if="store.trip && store.currentDay">
       <div v-if="degraded" class="degraded-banner">后端暂不可用，正在加载本地行程数据。</div>
@@ -853,7 +880,7 @@ watch(
           </div>
         </section>
 
-        <AgentPanel />
+        <AgentPanel @replan-requested="retryPlanning" />
       </section>
       <details v-if="riskStages.length" class="roadbook-card risk-card glass-card">
         <summary>

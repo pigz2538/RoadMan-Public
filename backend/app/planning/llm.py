@@ -34,11 +34,14 @@ class OllamaRequirementExtractor:
             "cross_sea_required, cross_sea_mode, past_return_requested, time_window_minutes. "
             "Dates must be YYYY-MM-DD; unknown scalar fields must be null and preferences/special_events must be arrays. "
             "Only fill start_date/end_date when the user's text explicitly gives a calendar date, a relative date "
-            "such as 今天/明天, or an unambiguous weekday. Phrases such as 今年暑假、最多三天、玩三天 are not "
+            "such as 今天/明天/后天/前天, or an unambiguous weekday. English relative dates and weekdays "
+            "(today, tomorrow, the day after tomorrow, Monday, next Sunday/next week Sunday, this weekend) must also be "
+            "resolved against Today. Phrases such as 今年暑假、最多三天、玩三天 are not "
             "calendar dates; leave both date fields null instead of inventing dates. "
             "Normalize Chinese time phrases: 中午=12:00, 下午=14:00, 晚上=19:00. "
             "Understand relative weekdays and ranges as a pair: 周一出发、周五回来 means a Monday-to-Friday "
-            "window in the same upcoming week; do not return an end date earlier than the start date. "
+            "window in the same upcoming week; 周末 means Saturday through Sunday; do not return an end date "
+            "earlier than the start date. "
             "When a weekday pair is present, resolve both concrete dates from Today instead of leaving one null. "
             "Infer travelers semantically (情侣/夫妻=2, 一家三口=3); do not default to 1 when evidence is absent. "
             "请根据语义判断同行人数，不要机械默认 1。"
@@ -615,7 +618,34 @@ def _extract_literal_constraints(raw_text: str, today: date) -> dict[str, Any]:
 
 _WEEKDAY_PATTERN = re.compile(r"(?P<scope>下周|下星期|本周|这周|周|星期)(?P<day>[一二三四五六日天])")
 _WEEKDAY_INDEX = {"一": 0, "二": 1, "三": 2, "四": 3, "五": 4, "六": 5, "日": 6, "天": 6}
-_RELATIVE_DAY_OFFSETS = {"大后天": 3, "后天": 2, "明天": 1, "今天": 0, "昨天": -1}
+_ENGLISH_WEEKDAY_PATTERN = re.compile(
+    r"(?P<scope>next\s+week\s+|next\s+|this\s+)?"
+    r"(?P<day>monday|tuesday|wednesday|thursday|friday|saturday|sunday)",
+    re.IGNORECASE,
+)
+_ENGLISH_WEEKDAY_INDEX = {
+    "monday": 0,
+    "tuesday": 1,
+    "wednesday": 2,
+    "thursday": 3,
+    "friday": 4,
+    "saturday": 5,
+    "sunday": 6,
+}
+_RELATIVE_DAY_OFFSETS = {
+    "大后天": 3,
+    "后天": 2,
+    "明天": 1,
+    "今天": 0,
+    "昨天": -1,
+    "前天": -2,
+    "the day after tomorrow": 2,
+    "day after tomorrow": 2,
+    "tomorrow": 1,
+    "today": 0,
+    "yesterday": -1,
+    "day before yesterday": -2,
+}
 
 
 def _weekday_date(match: re.Match[str], today: date) -> date:
@@ -626,6 +656,18 @@ def _weekday_date(match: re.Match[str], today: date) -> date:
     if scope in {"下周", "下星期"}:
         candidate += timedelta(days=7)
     elif scope in {"周", "星期"} and candidate < today:
+        candidate += timedelta(days=7)
+    return candidate
+
+
+def _english_weekday_date(match: re.Match[str], today: date) -> date:
+    monday = today - timedelta(days=today.weekday())
+    day = match.group("day").casefold()
+    candidate = monday + timedelta(days=_ENGLISH_WEEKDAY_INDEX[day])
+    scope = (match.group("scope") or "").strip().casefold()
+    if scope in {"next", "next week"}:
+        candidate += timedelta(days=7)
+    elif scope == "" and candidate < today:
         candidate += timedelta(days=7)
     return candidate
 
@@ -642,13 +684,15 @@ def extract_structural_constraints(raw_text: str, today: date) -> dict[str, Any]
 
     relative = list(
         re.finditer(
-            r"大后天|后天|明天|今天|昨天",
+            r"大后天|后天|明天|今天|昨天|前天|the day after tomorrow|day after tomorrow|"
+            r"day before yesterday|tomorrow|today|yesterday",
             raw_text,
+            re.IGNORECASE,
         )
     )
     if relative:
         relative_dates = [
-            today + timedelta(days=_RELATIVE_DAY_OFFSETS[item.group(0)])
+            today + timedelta(days=_RELATIVE_DAY_OFFSETS[item.group(0).casefold()])
             for item in relative[:2]
         ]
         if "start_date" not in result:
@@ -657,10 +701,25 @@ def extract_structural_constraints(raw_text: str, today: date) -> dict[str, Any]
             result["end_date"] = relative_dates[1].isoformat()
 
     weekday_matches = list(_WEEKDAY_PATTERN.finditer(raw_text))
-    if weekday_matches:
-        weekday_dates = [
-            _weekday_date(match, today) for match in weekday_matches[:2]
-        ]
+    english_weekday_matches = list(_ENGLISH_WEEKDAY_PATTERN.finditer(raw_text))
+    weekday_dates = [
+        *[_weekday_date(match, today) for match in weekday_matches[:2]],
+        *[_english_weekday_date(match, today) for match in english_weekday_matches[:2]],
+    ]
+    weekend_requested = bool(
+        re.search(r"周末|本周末|这个周末|this\s+weekend|weekend", raw_text, re.IGNORECASE)
+    )
+    if weekend_requested:
+        monday = today - timedelta(days=today.weekday())
+        saturday = monday + timedelta(days=5)
+        if saturday < today:
+            saturday += timedelta(days=7)
+        # “周末/周日” is a common shorthand. Prefer the complete weekend
+        # window over a second regex match for 周日 so it cannot become a
+        # Sunday-to-next-Saturday range.
+        weekday_dates = [saturday, saturday + timedelta(days=1)]
+    if weekday_dates:
+        weekday_dates = weekday_dates[:2]
         if len(weekday_dates) > 1 and weekday_dates[1] <= weekday_dates[0]:
             # A bare second weekday in a range belongs after the first one,
             # including ranges that cross the Sunday/Monday boundary.

@@ -291,10 +291,10 @@ def build_planning_graph(
         await emit(
             state,
             "discover_tourism",
-            "正在检索景点、餐饮与住宿候选",
+            "FlyAI Agent 正在检索景点与门票候选",
             65,
             event="tool_started",
-            tool="amap.poi",
+            tool="flyai.poi",
         )
         destination = state["trip_request"]["destination"]
         coordinates = destination.get("coordinates")
@@ -321,6 +321,92 @@ def build_planning_graph(
             tourism_sources.extend(
                 item.model_dump(mode="json") for item in flyai_pois.sources
             )
+        await emit(
+            state,
+            "discover_tourism",
+            "正在检索高德景点、餐饮与住宿候选",
+            65,
+            event="tool_started",
+            tool="amap.poi",
+        )
+        # FlyAI is also a first-class source for dining candidates.  AMap is
+        # still queried below for road-side coverage, but keeping this call
+        # separate lets the POI/ranking agents compare richer restaurant and
+        # meal metadata instead of silently falling back to one provider.
+        await emit(
+            state,
+            "discover_tourism",
+            "FlyAI Agent 正在检索餐饮候选与营业信息",
+            65,
+            event="tool_started",
+            tool="flyai.poi",
+        )
+        flyai_meals = await registry.execute(
+            "flyai.poi",
+            {
+                "city_name": destination.get("city") or destination["name"],
+                "keyword": "餐厅",
+            },
+            SkillContext(trip_id=state["trip_id"], metadata={"category": "meals"}),
+        )
+        if flyai_meals.success and isinstance(flyai_meals.data, dict):
+            meal_sources = [
+                item.model_dump(mode="json") for item in flyai_meals.sources
+            ]
+            tourism_sources.extend(meal_sources)
+            existing_meal_names = {
+                _normalize_poi_name(item.get("place", {}).get("name", ""))
+                for item in candidates["meals"]
+            }
+            for item in flyai_meals.data.get("items", []):
+                name = str(item.get("name") or "").strip()
+                longitude, latitude = item.get("longitude"), item.get("latitude")
+                if not name or longitude is None or latitude is None:
+                    continue
+                normalized = _normalize_poi_name(name)
+                if normalized in existing_meal_names:
+                    continue
+                try:
+                    longitude_value = float(longitude)
+                    latitude_value = float(latitude)
+                except (TypeError, ValueError):
+                    continue
+                candidates["meals"].append(
+                    {
+                        "place": {
+                            "id": item.get("id") or name,
+                            "name": name,
+                            "address": item.get("address"),
+                            "city": destination.get("city"),
+                            "coordinates": {
+                                "longitude": longitude_value,
+                                "latitude": latitude_value,
+                            },
+                            "source_id": item.get("id") or name,
+                        },
+                        "detail_url": item.get("detail_url"),
+                        "image_url": item.get("image_url"),
+                        "rating": item.get("rating"),
+                        "source_records": [
+                            *meal_sources,
+                            {
+                                "provider": "FlyAI / 飞猪",
+                                "title": f"{name} 餐饮详情",
+                                "url": item.get("detail_url") or "https://www.fliggy.com/",
+                            },
+                        ],
+                        "provider": flyai_meals.provider,
+                    }
+                )
+                existing_meal_names.add(normalized)
+        await emit(
+            state,
+            "discover_tourism",
+            "FlyAI Agent 已返回餐饮候选，交由 POI Agent 去重排序",
+            65,
+            event="tool_completed",
+            tool="flyai.poi",
+        )
         flyai_hotels = await registry.execute(
             "flyai.hotel",
             {

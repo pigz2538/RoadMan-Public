@@ -122,6 +122,7 @@ async function json<T>(response: Response): Promise<T> {
 export async function createTrip(
   rawText: string,
   extracted: Record<string, unknown> = {},
+  selectedVehicleId?: string,
 ): Promise<Trip> {
   return json(await fetch(`${API_BASE}/api/v1/trips`, {
     method: 'POST',
@@ -141,6 +142,7 @@ export async function createTrip(
         special_events: extracted.special_events,
         max_days: extracted.max_days,
       },
+      selected_vehicle_id: selectedVehicleId,
     }),
   }))
 }

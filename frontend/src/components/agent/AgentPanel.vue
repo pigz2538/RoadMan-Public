@@ -14,6 +14,7 @@ import {
 import { useTripStore } from '../../stores/trip'
 
 const store = useTripStore()
+const emit = defineEmits<{ 'replan-requested': [] }>()
 const message = ref('')
 const messages = ref<{ side: 'ai' | 'user', text: string }[]>([])
 const recommendationOpen = ref(false)
@@ -165,6 +166,12 @@ async function send() {
     })
     messages.value.push({ side: 'ai', text: result.message })
     if (result.patch) store.pendingPatch = result.patch
+    if (result.global_replan_required) {
+      // A global edit (for example “换成两天行程”) is not a patch preview:
+      // it must restart the planning graph so every day, route and meal is
+      // recalculated. The parent owns the live progress/SSE lifecycle.
+      emit('replan-requested')
+    }
   } catch (error) {
     messages.value.push({
       side: 'ai',

@@ -1,7 +1,7 @@
 import pytest
 
 from app.db import SessionLocal
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from app.domain.models import Activity, DayItemRef, DayPlan, Trip
 from app.domain.models import SSEEvent
@@ -277,18 +277,22 @@ async def test_candidate_patch_requires_preview_before_apply(client):
 
 @pytest.mark.asyncio
 async def test_preflight_blocks_temporal_and_cross_sea_conflicts(client):
+    start_date = date.today() + timedelta(days=2)
+    invalid_end_date = start_date - timedelta(days=1)
+    corrected_end_date = start_date + timedelta(days=1)
+    raw_text = (
+        f"{start_date.isoformat()}从上海出发跨海去海岛，{invalid_end_date.isoformat()}返回，"
+        "下午3点出发到下午3点抵达"
+    )
     response = await client.post(
         "/api/v1/trips/preflight",
         json={
-            "raw_text": (
-                "2026-08-02从上海出发跨海去海岛，2026-08-01返回，"
-                "下午3点出发到下午3点抵达"
-            ),
+            "raw_text": raw_text,
             "previous_extracted": {
                 "origin_name": "上海",
                 "destination_name": "海岛",
-                "start_date": "2026-08-02",
-                "end_date": "2026-08-01",
+                "start_date": start_date.isoformat(),
+                "end_date": invalid_end_date.isoformat(),
                 "cross_sea_required": True,
                 "cross_sea_mode": None,
                 "time_window_minutes": 30,
@@ -311,22 +315,19 @@ async def test_preflight_blocks_temporal_and_cross_sea_conflicts(client):
     assert cross_sea["options"] == ["轮渡", "飞机", "跨海大桥"]
 
     answers = {
-        "INVALID_DATE_ORDER:end_date": "2026-08-03",
+        "INVALID_DATE_ORDER:end_date": corrected_end_date.isoformat(),
         "CROSS_SEA_MODE_REQUIRED:preferences": "轮渡",
         "IMPOSSIBLE_TIME_WINDOW:time_window": "取消原到达限制，按合理车程安排",
     }
     reviewed = await client.post(
         "/api/v1/trips/preflight",
         json={
-            "raw_text": (
-                "2026-08-02从上海出发跨海去海岛，2026-08-01返回，"
-                "下午3点出发到下午3点抵达"
-            ),
+            "raw_text": raw_text,
             "previous_extracted": {
                 "origin_name": "上海",
                 "destination_name": "海岛",
-                "start_date": "2026-08-02",
-                "end_date": "2026-08-01",
+                "start_date": start_date.isoformat(),
+                "end_date": invalid_end_date.isoformat(),
                 "cross_sea_required": True,
                 "cross_sea_mode": None,
                 "time_window_minutes": 30,
@@ -340,21 +341,18 @@ async def test_preflight_blocks_temporal_and_cross_sea_conflicts(client):
     assert reviewed_body["ready"] is False
     assert reviewed_body["confirmation_required"] is True
     assert reviewed_body["issues"] == []
-    assert reviewed_body["extracted"]["end_date"] == "2026-08-03"
+    assert reviewed_body["extracted"]["end_date"] == corrected_end_date.isoformat()
     assert reviewed_body["extracted"]["cross_sea_mode"] == "轮渡"
 
     confirmed = await client.post(
         "/api/v1/trips/preflight",
         json={
-            "raw_text": (
-                "2026-08-02从上海出发跨海去海岛，2026-08-01返回，"
-                "下午3点出发到下午3点抵达"
-            ),
+            "raw_text": raw_text,
             "previous_extracted": {
                 "origin_name": "上海",
                 "destination_name": "海岛",
-                "start_date": "2026-08-02",
-                "end_date": "2026-08-01",
+                "start_date": start_date.isoformat(),
+                "end_date": invalid_end_date.isoformat(),
                 "cross_sea_required": True,
                 "cross_sea_mode": "ferry",
                 "time_window_minutes": 30,
@@ -598,6 +596,12 @@ async def test_sse_supports_last_event_id(client):
     assert "id: 3" not in resumed.text
     assert "id: 4" in resumed.text
     assert "id: 6" in resumed.text
+
+    resumed_query = await client.get(
+        "/api/v1/trips/trip_wuhan_lushan_demo/planning/events?after=3",
+    )
+    assert "id: 3" not in resumed_query.text
+    assert "id: 4" in resumed_query.text
 
 
 @pytest.mark.asyncio

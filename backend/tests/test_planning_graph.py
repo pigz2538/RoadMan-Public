@@ -93,6 +93,26 @@ def test_structural_calendar_resolves_weekday_range_from_today():
     }
 
 
+def test_structural_calendar_supports_relative_weekend_and_english_dates():
+    today = date(2026, 8, 3)
+    assert extract_structural_constraints("后天出发，前天回来", today) == {
+        "start_date": "2026-08-05",
+        "end_date": "2026-08-01",
+    }
+    assert extract_structural_constraints("this weekend出发", today) == {
+        "start_date": "2026-08-08",
+        "end_date": "2026-08-09",
+    }
+    assert extract_structural_constraints("周末周日回来", today) == {
+        "start_date": "2026-08-08",
+        "end_date": "2026-08-09",
+    }
+    assert extract_structural_constraints("next Sunday出发，Monday回来", today) == {
+        "start_date": "2026-08-16",
+        "end_date": "2026-08-17",
+    }
+
+
 @pytest.mark.asyncio
 async def test_requirement_agent_decides_semantic_party_size(monkeypatch):
     class FakeResponse:
@@ -329,6 +349,63 @@ class FakePoiAdapter(SkillAdapter):
         return {"status": "ready"}
 
 
+class FakeFlyAIPoiAdapter(SkillAdapter):
+    name = "flyai.poi"
+
+    async def execute(self, payload: dict[str, Any], _: SkillContext) -> SkillResult:
+        is_meal = payload.get("keyword") == "餐厅"
+        name = "FlyAI 餐厅" if is_meal else "FlyAI 景点"
+        return SkillResult(
+            success=True,
+            provider="fake-flyai",
+            data={
+                "items": [
+                    {
+                        "id": name,
+                        "name": name,
+                        "address": "九江测试地址",
+                        "longitude": 115.93,
+                        "latitude": 29.60,
+                        "detail_url": "https://example.test/flyai",
+                        "image_url": "https://example.test/flyai.jpg",
+                    }
+                ]
+            },
+        )
+
+    async def health_check(self) -> dict[str, Any]:
+        return {"status": "ready"}
+
+
+class FakeFlyAIHotelAdapter(SkillAdapter):
+    name = "flyai.hotel"
+
+    async def execute(self, _: dict[str, Any], __: SkillContext) -> SkillResult:
+        return SkillResult(
+            success=True,
+            provider="fake-flyai",
+            data={
+                "items": [
+                    {
+                        "id": "flyai-hotel",
+                        "name": "FlyAI 测试民宿",
+                        "address": "九江测试地址",
+                        "location": "115.93,29.60",
+                        "longitude": 115.93,
+                        "latitude": 29.60,
+                        "price_min_cny": 320,
+                        "price_max_cny": 420,
+                        "price_estimated": False,
+                        "detail_url": "https://example.test/flyai-hotel",
+                    }
+                ]
+            },
+        )
+
+    async def health_check(self) -> dict[str, Any]:
+        return {"status": "ready"}
+
+
 class FakeWeatherAdapter(SkillAdapter):
     name = "open_meteo.forecast"
 
@@ -357,12 +434,15 @@ class FakeWeatherAdapter(SkillAdapter):
         return {"status": "ready"}
 
 
-def fake_registry() -> SkillRegistry:
+def fake_registry(*, with_flyai: bool = False) -> SkillRegistry:
     registry = SkillRegistry()
     registry.register(FakeGeocodeAdapter())
     registry.register(FakeRouteAdapter())
     registry.register(FakePoiAdapter())
     registry.register(FakeWeatherAdapter())
+    if with_flyai:
+        registry.register(FakeFlyAIPoiAdapter())
+        registry.register(FakeFlyAIHotelAdapter())
     return registry
 
 
@@ -409,6 +489,32 @@ async def test_graph_builds_two_day_markdown_plan():
     assert "武汉—庐山自驾行程安排" in result["plan_markdown"]
     assert result["trip_request"].get("travelers") is None
     assert "travelers=1" not in result["trip_request"]["defaults_applied"]
+
+
+@pytest.mark.asyncio
+async def test_tourism_discovery_keeps_flyai_meal_and_hotel_candidates():
+    graph = build_planning_graph(
+        fake_registry(with_flyai=True),
+        Settings(load_local_skill_credentials=False, enable_llm_requirement_extraction=False),
+    )
+    result = await graph.ainvoke(
+        {
+            "trip_id": "trip_flyai_sources",
+            "raw_input": "周六从武汉去庐山，两天一夜",
+            "trip_request": {
+                "raw_text": "周六从武汉去庐山，两天一夜",
+                "origin": {"name": "武汉"},
+                "destination": {"name": "庐山"},
+                "start_date": "2026-08-08",
+                "end_date": "2026-08-09",
+                "max_days": 2,
+            },
+            "clarification_round": 0,
+        }
+    )
+    candidates = result["tourism_candidates"]
+    assert any(item["provider"] == "fake-flyai" for item in candidates["meals"])
+    assert any(item["provider"] == "fake-flyai" for item in candidates["hotels"])
 
 
 @pytest.mark.asyncio

@@ -14,6 +14,14 @@ import {
   startPlanning as startPlanningRequest,
   type PreflightResult,
 } from '../api/trips'
+import {
+  createVehicle,
+  deleteVehicle,
+  listVehicles,
+  updateVehicle,
+  type Vehicle,
+  type VehicleInput,
+} from '../api/vehicles'
 import type { Trip } from '../types/trip'
 
 const router = useRouter()
@@ -29,6 +37,13 @@ const weather = ref({ temperature: '--', condition: '晴', location: '武汉' })
 const activeMenu = ref('账户设置')
 const drawerOpen = ref(false)
 const accountMenuOpen = ref(false)
+const vehicles = ref<Vehicle[]>([])
+const currentVehicleId = ref('')
+const vehicleBusy = ref(false)
+const vehicleError = ref('')
+const vehicleFormOpen = ref(false)
+const vehicleEditingId = ref<string | null>(null)
+const VEHICLE_STORAGE_KEY = 'roadman:current-vehicle-id'
 const modelEnabled = ref(true)
 const modelLoaded = ref(false)
 const modelError = ref(false)
@@ -50,6 +65,33 @@ const allHistorySelected = computed(() =>
   historyTrips.value.length > 0
   && historyTrips.value.every((trip) => historySelectedIds.value.includes(trip.id)),
 )
+const currentVehicle = computed(() => vehicles.value.find((vehicle) => vehicle.id === currentVehicleId.value) || vehicles.value[0])
+const availableRange = computed(() => {
+  const vehicle = currentVehicle.value
+  if (!vehicle?.rated_range_km || vehicle.current_energy_percent == null) return 450
+  return Math.max(0, Math.round(vehicle.rated_range_km * vehicle.current_energy_percent / 100))
+})
+
+function newVehicleDraft(): VehicleInput {
+  return {
+    brand: 'RoadMan',
+    series: '纯电 SUV',
+    model: 'RoadMan 纯电 SUV',
+    power_type: 'electric',
+    rated_range_km: 560,
+    current_energy_percent: 80,
+    battery_kwh: 82,
+    consumption_per_100km: 18,
+    max_charge_kw: 180,
+    seats: 5,
+    has_etc: true,
+    mountain_ready: true,
+    unpaved_ready: false,
+    safe_energy_reserve_percent: 15,
+  }
+}
+
+const vehicleDraft = ref<VehicleInput>(newVehicleDraft())
 
 const menus = [
   { label: '账户设置', icon: CircleUserRound },
@@ -69,6 +111,7 @@ onMounted(() => {
   prompt.value = window.sessionStorage.getItem(PROMPT_STORAGE_KEY) || ''
   isFirefox.value = /firefox/i.test(navigator.userAgent)
   void loadHistory()
+  void loadVehicles()
   void loadHomeWeather()
   void import('@google/model-viewer').then(({ ModelViewerElement }) => {
     // The model is intentionally loaded, but keep adaptive rendering bounded.
@@ -78,6 +121,97 @@ onMounted(() => {
     modelError.value = true
   })
 })
+
+async function loadVehicles() {
+  try {
+    let result = await listVehicles()
+    if (!result.length) {
+      // Keep the drawer useful on a new installation while still persisting a
+      // real profile for the planning backend to consume.
+      result = [await createVehicle(newVehicleDraft())]
+    }
+    vehicles.value = result
+    const remembered = window.localStorage.getItem(VEHICLE_STORAGE_KEY)
+    currentVehicleId.value = result.some((vehicle) => vehicle.id === remembered)
+      ? remembered || result[0].id
+      : result[0].id
+    window.localStorage.setItem(VEHICLE_STORAGE_KEY, currentVehicleId.value)
+  } catch (error) {
+    // The home page can still be used when the API is offline; editing will
+    // surface the concrete request error instead of hiding the drawer.
+    vehicles.value = [{ id: 'local-default', ...newVehicleDraft() } as Vehicle]
+    currentVehicleId.value = 'local-default'
+    vehicleError.value = error instanceof Error ? error.message : '车辆列表暂不可用'
+  }
+}
+
+function selectVehicle(vehicleId: string) {
+  currentVehicleId.value = vehicleId
+  window.localStorage.setItem(VEHICLE_STORAGE_KEY, vehicleId)
+}
+
+function beginAddVehicle() {
+  vehicleEditingId.value = null
+  vehicleDraft.value = newVehicleDraft()
+  vehicleError.value = ''
+  vehicleFormOpen.value = true
+}
+
+function beginEditVehicle(vehicle: Vehicle) {
+  // The offline placeholder is not persisted; editing it creates the first
+  // real server profile instead of issuing a PATCH for a synthetic id.
+  vehicleEditingId.value = vehicle.id === 'local-default' ? null : vehicle.id
+  vehicleDraft.value = vehicle.id === 'local-default'
+    ? { ...vehicle, id: undefined }
+    : { ...vehicle }
+  vehicleError.value = ''
+  vehicleFormOpen.value = true
+}
+
+function cancelVehicleForm() {
+  vehicleFormOpen.value = false
+  vehicleEditingId.value = null
+  vehicleDraft.value = newVehicleDraft()
+}
+
+async function saveVehicle() {
+  if (vehicleBusy.value) return
+  vehicleBusy.value = true
+  vehicleError.value = ''
+  try {
+    const saved = vehicleEditingId.value
+      ? await updateVehicle(vehicleEditingId.value, vehicleDraft.value)
+      : await createVehicle(vehicleDraft.value)
+    const existingIndex = vehicles.value.findIndex((vehicle) => vehicle.id === saved.id)
+    if (existingIndex >= 0) vehicles.value.splice(existingIndex, 1, saved)
+    else vehicles.value.unshift(saved)
+    selectVehicle(saved.id)
+    cancelVehicleForm()
+  } catch (error) {
+    vehicleError.value = error instanceof Error ? error.message : '保存车辆失败'
+  } finally {
+    vehicleBusy.value = false
+  }
+}
+
+async function removeVehicle(vehicle: Vehicle) {
+  if (vehicleBusy.value || !window.confirm(`确定删除“${vehicle.brand} ${vehicle.model}”吗？`)) return
+  vehicleBusy.value = true
+  vehicleError.value = ''
+  try {
+    if (vehicle.id !== 'local-default') await deleteVehicle(vehicle.id)
+    vehicles.value = vehicles.value.filter((item) => item.id !== vehicle.id)
+    if (!vehicles.value.length) {
+      vehicles.value = [{ id: 'local-default', ...newVehicleDraft() } as Vehicle]
+    }
+    if (currentVehicleId.value === vehicle.id) selectVehicle(vehicles.value[0].id)
+    if (vehicleEditingId.value === vehicle.id) cancelVehicleForm()
+  } catch (error) {
+    vehicleError.value = error instanceof Error ? error.message : '删除车辆失败'
+  } finally {
+    vehicleBusy.value = false
+  }
+}
 
 async function loadHistory() {
   try {
@@ -262,7 +396,11 @@ async function checkPreflight(confirmed = false) {
     clarificationIndex.value = 0
     if (!preflight.value.ready) return
     planning.value = true
-    const trip = await createTrip(prompt.value.trim(), preflight.value.extracted)
+    const trip = await createTrip(
+      prompt.value.trim(),
+      preflight.value.extracted,
+      currentVehicleId.value && currentVehicleId.value !== 'local-default' ? currentVehicleId.value : undefined,
+    )
     await startPlanningRequest(trip.id)
     await router.push(`/trips/${trip.id}/plan?planning=1`)
   } catch (error) {
@@ -317,7 +455,7 @@ function activate(label: string) {
       </button>
       <div class="top-stats">
         <span><CloudSun class="sun-icon" /> {{ weather.temperature }}°C&nbsp; {{ weather.condition }} <small>{{ weather.location }}</small></span>
-        <span><CarFront class="mint-icon" /> <strong>450</strong> km <small>估算</small></span>
+        <span><CarFront class="mint-icon" /> <strong>{{ availableRange }}</strong> km <small>估算可用</small></span>
         <button class="history-button" type="button" @click="historyOpen = !historyOpen">
           <History :size="20" />历史规划<span>{{ historyTrips.length }}</span>
         </button>
@@ -619,14 +757,62 @@ function activate(label: string) {
         <SlidersHorizontal :size="22" />
         <h2>{{ activeMenu }}</h2>
         <template v-if="activeMenu === '车型管理/选择'">
-          <span class="status-pill">当前车辆</span>
-          <h3>RoadMan 纯电 SUV</h3>
-          <dl>
-            <div><dt>额定续航</dt><dd>560 km</dd></div>
-            <div><dt>当前电量</dt><dd>80%</dd></div>
-            <div><dt>估算可用</dt><dd>450 km</dd></div>
-            <div><dt>座位数</dt><dd>5</dd></div>
-          </dl>
+          <div class="vehicle-drawer-heading">
+            <span class="status-pill">当前车辆</span>
+            <button type="button" class="text-button" @click="beginAddVehicle">添加车型</button>
+          </div>
+          <p v-if="vehicleError" class="vehicle-error">{{ vehicleError }}</p>
+          <div class="vehicle-list">
+            <article
+              v-for="vehicle in vehicles"
+              :key="vehicle.id"
+              :class="['vehicle-item', { selected: vehicle.id === currentVehicle?.id }]"
+              @click="selectVehicle(vehicle.id)"
+            >
+              <button type="button" class="vehicle-item-main" @click.stop="selectVehicle(vehicle.id)">
+                <strong>{{ vehicle.brand }} {{ vehicle.model }}</strong>
+                <small>{{ vehicle.power_type === 'electric' ? '纯电' : vehicle.power_type === 'hybrid' ? '混动' : '燃油' }} · {{ vehicle.seats }} 座</small>
+              </button>
+              <div class="vehicle-item-actions">
+                <button type="button" title="编辑车型" @click.stop="beginEditVehicle(vehicle)">编辑</button>
+                <button type="button" title="删除车型" @click.stop="removeVehicle(vehicle)">删除</button>
+              </div>
+            </article>
+          </div>
+          <template v-if="currentVehicle">
+            <h3>{{ currentVehicle.brand }} {{ currentVehicle.model }}</h3>
+            <dl>
+              <div><dt>额定续航</dt><dd>{{ currentVehicle.rated_range_km || '--' }} km</dd></div>
+              <div><dt>当前电量</dt><dd>{{ currentVehicle.current_energy_percent ?? '--' }}%</dd></div>
+              <div><dt>估算可用</dt><dd>{{ availableRange }} km</dd></div>
+              <div><dt>座位数</dt><dd>{{ currentVehicle.seats }}</dd></div>
+            </dl>
+          </template>
+          <form v-if="vehicleFormOpen" class="vehicle-form" @submit.prevent="saveVehicle">
+            <strong>{{ vehicleEditingId ? '编辑车型' : '添加车型' }}</strong>
+            <div class="vehicle-form-grid">
+              <input v-model="vehicleDraft.brand" required placeholder="品牌" aria-label="品牌">
+              <input v-model="vehicleDraft.series" required placeholder="车系" aria-label="车系">
+              <input v-model="vehicleDraft.model" required placeholder="车型名称" aria-label="车型名称">
+              <select v-model="vehicleDraft.power_type" aria-label="动力类型">
+                <option value="electric">纯电</option>
+                <option value="hybrid">混动</option>
+                <option value="fuel">燃油</option>
+              </select>
+              <input v-model.number="vehicleDraft.rated_range_km" type="number" min="1" placeholder="额定续航 km" aria-label="额定续航">
+              <input v-model.number="vehicleDraft.current_energy_percent" type="number" min="0" max="100" placeholder="当前电量 %" aria-label="当前电量">
+              <input v-model.number="vehicleDraft.battery_kwh" type="number" min="1" placeholder="电池容量 kWh" aria-label="电池容量">
+              <input v-model.number="vehicleDraft.consumption_per_100km" type="number" min="1" placeholder="百公里能耗" aria-label="百公里能耗">
+              <input v-model.number="vehicleDraft.seats" type="number" min="1" max="20" placeholder="座位数" aria-label="座位数">
+              <input v-model.number="vehicleDraft.safe_energy_reserve_percent" type="number" min="5" max="40" placeholder="安全余量 %" aria-label="安全余量">
+            </div>
+            <label class="vehicle-check"><input v-model="vehicleDraft.has_etc" type="checkbox"> 已办理 ETC</label>
+            <label class="vehicle-check"><input v-model="vehicleDraft.mountain_ready" type="checkbox"> 适合山路</label>
+            <div class="vehicle-form-actions">
+              <button type="button" class="secondary-button" @click="cancelVehicleForm">取消</button>
+              <button type="submit" class="primary-button" :disabled="vehicleBusy">{{ vehicleBusy ? '保存中…' : '保存车型' }}</button>
+            </div>
+          </form>
         </template>
         <p v-else>该模块已保留静态交互入口，将在对应阶段接入正式设置表单。</p>
       </aside>
