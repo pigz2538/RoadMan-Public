@@ -220,6 +220,9 @@ watch(() => store.pendingPatch?.id, (patchId) => {
           <p v-if="candidate.seasonal_excluded" class="recommendation-seasonal-warning">
             {{ candidate.seasonal_warning || candidate.seasonal_reason || '当前出行日期可能不适合，已降为备选' }}
           </p>
+          <p v-else-if="candidate.suitability_reason" class="recommendation-suitability">
+            {{ candidate.suitability_reason }}
+          </p>
           <p v-if="candidate.description" class="recommendation-description">{{ candidate.description }}</p>
           <a
             v-if="candidate.detail_url || candidate.source_records?.find((item) => item.url)"

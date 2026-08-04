@@ -73,6 +73,13 @@ export interface RecommendationCandidate {
   seasonal_excluded?: boolean
   seasonal_warning?: string
   seasonal_reason?: string
+  agent_suitability?: boolean
+  suitability_confidence?: 'high' | 'medium' | 'low'
+  suitability_reason?: string
+  weather_fit_reason?: string
+  terrain_fit_reason?: string
+  personal_fit_reason?: string
+  elevation_m?: number
   recommendation_reasons?: string[]
   agent_reason?: string
   description?: string

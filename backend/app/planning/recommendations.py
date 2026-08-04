@@ -87,6 +87,30 @@ def apply_agent_ranking(
     return candidates
 
 
+def apply_agent_suitability(
+    candidates: dict[str, list[dict[str, Any]]],
+    decisions: list[dict[str, Any]],
+) -> dict[str, list[dict[str, Any]]]:
+    """Attach per-candidate condition checks without deleting alternatives."""
+    by_id = {
+        str(decision.get("candidate_id")): decision
+        for decision in decisions
+        if decision.get("candidate_id")
+    }
+    for items in candidates.values():
+        for item in items:
+            decision = by_id.get(str(item.get("candidate_id")))
+            if not decision:
+                continue
+            item["agent_suitability"] = bool(decision["suitable"])
+            item["suitability_confidence"] = decision.get("confidence", "low")
+            item["suitability_reason"] = decision.get("reason")
+            item["weather_fit_reason"] = decision.get("weather_reason")
+            item["terrain_fit_reason"] = decision.get("terrain_reason")
+            item["personal_fit_reason"] = decision.get("personal_reason")
+    return candidates
+
+
 def _distance_km(
     first: dict[str, Any],
     second: dict[str, Any],

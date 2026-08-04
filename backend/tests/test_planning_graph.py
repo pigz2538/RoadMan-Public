@@ -507,9 +507,15 @@ async def test_graph_builds_two_day_markdown_plan():
 
 @pytest.mark.asyncio
 async def test_tourism_discovery_keeps_flyai_meal_and_hotel_candidates():
+    progress_events = []
+
+    async def collect_progress(trip_id, node, label, progress, event, tool):
+        progress_events.append((node, label, event, tool))
+
     graph = build_planning_graph(
         fake_registry(with_flyai=True),
         Settings(load_local_skill_credentials=False, enable_llm_requirement_extraction=False),
+        progress_callback=collect_progress,
     )
     result = await graph.ainvoke(
         {
@@ -529,6 +535,15 @@ async def test_tourism_discovery_keeps_flyai_meal_and_hotel_candidates():
     candidates = result["tourism_candidates"]
     assert any(item["provider"] == "fake-flyai" for item in candidates["meals"])
     assert any(item["provider"] == "fake-flyai" for item in candidates["hotels"])
+    assert {
+        "flyai_poi_attractions",
+        "flyai_poi_meals",
+        "flyai_hotels",
+    } <= {event[0] for event in progress_events}
+    assert any(
+        event[0] == "flyai_hotels" and event[2] == "tool_completed"
+        for event in progress_events
+    )
 
 
 @pytest.mark.asyncio

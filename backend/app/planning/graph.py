@@ -33,9 +33,10 @@ from .llm import (
     OllamaEventResearchAgent,
     OllamaPoiCurator,
     OllamaPoiRanker,
+    OllamaPoiSuitabilityAgent,
     OllamaRequirementExtractor,
 )
-from .recommendations import apply_agent_ranking, rank_tourism_candidates
+from .recommendations import apply_agent_ranking, apply_agent_suitability, rank_tourism_candidates
 from .poi_enrichment import enrich_tourism_candidates
 from .seasonality import apply_seasonal_guard, parse_trip_date
 from .state import RoadManState
@@ -59,6 +60,7 @@ def build_planning_graph(
     event_research_agent = OllamaEventResearchAgent(settings)
     poi_curator = OllamaPoiCurator(settings)
     poi_ranker = OllamaPoiRanker(settings)
+    poi_suitability_agent = OllamaPoiSuitabilityAgent(settings)
 
     async def emit(
         state: RoadManState,
@@ -291,7 +293,7 @@ def build_planning_graph(
     async def discover_tourism(state: RoadManState) -> dict[str, Any]:
         await emit(
             state,
-            "discover_tourism",
+            "flyai_poi_attractions",
             "FlyAI Agent 正在检索景点与门票候选",
             65,
             event="tool_started",
@@ -324,6 +326,18 @@ def build_planning_graph(
             )
         await emit(
             state,
+            "flyai_poi_attractions",
+            (
+                f"FlyAI 景点候选已返回 {len(flyai_ticket_items)} 项"
+                if flyai_pois.success
+                else "FlyAI 景点搜索暂不可用，后续由高德与其他来源补充"
+            ),
+            65,
+            event="tool_completed",
+            tool="flyai.poi",
+        )
+        await emit(
+            state,
             "discover_tourism",
             "正在检索高德景点、餐饮与住宿候选",
             65,
@@ -336,7 +350,7 @@ def build_planning_graph(
         # meal metadata instead of silently falling back to one provider.
         await emit(
             state,
-            "discover_tourism",
+            "flyai_poi_meals",
             "FlyAI Agent 正在检索餐饮候选与营业信息",
             65,
             event="tool_started",
@@ -402,11 +416,23 @@ def build_planning_graph(
                 existing_meal_names.add(normalized)
         await emit(
             state,
-            "discover_tourism",
-            "FlyAI Agent 已返回餐饮候选，交由 POI Agent 去重排序",
+            "flyai_poi_meals",
+            (
+                f"FlyAI 餐饮候选已返回 {len(candidates['meals'])} 项，交由 POI Agent 去重排序"
+                if flyai_meals.success
+                else "FlyAI 餐饮搜索暂不可用，后续由高德餐饮候选补充"
+            ),
             65,
             event="tool_completed",
             tool="flyai.poi",
+        )
+        await emit(
+            state,
+            "flyai_hotels",
+            "FlyAI Agent 正在检索入住日期内的酒店与民宿候选",
+            65,
+            event="tool_started",
+            tool="flyai.hotel",
         )
         flyai_hotels = await registry.execute(
             "flyai.hotel",
@@ -457,6 +483,18 @@ def build_planning_graph(
                         ),
                     }
                 )
+        await emit(
+            state,
+            "flyai_hotels",
+            (
+                f"FlyAI 住宿候选已返回 {len(candidates['hotels'])} 项"
+                if flyai_hotels.success
+                else "FlyAI 住宿搜索暂不可用，后续由高德住宿候选补充"
+            ),
+            65,
+            event="tool_completed",
+            tool="flyai.hotel",
+        )
         for category, (keywords, page_size) in categories.items():
             if category == "hotels" and candidates["hotels"]:
                 continue
@@ -753,20 +791,6 @@ def build_planning_graph(
                 event="tool_completed",
                 tool="ollama.poi_ranker",
             )
-        candidates, seasonal_review = apply_seasonal_guard(
-            candidates,
-            parse_trip_date(state["trip_request"].get("start_date")),
-            parse_trip_date(state["trip_request"].get("end_date")),
-        )
-        if seasonal_review:
-            await emit(
-                state,
-                "review_seasonality",
-                f"季节复核已将 {len(seasonal_review)} 个不合时令候选降为备选",
-                69,
-                event="tool_completed",
-                tool="seasonality.guard",
-            )
         await emit(
             state,
             "discover_tourism",
@@ -781,7 +805,6 @@ def build_planning_graph(
         )
         return {
             "tourism_candidates": candidates,
-            "seasonal_review": seasonal_review,
             "sources": [*state.get("sources", []), *tourism_sources],
             "progress": {"node": "discover_tourism", "value": 69},
         }
@@ -1143,6 +1166,46 @@ def build_planning_graph(
             ],
             "sources": [*state.get("sources", []), *weather_sources],
             "progress": {"node": "sample_weather", "value": 86},
+        }
+
+    async def review_tourism_suitability(state: RoadManState) -> dict[str, Any]:
+        await emit(
+            state,
+            "review_tourism_suitability",
+            "POI Agent 正在逐项结合日期、天气、气温、海拔与用户偏好复核候选",
+            87,
+            event="tool_started",
+            tool="ollama.poi_suitability",
+        )
+        candidates = state.get("tourism_candidates", {})
+        decisions = await poi_suitability_agent.review(
+            candidates,
+            state.get("trip_request", {}),
+            state.get("day_plans", []),
+            state.get("weather_results", []),
+        )
+        if decisions:
+            candidates = apply_agent_suitability(candidates, decisions)
+        candidates, seasonal_review = apply_seasonal_guard(
+            candidates,
+            parse_trip_date(state.get("trip_request", {}).get("start_date")),
+            parse_trip_date(state.get("trip_request", {}).get("end_date")),
+        )
+        await emit(
+            state,
+            "review_tourism_suitability",
+            (
+                f"候选逐项复核完成：Agent 返回 {len(decisions)} 条判断，"
+                f"{len(seasonal_review)} 项降为备选"
+            ),
+            87,
+            event="tool_completed",
+            tool="ollama.poi_suitability",
+        )
+        return {
+            "tourism_candidates": candidates,
+            "seasonal_review": seasonal_review,
+            "progress": {"node": "review_tourism_suitability", "value": 87},
         }
 
     async def load_vehicle_profile(state: RoadManState) -> dict[str, Any]:
@@ -1516,6 +1579,7 @@ def build_planning_graph(
     builder.add_node("build_local_routes", build_local_routes)
     builder.add_node("build_stages", build_stages)
     builder.add_node("sample_weather", sample_weather)
+    builder.add_node("review_tourism_suitability", review_tourism_suitability)
     builder.add_node("load_vehicle_profile", load_vehicle_profile)
     builder.add_node("discover_services", discover_services)
     builder.add_node("enrich_deep_drive", enrich_deep_drive)
@@ -1543,7 +1607,8 @@ def build_planning_graph(
     builder.add_edge("build_stages", "load_vehicle_profile")
     builder.add_edge("load_vehicle_profile", "discover_services")
     builder.add_edge("discover_services", "sample_weather")
-    builder.add_edge("sample_weather", "enrich_deep_drive")
+    builder.add_edge("sample_weather", "review_tourism_suitability")
+    builder.add_edge("review_tourism_suitability", "enrich_deep_drive")
     builder.add_edge("enrich_deep_drive", "schedule_tourism")
     builder.add_edge("schedule_tourism", "review_daily_schedule")
     builder.add_edge("review_daily_schedule", "verify_plan")

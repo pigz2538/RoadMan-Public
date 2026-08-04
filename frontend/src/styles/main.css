@@ -539,6 +539,7 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .patch-card dl { margin: 0; display: grid; gap: 5px; }.patch-card dl div { display: flex; justify-content: space-between; font-size: 12px; }.patch-card dt { color: var(--muted); }.patch-card dd { margin: 0; font-weight: 600; }.patch-card .good { color: #159c7d; }
 .recommendation-description, .activity-description { color: #5b708d; line-height: 1.55; font-size: 12px; margin: 5px 0 0; }
 .recommendation-seasonal-warning { color: #b56a12 !important; font-size: 12px; font-weight: 650; }
+.recommendation-suitability { color: #27765d !important; font-size: 12px; }
 .recommendation-list article footer button:disabled { color: #8c9ab0; background: #eef2f7; border-color: #dce3ec; cursor: not-allowed; }
 .patch-card > div { margin-top: 10px; display: grid; grid-template-columns: 1fr 1.4fr; gap: 7px; }.patch-card button { padding: 8px; border: 1px solid #d7e0ed; border-radius: 9px; background: white; font-size: 12px; cursor: pointer; }.patch-card button.apply { background: var(--blue); color: white; border-color: var(--blue); }
 .suggestions { padding: 0 12px 8px; display: flex; gap: 5px; flex-wrap: wrap; }

@@ -97,23 +97,40 @@ def apply_seasonal_guard(
             continue
         for item in items:
             assessment = assess_candidate_season(item, start_date, end_date)
-            # A remote Agent decision has priority, while the deterministic
-            # guard can still reject an unmistakable off-season activity.
-            agent_fit = item.get("seasonal_fit")
-            if agent_fit is False:
+            # The per-candidate suitability Agent is authoritative when it
+            # returned a confident decision. The local guard is only used for
+            # missing/low-confidence Agent output or an obvious safety signal.
+            agent_suitability = item.get("agent_suitability")
+            suitability_confidence = item.get("suitability_confidence")
+            agent_authoritative = (
+                isinstance(agent_suitability, bool)
+                and suitability_confidence in {"high", "medium"}
+            )
+            if agent_authoritative:
                 assessment = {
-                    "seasonal_fit": False,
-                    "seasonal_reason": item.get("seasonal_reason")
-                    or item.get("agent_seasonal_reason")
-                    or "Agent 判断与当前出行季节不匹配",
+                    "seasonal_fit": agent_suitability,
+                    "seasonal_reason": item.get("suitability_reason")
+                    or "Agent 已结合日期、天气、地形与偏好复核",
                 }
-            elif assessment["seasonal_fit"] is None and agent_fit is not None:
-                assessment = {
-                    "seasonal_fit": bool(agent_fit),
-                    "seasonal_reason": item.get("seasonal_reason")
-                    or item.get("agent_seasonal_reason")
-                    or "Agent 季节适配判断",
-                }
+            # A rank-level seasonal flag is weaker than a confident
+            # candidate-level suitability decision. Keep it as a fallback
+            # only when the candidate review did not return a usable answer.
+            if not agent_authoritative:
+                agent_fit = item.get("seasonal_fit")
+                if agent_fit is False:
+                    assessment = {
+                        "seasonal_fit": False,
+                        "seasonal_reason": item.get("seasonal_reason")
+                        or item.get("agent_seasonal_reason")
+                        or "候选与当前出行季节不匹配",
+                    }
+                elif assessment["seasonal_fit"] is None and agent_fit is not None:
+                    assessment = {
+                        "seasonal_fit": bool(agent_fit),
+                        "seasonal_reason": item.get("seasonal_reason")
+                        or item.get("agent_seasonal_reason")
+                        or "已完成季节适配判断",
+                    }
             item.update(assessment)
             item["seasonal_excluded"] = assessment["seasonal_fit"] is False
             if item["seasonal_excluded"]:

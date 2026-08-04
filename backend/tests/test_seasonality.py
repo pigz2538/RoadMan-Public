@@ -1,5 +1,6 @@
 from datetime import date
 
+from app.planning.recommendations import apply_agent_suitability
 from app.planning.seasonality import apply_seasonal_guard, assess_candidate_season
 
 
@@ -26,3 +27,19 @@ def test_guard_keeps_unsuitable_items_visible_as_backups():
     excluded = next(item for item in candidates["attractions"] if item["place"]["name"] == "赏枫步道")
     assert excluded["seasonal_excluded"] is True
     assert report[0]["name"] == "赏枫步道"
+
+
+def test_confident_agent_can_override_broad_fallback_with_provider_context():
+    candidates = {"attractions": [_candidate("室内滑雪馆", description="全年室内恒温雪场")]}
+    candidates = apply_agent_suitability(
+        candidates,
+        [{
+            "candidate_id": "室内滑雪馆",
+            "suitable": True,
+            "confidence": "high",
+            "reason": "Agent 根据室内全年运营和恒温说明判断可用",
+        }],
+    )
+    candidates, report = apply_seasonal_guard(candidates, date(2026, 8, 11))
+    assert candidates["attractions"][0]["seasonal_excluded"] is False
+    assert report == []

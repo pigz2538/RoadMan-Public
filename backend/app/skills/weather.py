@@ -69,6 +69,7 @@ class OpenMeteoForecastAdapter(SkillAdapter):
             data={
                 "latitude": body.get("latitude"),
                 "longitude": body.get("longitude"),
+                "elevation_m": body.get("elevation"),
                 "timezone": body.get("timezone"),
                 "current": body.get("current"),
                 "hourly_samples": samples,

@@ -459,6 +459,190 @@ class OllamaPoiRanker:
         return cleaned
 
 
+class OllamaPoiSuitabilityAgent:
+    """Review every candidate against the actual travel conditions.
+
+    Ranking answers "which option is attractive".  This pass answers the
+    stricter question "can this specific option reasonably be visited on the
+    requested dates" using the candidate metadata, forecast, terrain and the
+    already extracted user preferences.  A missing/invalid answer is ignored
+    so the deterministic planner can keep working offline.
+    """
+
+    def __init__(self, settings: Settings) -> None:
+        self.settings = settings
+
+    async def review(
+        self,
+        candidates: dict[str, list[dict[str, Any]]],
+        trip_request: dict[str, Any],
+        day_plans: list[dict[str, Any]],
+        weather_results: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        if not self.settings.ollama_api_key:
+            return []
+        compact: list[dict[str, Any]] = []
+        for category, items in candidates.items():
+            for item in items:
+                place = item.get("place") or {}
+                coordinates = place.get("coordinates") or {}
+                compact.append(
+                    {
+                        "candidate_id": item.get("candidate_id"),
+                        "category": category,
+                        "name": place.get("name"),
+                        "address": place.get("address"),
+                        "description": item.get("description"),
+                        "categories": item.get("categories") or item.get("kinds"),
+                        "rating": item.get("rating"),
+                        "elevation_m": item.get("elevation_m"),
+                        "coordinates": coordinates,
+                        "provider": item.get("provider"),
+                        "opening_hours": item.get("opening_hours"),
+                    }
+                )
+        if not compact:
+            return []
+        weather = _compact_weather_centers(weather_results)
+        candidate_weather = _match_candidate_weather(compact, weather)
+        route_context = [
+            {
+                "day": day.get("date"),
+                "stages": [
+                    {
+                        "destination": (stage.get("destination") or {}).get("name"),
+                        "elevation_gain_m": stage.get("elevation_gain_m"),
+                        "weather": stage.get("weather_summary"),
+                    }
+                    for stage in day.get("stages", [])
+                ],
+            }
+            for day in day_plans
+        ]
+        prompt = (
+            "You are RoadMan's POI safety and suitability Agent. Review EVERY "
+            "candidate independently; do not use a fixed month table. Consider "
+            "the requested date range, forecast temperature/precipitation/wind, "
+            "elevation and terrain, opening information, activity characteristics, "
+            "travel mode, party size and the user's preferences/special events. "
+            "A seasonal activity can still be suitable when the provider details, "
+            "indoor setting or local conditions support it. Mark unsuitable only "
+            "when the evidence makes it unreasonable or unsafe. Return ONLY JSON: "
+            '{"decisions":[{"candidate_id":"...","suitable":true,'
+            '"confidence":"high|medium|low","reason":"中文依据",'
+            '"weather_reason":"...","terrain_reason":"...",'
+            '"personal_reason":"..."}]}。必须覆盖输入中的每个 candidate_id。'
+            f"\n行程需求：{json.dumps({key: trip_request.get(key) for key in ('start_date', 'end_date', 'preferences', 'special_events', 'travelers', 'destination')}, ensure_ascii=False)}"
+            f"\n候选：{json.dumps(compact, ensure_ascii=False)}"
+            f"\n天气中心：{json.dumps(weather, ensure_ascii=False)}"
+            f"\n候选对应天气：{json.dumps(candidate_weather, ensure_ascii=False)}"
+            f"\n路线地形与阶段天气：{json.dumps(route_context, ensure_ascii=False)}"
+        )
+        try:
+            async with httpx.AsyncClient(timeout=min(self.settings.ollama_timeout_seconds, 60)) as client:
+                response = await client.post(
+                    self.settings.ollama_api_url,
+                    headers={"Authorization": f"Bearer {self.settings.ollama_api_key}"},
+                    json={
+                        "model": self.settings.ollama_model,
+                        "prompt": prompt,
+                        "stream": False,
+                        "think": False,
+                        "format": "json",
+                    },
+                )
+                response.raise_for_status()
+                payload = _parse_unfiltered_json_object(response.json().get("response", ""))
+        except (httpx.HTTPError, ValueError, TypeError, json.JSONDecodeError):
+            return []
+        decisions = payload.get("decisions")
+        if not isinstance(decisions, list):
+            return []
+        valid_ids = {str(item.get("candidate_id")) for item in compact}
+        cleaned: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for item in decisions:
+            if not isinstance(item, dict):
+                continue
+            candidate_id = str(item.get("candidate_id") or "")
+            suitable = item.get("suitable")
+            if (
+                not candidate_id
+                or candidate_id not in valid_ids
+                or candidate_id in seen
+                or not isinstance(suitable, bool)
+            ):
+                continue
+            confidence = str(item.get("confidence") or "low").lower()
+            if confidence not in {"high", "medium", "low"}:
+                confidence = "low"
+            seen.add(candidate_id)
+            cleaned.append(
+                {
+                    "candidate_id": candidate_id,
+                    "suitable": suitable,
+                    "confidence": confidence,
+                    "reason": str(item.get("reason") or "Agent 综合日期、天气、地形与偏好复核").strip()[:240],
+                    "weather_reason": str(item.get("weather_reason") or "").strip()[:160],
+                    "terrain_reason": str(item.get("terrain_reason") or "").strip()[:160],
+                    "personal_reason": str(item.get("personal_reason") or "").strip()[:160],
+                }
+            )
+        return cleaned
+
+
+def _compact_weather_centers(weather_results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    compact: list[dict[str, Any]] = []
+    for result in weather_results[:30]:
+        samples = [sample for sample in result.get("hourly_samples", []) if isinstance(sample, dict)]
+        temperatures = [sample.get("temperature_c") for sample in samples if isinstance(sample.get("temperature_c"), (int, float))]
+        precipitation = [sample.get("precipitation_probability") for sample in samples if isinstance(sample.get("precipitation_probability"), (int, float))]
+        winds = [sample.get("wind_speed_kmh") for sample in samples if isinstance(sample.get("wind_speed_kmh"), (int, float))]
+        compact.append(
+            {
+                "latitude": result.get("latitude"),
+                "longitude": result.get("longitude"),
+                "elevation_m": result.get("elevation_m"),
+                "temperature_range_c": [min(temperatures), max(temperatures)] if temperatures else None,
+                "precipitation_probability_max": max(precipitation) if precipitation else None,
+                "wind_speed_max_kmh": max(winds) if winds else None,
+                "sample_count": len(samples),
+            }
+        )
+    return compact
+
+
+def _match_candidate_weather(
+    candidates: list[dict[str, Any]],
+    weather_centers: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Attach the nearest forecast/elevation center to every candidate."""
+    matched: list[dict[str, Any]] = []
+    for candidate in candidates:
+        coordinates = candidate.get("coordinates") or {}
+        try:
+            longitude = float(coordinates["longitude"])
+            latitude = float(coordinates["latitude"])
+        except (KeyError, TypeError, ValueError):
+            matched.append({"candidate_id": candidate.get("candidate_id"), "weather": None})
+            continue
+        nearest = min(
+            weather_centers,
+            key=lambda center: (
+                (float(center.get("longitude") or 0) - longitude) ** 2
+                + (float(center.get("latitude") or 0) - latitude) ** 2
+            ),
+            default=None,
+        )
+        matched.append(
+            {
+                "candidate_id": candidate.get("candidate_id"),
+                "weather": nearest,
+            }
+        )
+    return matched
+
+
 class OllamaEventResearchAgent:
     """Extract source-backed facts for a user-requested seasonal event.
 
