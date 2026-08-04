@@ -371,6 +371,13 @@ def create_candidate_patch(
     if not candidate:
         raise AppError("CANDIDATE_NOT_FOUND", "备选方案已失效，请刷新后重试", 404)
 
+    if request.operation == "add" and candidate.get("seasonal_excluded"):
+        raise AppError(
+            "SEASONAL_CANDIDATE_UNSUITABLE",
+            str(candidate.get("seasonal_warning") or "该候选与出行日期不匹配，已保留为备选"),
+            409,
+        )
+
     target = None
     if request.operation == "replace":
         if not request.target_activity_id:
@@ -692,6 +699,23 @@ def _duration_for(category: str) -> int:
 
 
 def _find_available_slot(day: Any, duration_minutes: int) -> tuple[datetime, datetime]:
+    """Find a gap, then flex non-essential stops before rejecting an edit."""
+    try:
+        return _find_strict_available_slot(day, duration_minutes)
+    except AppError as error:
+        if error.code != "NO_AVAILABLE_TIME_SLOT":
+            raise
+    rebalanced = _rebalance_for_insert(day, duration_minutes)
+    if rebalanced is not None:
+        return rebalanced
+    raise AppError(
+        "NO_AVAILABLE_TIME_SLOT",
+        "当天没有可调整的空闲时间；可以缩短景点停留、删除安排或选择其他日期",
+        409,
+    )
+
+
+def _find_strict_available_slot(day: Any, duration_minutes: int) -> tuple[datetime, datetime]:
     intervals = sorted(
         [
             (item.planned_start, item.planned_end)
@@ -715,6 +739,106 @@ def _find_available_slot(day: Any, duration_minutes: int) -> tuple[datetime, dat
         "当天没有足够的空闲时间，请先移除安排或选择其他日期",
         409,
     )
+
+
+def _rebalance_for_insert(day: Any, duration_minutes: int) -> tuple[datetime, datetime] | None:
+    """Reflow flexible activities around fixed intervals and return a slot.
+
+    Attractions and explicit rest blocks can move or shorten within comfort
+    limits.  Stages, meals, hotels, locked and required activities stay fixed.
+    """
+    all_activities = list(day.activities)
+    flexible = [
+        item
+        for item in all_activities
+        if item.type in {"attraction", "rest"}
+        and not item.locked
+        and not item.required
+    ]
+    if not flexible:
+        return None
+    original_times = {
+        item.id: (item.planned_start, item.planned_end, item.duration_minutes)
+        for item in flexible
+    }
+    fixed = [
+        (item.planned_start, item.planned_end)
+        for item in day.stages
+    ] + [
+        (item.planned_start, item.planned_end)
+        for item in all_activities
+        if item not in flexible
+    ]
+    fixed.sort(key=lambda value: value[0])
+    tzinfo = fixed[0][0].tzinfo if fixed else flexible[0].planned_start.tzinfo
+    day_start = datetime.combine(day.date, time(8, 0), tzinfo=tzinfo)
+    day_end = datetime.combine(day.date, time(22, 0), tzinfo=tzinfo)
+    windows: list[tuple[datetime, datetime]] = []
+    cursor = day_start
+    for start, end in fixed:
+        if end <= day_start or start >= day_end:
+            continue
+        start = max(start, day_start)
+        end = min(end, day_end)
+        if cursor < start:
+            windows.append((cursor, start))
+        cursor = max(cursor, end)
+    if cursor < day_end:
+        windows.append((cursor, day_end))
+    if not windows:
+        return None
+
+    def minimum_for(item: Any) -> int:
+        return 45 if item.type == "attraction" else 30
+
+    capacity = sum(int((end - start).total_seconds() // 60) for start, end in windows)
+    durations = {
+        item.id: max(minimum_for(item), int(item.duration_minutes))
+        for item in flexible
+    }
+    requested = max(30, int(duration_minutes))
+    reduction_needed = max(0, sum(durations.values()) + requested - capacity)
+    for item in sorted(flexible, key=lambda value: durations[value.id], reverse=True):
+        if reduction_needed <= 0:
+            break
+        reducible = max(0, durations[item.id] - minimum_for(item))
+        reduction = min(reducible, reduction_needed)
+        durations[item.id] -= reduction
+        reduction_needed -= reduction
+    if reduction_needed > 0:
+        return None
+
+    preferred = datetime.combine(day.date, time(15, 0), tzinfo=tzinfo)
+    queue: list[tuple[datetime, Any | None]] = [
+        *[(item.planned_start, item) for item in sorted(flexible, key=lambda value: value.planned_start)],
+        (preferred, None),
+    ]
+    queue.sort(key=lambda pair: pair[0])
+    queue_index = 0
+    candidate_slot: tuple[datetime, datetime] | None = None
+    for window_start, window_end in windows:
+        cursor = window_start
+        while queue_index < len(queue):
+            _, item = queue[queue_index]
+            duration = requested if item is None else durations[item.id]
+            end = cursor + timedelta(minutes=duration)
+            if end > window_end:
+                break
+            if item is None:
+                candidate_slot = (cursor, end)
+            else:
+                item.planned_start = cursor
+                item.planned_end = end
+                item.duration_minutes = duration
+            cursor = end
+            queue_index += 1
+        if queue_index >= len(queue):
+            break
+    if queue_index < len(queue) or candidate_slot is None:
+        for item in flexible:
+            item.planned_start, item.planned_end, item.duration_minutes = original_times[item.id]
+        return None
+    return candidate_slot
 
 
 def _normalize_day(day: Any) -> None:

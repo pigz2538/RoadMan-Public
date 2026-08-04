@@ -27,3 +27,4 @@ class RoadManState(TypedDict, total=False):
     error: dict[str, Any] | None
     messages: list[dict[str, Any]]
     special_event_research: list[dict[str, Any]]
+    seasonal_review: list[dict[str, Any]]

@@ -37,6 +37,7 @@ from .llm import (
 )
 from .recommendations import apply_agent_ranking, rank_tourism_candidates
 from .poi_enrichment import enrich_tourism_candidates
+from .seasonality import apply_seasonal_guard, parse_trip_date
 from .state import RoadManState
 from .tourism import review_daily_schedule, schedule_tourism_activities, verify_tourism_plan
 
@@ -739,6 +740,8 @@ def build_planning_graph(
                 candidates,
                 state["trip_request"].get("preferences", []),
                 state["trip_request"].get("special_events", []),
+                travel_start=state["trip_request"].get("start_date"),
+                travel_end=state["trip_request"].get("end_date"),
             )
             if agent_decisions:
                 candidates = apply_agent_ranking(candidates, agent_decisions)
@@ -749,6 +752,20 @@ def build_planning_graph(
                 68,
                 event="tool_completed",
                 tool="ollama.poi_ranker",
+            )
+        candidates, seasonal_review = apply_seasonal_guard(
+            candidates,
+            parse_trip_date(state["trip_request"].get("start_date")),
+            parse_trip_date(state["trip_request"].get("end_date")),
+        )
+        if seasonal_review:
+            await emit(
+                state,
+                "review_seasonality",
+                f"季节复核已将 {len(seasonal_review)} 个不合时令候选降为备选",
+                69,
+                event="tool_completed",
+                tool="seasonality.guard",
             )
         await emit(
             state,
@@ -764,6 +781,7 @@ def build_planning_graph(
         )
         return {
             "tourism_candidates": candidates,
+            "seasonal_review": seasonal_review,
             "sources": [*state.get("sources", []), *tourism_sources],
             "progress": {"node": "discover_tourism", "value": 69},
         }

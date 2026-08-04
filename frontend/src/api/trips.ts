@@ -70,6 +70,9 @@ export interface RecommendationCandidate {
   rank: number
   score: number
   backup?: boolean
+  seasonal_excluded?: boolean
+  seasonal_warning?: string
+  seasonal_reason?: string
   recommendation_reasons?: string[]
   agent_reason?: string
   description?: string

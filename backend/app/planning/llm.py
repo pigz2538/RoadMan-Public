@@ -370,6 +370,9 @@ class OllamaPoiRanker:
         candidates: dict[str, list[dict[str, Any]]],
         preferences: list[str],
         special_events: list[str],
+        *,
+        travel_start: str | None = None,
+        travel_end: str | None = None,
     ) -> list[dict[str, Any]]:
         if not self.settings.ollama_api_key:
             return []
@@ -383,6 +386,7 @@ class OllamaPoiRanker:
                         "category": category,
                         "name": place.get("name"),
                         "categories": item.get("categories"),
+                        "description": item.get("description"),
                         "rating": item.get("rating"),
                         "distance_km": item.get("distance_km"),
                         "price": item.get("ticket_or_price"),
@@ -391,6 +395,11 @@ class OllamaPoiRanker:
         if not compact:
             return []
         prompt = (
+            "Travel dates: "
+            f"{travel_start or 'unknown'} to {travel_end or travel_start or 'unknown'}. "
+            "Assess seasonal_fit for every candidate; reject clearly off-season outdoor activities, "
+            "but keep indoor or all-season venues when provider details support them. "
+            "Return seasonal_fit and seasonal_reason in each decision. "
             "你是 RoadMan POI 行程策展 Agent。请根据已经由 Requirement Agent 提取的偏好、特殊体验、"
             "距离、评分、价格和类别，为候选景点、住宿、餐饮排序。不要从原始用户文本猜测偏好，"
             "也不要凭空创造候选；只返回候选 ID 的 JSON 决策。可以遗漏不适合的候选。"
@@ -438,6 +447,12 @@ class OllamaPoiRanker:
                 {
                     "candidate_id": candidate_id,
                     "score": max(0.0, min(100.0, score)),
+                    "seasonal_fit": (
+                        bool(item.get("seasonal_fit"))
+                        if isinstance(item.get("seasonal_fit"), bool)
+                        else None
+                    ),
+                    "seasonal_reason": str(item.get("seasonal_reason") or "").strip()[:160],
                     "reason": str(item.get("reason") or "Agent 综合偏好、距离与数据质量").strip()[:120],
                 }
             )

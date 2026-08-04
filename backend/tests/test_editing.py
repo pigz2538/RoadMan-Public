@@ -22,6 +22,7 @@ from app.planning.editing import (
     decide_candidate_patch,
     interpret_edit_intent,
     recompute_and_verify_patch,
+    _find_available_slot,
 )
 from app.skills.base import SkillAdapter, SkillContext
 from app.skills.registry import SkillRegistry
@@ -373,3 +374,28 @@ def test_delete_then_add_keeps_the_new_activity_in_canonical_day_state():
     decide_candidate_patch(trip, state, add_patch.id, apply=True)
     assert [item.place.name for item in trip.days[0].activities] == ["New attraction"]
     assert [item.id for item in trip.days[0].items] == ["stage_1", trip.days[0].activities[0].id]
+
+
+def test_add_rebalances_flexible_stops_when_the_day_has_no_strict_gap():
+    day = DayPlan(
+        id="day_rebalance",
+        day_index=1,
+        date=date(2026, 8, 2),
+        title="Day 1",
+        activities=[
+            Activity(
+                id=f"activity_{index}",
+                day_id="day_rebalance",
+                sequence=index,
+                type="attraction",
+                place={"name": f"Attraction {index}"},
+                planned_start=datetime(2026, 8, 2, 9 + index * 4, tzinfo=timezone.utc),
+                planned_end=datetime(2026, 8, 2, 13 + index * 4, tzinfo=timezone.utc),
+                duration_minutes=240,
+            )
+            for index in range(3)
+        ],
+    )
+    start, end = _find_available_slot(day, 90)
+    assert end - start == timedelta(minutes=90)
+    assert all(item.duration_minutes >= 45 for item in day.activities)

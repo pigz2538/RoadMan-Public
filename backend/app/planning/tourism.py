@@ -17,6 +17,12 @@ def schedule_tourism_activities(
         item["place"]["name"]: item
         for item in candidates.get("attractions", [])
         if item.get("place", {}).get("name")
+        and not item.get("seasonal_excluded")
+    }
+    seasonal_excluded_names = {
+        item.get("place", {}).get("name")
+        for item in candidates.get("attractions", [])
+        if item.get("seasonal_excluded") and item.get("place", {}).get("name")
     }
     used_attraction_names: set[str] = set()
     used_meal_names = {
@@ -41,6 +47,12 @@ def schedule_tourism_activities(
         for activity in list(day.get("activities", [])):
             name = activity.get("place", {}).get("name")
             if activity.get("type") == "attraction" and name:
+                if name in seasonal_excluded_names:
+                    # A re-run of the review pass can encounter a stale
+                    # activity created before seasonal filtering. Remove it
+                    # from the formal plan and leave the candidate visible as
+                    # a backup recommendation.
+                    continue
                 if name in used_attraction_names:
                     # Agent candidates can repeat the destination attraction
                     # on every day. Keep the first occurrence and let the
@@ -146,7 +158,12 @@ def schedule_tourism_activities(
                     break
                 place = candidate.get("place") or {}
                 name = place.get("name")
-                if not name or name in existing_names or name in used_attraction_names:
+                if (
+                    not name
+                    or candidate.get("seasonal_excluded")
+                    or name in existing_names
+                    or name in used_attraction_names
+                ):
                     continue
                 slot = _closest_free_slot(
                     datetime.combine(

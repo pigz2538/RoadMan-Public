@@ -69,6 +69,10 @@ def apply_agent_ranking(
             item["agent_score"] = decision["score"]
             item["agent_reason"] = decision["reason"]
             item["score"] = decision["score"]
+            if decision.get("seasonal_fit") is not None:
+                item["seasonal_fit"] = decision["seasonal_fit"]
+            if decision.get("seasonal_reason"):
+                item["agent_seasonal_reason"] = decision["seasonal_reason"]
             item["recommendation_reasons"] = [decision["reason"]]
         items.sort(
             key=lambda item: (

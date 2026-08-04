@@ -217,6 +217,9 @@ watch(() => store.pendingPatch?.id, (patchId) => {
             <span>{{ candidate.score.toFixed(1) }} 分</span>
           </header>
           <p>{{ candidate.agent_reason || candidate.recommendation_reasons?.join(' · ') || candidate.place.address || '综合距离与偏好排序' }}</p>
+          <p v-if="candidate.seasonal_excluded" class="recommendation-seasonal-warning">
+            {{ candidate.seasonal_warning || candidate.seasonal_reason || '当前出行日期可能不适合，已降为备选' }}
+          </p>
           <p v-if="candidate.description" class="recommendation-description">{{ candidate.description }}</p>
           <a
             v-if="candidate.detail_url || candidate.source_records?.find((item) => item.url)"
@@ -227,8 +230,10 @@ watch(() => store.pendingPatch?.id, (patchId) => {
           >查看详细介绍与数据来源</a>
           <footer>
             <span>{{ candidatePrice(candidate) }}</span>
-            <button @click="preview(candidate, 'add')">加入</button>
-            <button v-if="canReplace" @click="preview(candidate, 'replace')">替换所选</button>
+            <button :disabled="candidate.seasonal_excluded" @click="preview(candidate, 'add')">
+              {{ candidate.seasonal_excluded ? '季节不符' : '加入' }}
+            </button>
+            <button v-if="canReplace" :disabled="candidate.seasonal_excluded" @click="preview(candidate, 'replace')">替换所选</button>
           </footer>
         </article>
       </div>
