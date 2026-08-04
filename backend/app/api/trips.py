@@ -28,6 +28,7 @@ from ..planning.llm import (
     OllamaTripEditAgent,
     OllamaRequirementExtractor,
     OllamaRequirementValidator,
+    extract_explicit_location_constraints,
     extract_structural_constraints,
 )
 from ..planning.event_research import research_special_events
@@ -177,10 +178,11 @@ async def preflight_trip(
 ) -> PreflightResponse:
     today = date.today()
     structural_dates = extract_structural_constraints(payload.raw_text, today)
+    explicit_locations = extract_explicit_location_constraints(payload.raw_text)
     extracted = dict(payload.previous_extracted)
     if not extracted:
         settings = get_settings()
-        fast_extracted = structural_dates
+        fast_extracted = {**structural_dates, **explicit_locations}
         # Let the Requirement Agent interpret semantic details (for example
         # relationship-based party size) whenever it is configured. The
         # deterministic parser remains the offline fallback only.
@@ -197,6 +199,12 @@ async def preflight_trip(
     for field in ("start_date", "end_date"):
         if structural_dates.get(field):
             extracted[field] = structural_dates[field]
+    # A clarification round may carry a partial Agent response.  Preserve an
+    # explicitly written origin/destination if that response omitted it, but
+    # never overwrite a non-empty semantic Agent decision.
+    for field in ("origin_name", "destination_name"):
+        if not extracted.get(field) and explicit_locations.get(field):
+            extracted[field] = explicit_locations[field]
     for key, value in payload.answers.items():
         value = value.strip()
         if not value:

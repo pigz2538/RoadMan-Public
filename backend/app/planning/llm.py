@@ -13,11 +13,19 @@ class OllamaRequirementExtractor:
         self.settings = settings
 
     async def extract(self, raw_text: str, today: date) -> dict[str, Any]:
-        # The model owns semantic interpretation. The offline fallback only
-        # handles structural calendar constraints (numeric dates, relative
-        # dates and weekday ranges); it never extracts places, preferences,
-        # party size or travel modes.
-        legacy_fallback = extract_structural_constraints(raw_text, today)
+        # The model owns semantic interpretation. The offline fallback handles
+        # structural calendar constraints and only preserves places explicitly
+        # written in a travel clause; it never infers preferences, party size,
+        # events or travel modes.
+        # If the cloud Agent is temporarily unreachable, keep explicitly
+        # stated places as a conservative grammar fallback.  This is not a
+        # place-name keyword list: it only reads grammatical anchors such as
+        # “从 A 出发，去 B”.  The cloud Agent remains authoritative whenever
+        # it returns a valid semantic extraction.
+        legacy_fallback = {
+            **extract_structural_constraints(raw_text, today),
+            **extract_explicit_location_constraints(raw_text),
+        }
         if (
             not self.settings.enable_llm_requirement_extraction
             or not self.settings.ollama_api_key
@@ -731,6 +739,79 @@ def extract_structural_constraints(raw_text: str, today: date) -> dict[str, Any]
             result["start_date"] = weekday_dates[0].isoformat()
         if len(weekday_dates) > 1 and "end_date" not in result:
             result["end_date"] = weekday_dates[1].isoformat()
+
+    return result
+
+
+def _clean_explicit_place(value: str) -> str | None:
+    value = re.sub(r"\s+", " ", value).strip(" \t\r\n，,。；;、:：")
+    value = re.sub(r"(?:及其周边|周边)$", "", value).strip()
+    value = re.sub(r"(?:早上|上午|中午|下午|晚上|夜间)$", "", value).strip()
+    if not value or len(value) > 64:
+        return None
+    return value
+
+
+def extract_explicit_location_constraints(raw_text: str) -> dict[str, str]:
+    """Recover only explicit origin/destination grammar when the Agent is down.
+
+    The fallback intentionally does not contain a city/POI dictionary and does
+    not infer a destination from an experience (for example, “看流星雨”).
+    It is limited to common travel clauses and is used only for fields the
+    semantic Agent did not return.
+    """
+    text = re.sub(r"\s+", " ", raw_text or "").strip()
+    if not text:
+        return {}
+
+    result: dict[str, str] = {}
+    origin_match = re.search(
+        r"从\s*(?P<origin>[^，,。；;、]+?)\s*(?:出发|启程|开始(?:行程)?|出游|到)",
+        text,
+    )
+    if origin_match:
+        origin = _clean_explicit_place(origin_match.group("origin"))
+        if origin:
+            result["origin_name"] = origin
+
+    # “去/到/前往 B 看/玩…” and “在 B 及其周边…” are explicit destination
+    # clauses.  Stop before the experience so it is not mistaken for a POI.
+    destination_patterns = (
+        r"(?:去|到|前往|抵达|游览|参观)\s*(?P<destination>[^，,。；;、]+?)"
+        r"(?=及其周边|周边|看|赏|游玩|旅游|转转|参观|住宿|停留|度假|出游|[，,。；;]|$)",
+        r"在\s*(?P<destination>[^，,。；;、]+?)"
+        r"(?=及其周边|周边|旅游|游玩|转转|住宿|停留|度假|出游|[，,。；;]|$)",
+    )
+    for pattern in destination_patterns:
+        destination_match = re.search(pattern, text)
+        if not destination_match:
+            continue
+        destination = _clean_explicit_place(destination_match.group("destination"))
+        if destination and destination != result.get("origin_name"):
+            result["destination_name"] = destination
+            break
+
+    # Also support concise “从 A 到 B” and English “from A to B” clauses.
+    if "origin_name" not in result or "destination_name" not in result:
+        compact_match = re.search(
+            r"从\s*(?P<origin>[^，,。；;、]+?)\s*到\s*(?P<destination>[^，,。；;、]+?)"
+            r"(?=看|赏|游玩|旅游|转转|及其周边|周边|[，,。；;]|$)",
+            text,
+        )
+        english_match = re.search(
+            r"\bfrom\s+(?P<origin>[^,.;]+?)\s+to\s+(?P<destination>[^,.;]+?)"
+            r"(?=\s+(?:for|with|on)\b|[,.;]|$)",
+            text,
+            re.IGNORECASE,
+        )
+        match = compact_match or english_match
+        if match:
+            origin = _clean_explicit_place(match.group("origin"))
+            destination = _clean_explicit_place(match.group("destination"))
+            if origin and "origin_name" not in result:
+                result["origin_name"] = origin
+            if destination and "destination_name" not in result:
+                result["destination_name"] = destination
 
     return result
 

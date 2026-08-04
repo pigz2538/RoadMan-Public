@@ -12,6 +12,7 @@ from app.planning.deep_drive import _ensure_daily_meals
 from app.planning.llm import (
     OllamaRequirementExtractor,
     deterministic_extract,
+    extract_explicit_location_constraints,
     extract_structural_constraints,
 )
 from app.planning.runner import run_planning
@@ -91,6 +92,19 @@ def test_structural_calendar_resolves_weekday_range_from_today():
         "start_date": "2026-08-03",
         "end_date": "2026-08-07",
     }
+
+
+def test_explicit_location_fallback_reads_travel_grammar_without_place_keywords():
+    extracted = extract_explicit_location_constraints(
+        "周一早上从武汉出发，去九宫山看流星雨，周五晚上回来"
+    )
+    assert extracted == {"origin_name": "武汉", "destination_name": "九宫山"}
+    assert extract_explicit_location_constraints(
+        "从湖州南浔站出发，在乌镇及其周边转转"
+    ) == {"origin_name": "湖州南浔站", "destination_name": "乌镇"}
+    assert extract_explicit_location_constraints(
+        "from Wuhan to Jiugongshan for stargazing"
+    ) == {"origin_name": "Wuhan", "destination_name": "Jiugongshan"}
 
 
 def test_structural_calendar_supports_relative_weekend_and_english_dates():

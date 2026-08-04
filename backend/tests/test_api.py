@@ -385,6 +385,8 @@ async def test_preflight_resolves_chinese_weekday_return_without_clarification(c
 
     assert response.status_code == 200
     body = response.json()
+    assert body["extracted"]["origin_name"] == "武汉"
+    assert body["extracted"]["destination_name"] == "九宫山"
     assert body["extracted"]["start_date"] == monday.isoformat()
     assert body["extracted"]["end_date"] == friday.isoformat()
     assert not {
