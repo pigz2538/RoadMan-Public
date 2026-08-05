@@ -60,6 +60,52 @@ def _normalize_poi_name(value: Any) -> str:
     return "".join(str(value or "").split()).casefold()
 
 
+def _is_authoritative_admin_geocode(requested_name: Any, geocode: dict[str, Any]) -> bool:
+    """Return whether a geocoder result is authoritative for an admin place.
+
+    ``_ensure_coordinates`` has a nearby-POI fallback for genuinely ambiguous
+    short scenic names (``乌镇`` is a common example).  That fallback must not
+    run for a city-level request such as ``北京``: searching nearby Wuhan POIs
+    for the word "北京" can return ``北京片皮烤鸭`` and silently turn the trip's
+    destination into a restaurant.  We intentionally infer this from AMap's
+    returned administrative fields instead of maintaining a hard-coded city
+    list, so the same guard works for Chinese, English, and arbitrary regions.
+    """
+    requested = _normalize_poi_name(requested_name)
+    if not requested:
+        return False
+
+    level = _normalize_poi_name(geocode.get("level"))
+    # AMap documents these levels as 省/市/区县.  Accept the English forms as
+    # well because adapters/mocks may normalize the response.
+    if level in {"省", "市", "区县", "province", "city", "district", "county"}:
+        return any(
+            requested == _normalize_poi_name(geocode.get(field))
+            or requested == _normalize_poi_name(str(geocode.get(field) or "").removesuffix("市"))
+            or requested == _normalize_poi_name(str(geocode.get(field) or "").removesuffix("省"))
+            or requested == _normalize_poi_name(str(geocode.get(field) or "").removesuffix("区"))
+            or requested == _normalize_poi_name(str(geocode.get(field) or "").removesuffix("县"))
+            for field in ("province", "city", "district")
+        )
+
+    # Some AMap responses/mocks omit ``level``.  Matching the requested value
+    # to an administrative field is still strong evidence that this is a
+    # city/region result, while a town/scenic name normally only appears in
+    # ``township`` or the formatted address and remains eligible for the
+    # nearby disambiguation path.
+    for field in ("province", "city", "district"):
+        value = str(geocode.get(field) or "")
+        if requested in {
+            _normalize_poi_name(value),
+            _normalize_poi_name(value.removesuffix("市")),
+            _normalize_poi_name(value.removesuffix("省")),
+            _normalize_poi_name(value.removesuffix("区")),
+            _normalize_poi_name(value.removesuffix("县")),
+        }:
+            return True
+    return False
+
+
 def build_planning_graph(
     registry: SkillRegistry,
     settings: Settings,
@@ -1255,13 +1301,11 @@ def build_planning_graph(
                 local_start = stage.planned_end + timedelta(minutes=105)
             if index == len(day_defs) - 1:
                 inbound = await prepare_route(inbound)
-                return_start = max(
+                return_start = _return_stage_start(
+                    day_date,
+                    request.get("return_time"),
                     local_start,
-                    _request_clock(
-                        day_date,
-                        request.get("return_time"),
-                        default=time(14, 30),
-                    ),
+                    inbound,
                 )
                 stages.append(
                     _movement_stage(
@@ -1749,6 +1793,47 @@ def build_planning_graph(
                 state.get("tourism_candidates", {}),
             )
         )
+        # ``return_time`` is an arrival deadline (e.g. “周日晚八点前
+        # 回来”), not a request to start the return leg at 20:00.  Check the
+        # final persisted stage after all rest/energy inserts so an impossible
+        # long-distance window is reported explicitly instead of being shown
+        # as a completed but late itinerary.
+        request = state.get("trip_request", {})
+        if request.get("return_time") and normalized_days:
+            try:
+                deadline = _request_clock(
+                    date.fromisoformat(request["end_date"]),
+                    request.get("return_time"),
+                    default=time(23, 59),
+                )
+                final_stage = next(
+                    (
+                        stage
+                        for day in reversed(normalized_days)
+                        for stage in reversed(day.get("stages", []))
+                        if str(stage.get("title") or "").startswith("返程")
+                    ),
+                    None,
+                )
+                if final_stage:
+                    arrival = datetime.fromisoformat(final_stage["planned_end"])
+                    if arrival > deadline:
+                        issues.append(
+                            {
+                                "code": "RETURN_DEADLINE_UNACHIEVABLE",
+                                "severity": "blocker",
+                                "description": (
+                                    f"返程预计 {arrival.strftime('%m月%d日 %H:%M')} 抵达，"
+                                    f"晚于用户要求的 {deadline.strftime('%m月%d日 %H:%M')}；"
+                                    "请延长行程、提前离开或改用更快的交通方式。"
+                                ),
+                            }
+                        )
+            except (KeyError, TypeError, ValueError):
+                # Invalid optional clocks are already handled by Requirement
+                # preflight; never make verification crash while reporting the
+                # rest of the route issues.
+                pass
         return {
             "day_plans": normalized_days,
             "verification_result": {
@@ -1932,6 +2017,8 @@ async def _ensure_coordinates(
         "address": result.data.get("formatted_address"),
         "city": result.data.get("city") or place.get("city"),
         "province": result.data.get("province"),
+        "district": result.data.get("district"),
+        "geocode_level": result.data.get("level"),
         "coordinates": {"longitude": float(longitude), "latitude": float(latitude)},
     }
     # A short scenic name can be ambiguous in AMap geocoding (乌镇, 南山, etc.).
@@ -1947,7 +2034,11 @@ async def _ensure_coordinates(
             ),
             RoutePoint(longitude=float(longitude), latitude=float(latitude)),
         )
-        if distance > 250 and len(str(place.get("name") or "")) <= 12:
+        if (
+            distance > 250
+            and len(str(place.get("name") or "")) <= 12
+            and not _is_authoritative_admin_geocode(place.get("name"), result.data)
+        ):
             poi_result = await registry.execute(
                 "amap.poi",
                 {
@@ -1987,6 +2078,8 @@ async def _ensure_coordinates(
                         "name": chosen.get("name") or place["name"],
                         "address": chosen.get("address") or resolved.get("address"),
                         "city": chosen.get("city") or resolved.get("city"),
+                        "province": chosen.get("province") or resolved.get("province"),
+                        "district": chosen.get("district") or resolved.get("district"),
                         "coordinates": {
                             "longitude": float(item_longitude),
                             "latitude": float(item_latitude),
@@ -2230,6 +2323,35 @@ def _request_clock(day: date, value: Any, *, default: time) -> datetime:
             except ValueError:
                 selected = default
     return datetime.combine(day, selected, tzinfo=SHANGHAI)
+
+
+def _return_stage_start(
+    day: date,
+    return_time: Any,
+    earliest_start: datetime,
+    route: dict[str, Any],
+) -> datetime:
+    """Schedule a return leg so an explicit return time is an arrival deadline.
+
+    Requirement extraction treats phrases such as “周日晚八点前回来” as the
+    time by which the traveller must arrive back at the origin.  The previous
+    implementation used that clock value as the *departure* time, which made a
+    long return leg necessarily finish after the user's deadline.  For an
+    explicit deadline, leave by ``deadline - route duration`` while respecting
+    the end of the day's local activities.  If the day's activities already
+    consume that buffer, the returned start remains safe and the normal plan
+    verification can surface the late-arrival constraint instead of silently
+    moving departure to the deadline.
+    """
+    deadline = _request_clock(day, return_time, default=time(14, 30))
+    if return_time is None:
+        return max(earliest_start, deadline)
+    try:
+        duration_minutes = int((route.get("data") or {}).get("duration_minutes") or 0)
+    except (TypeError, ValueError):
+        duration_minutes = 0
+    latest_start = deadline - timedelta(minutes=max(0, duration_minutes))
+    return max(earliest_start, latest_start)
 
 
 def _fallback_local_route(

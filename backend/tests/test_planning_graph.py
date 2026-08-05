@@ -1,5 +1,6 @@
 from datetime import date, datetime, time, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -7,7 +8,12 @@ from app.core.config import Settings
 from app.api.trips import get_trip_risks, get_trip_services
 from app.db import SessionLocal, create_tables
 from app.domain.models import SkillResult, TripCreate, TripRequest, VehicleProfile
-from app.planning.graph import _ensure_coordinates, _movement_stage, build_planning_graph
+from app.planning.graph import (
+    _ensure_coordinates,
+    _movement_stage,
+    _return_stage_start,
+    build_planning_graph,
+)
 from app.planning.deep_drive import _ensure_daily_meals
 from app.planning.llm import (
     OllamaRequirementExtractor,
@@ -272,6 +278,92 @@ async def test_ambiguous_destination_is_corrected_by_nearby_poi():
 
     assert destination["name"] == "乌镇风景区"
     assert destination["coordinates"]["longitude"] == 120.486173
+
+
+@pytest.mark.asyncio
+async def test_city_destination_is_not_replaced_by_nearby_restaurant():
+    """A city name must remain a city, even when a nearby POI shares its name.
+
+    Regression for the Wuhan -> Beijing request that became the local POI
+    ``北京片皮烤鸭``: the short-name ambiguity fallback used to search around
+    Wuhan for every result more than 250 km away, then overwrite the
+    destination with the closest matching restaurant.
+    """
+
+    class CityRegistry:
+        def __init__(self):
+            self.calls: list[str] = []
+
+        async def execute(self, name, payload, _):
+            self.calls.append(name)
+            if name == "amap.geocode":
+                return SkillResult(
+                    success=True,
+                    provider="fake-amap",
+                    data={
+                        "formatted_address": "北京市",
+                        "location": "116.407387,39.904179",
+                        "province": "北京市",
+                        "city": "北京市",
+                        "district": [],
+                        "level": "市",
+                    },
+                )
+            return SkillResult(
+                success=True,
+                provider="fake-amap",
+                data={
+                    "items": [
+                        {
+                            "name": "北京片皮烤鸭",
+                            "location": "114.288664,30.582774",
+                            "address": "武汉市江汉三路",
+                            "city": "武汉市",
+                            "type": "餐饮服务",
+                        }
+                    ]
+                },
+            )
+
+    registry = CityRegistry()
+    origin = {
+        "name": "武汉",
+        "city": "武汉市",
+        "coordinates": {"longitude": 114.3055, "latitude": 30.5928},
+    }
+    destination = await _ensure_coordinates(
+        registry,
+        {"name": "北京"},
+        "trip",
+        nearby=origin,
+    )
+
+    assert destination["name"] == "北京"
+    assert destination["city"] == "北京市"
+    assert destination["coordinates"] == {"longitude": 116.407387, "latitude": 39.904179}
+    assert registry.calls == ["amap.geocode"]
+
+
+def test_return_time_is_scheduled_as_arrival_deadline():
+    start = datetime(2026, 8, 9, 9, 30, tzinfo=ZoneInfo("Asia/Shanghai"))
+    route = {"data": {"duration_minutes": 711}}
+
+    scheduled = _return_stage_start(
+        date(2026, 8, 9),
+        "20:00",
+        start,
+        route,
+    )
+
+    assert scheduled == datetime(2026, 8, 9, 9, 30, tzinfo=ZoneInfo("Asia/Shanghai"))
+    assert scheduled + timedelta(minutes=711) == datetime(
+        2026,
+        8,
+        9,
+        21,
+        21,
+        tzinfo=ZoneInfo("Asia/Shanghai"),
+    )
 
 
 class FakeGeocodeAdapter(SkillAdapter):

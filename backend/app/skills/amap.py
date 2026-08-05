@@ -102,6 +102,16 @@ class AmapGeocodeAdapter(SkillAdapter):
                 "province": item.get("province"),
                 "city": item.get("city"),
                 "district": item.get("district"),
+                # Keep the administrative granularity returned by AMap.  The
+                # planner uses this to distinguish a city-level destination
+                # (for example, "北京") from a short scenic/POI name.  Without
+                # it, the nearby-POI ambiguity fallback can replace a city
+                # with an unrelated local restaurant whose name happens to
+                # contain the same word.
+                "township": item.get("township"),
+                "street": item.get("street"),
+                "number": item.get("number"),
+                "level": item.get("level"),
                 "adcode": item.get("adcode"),
             },
             sources=[SourceRecord(provider="高德地图", title="地理编码 API", url=f"{AMAP_BASE_URL}/v3/geocode/geo")],
