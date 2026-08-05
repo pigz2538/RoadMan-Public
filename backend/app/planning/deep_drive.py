@@ -554,7 +554,12 @@ def _fill_planned_rest_points(
         }
         indexed.append((target, "rest", place))
         used_indexes.add(target)
-    return [(kind, place) for _, kind, place in sorted(indexed)[:count]]
+    # Multiple service POIs can project onto the same route geometry point.
+    # Sort only by the numeric route index; comparing the nested place dicts
+    # on a tie raises ``TypeError: '<' not supported between instances of
+    # 'dict' and 'dict'`` and aborts otherwise valid long-distance plans.
+    ordered = sorted(indexed, key=lambda item: item[0])
+    return [(kind, place) for _, kind, place in ordered[:count]]
 
 
 def _densify_geometry(
@@ -591,19 +596,29 @@ def _select_break_places(
     ]
     selected: list[tuple[int, str, dict[str, Any]]] = []
     used: set[str] = set()
+    used_indexes: set[int] = set()
     for number in range(1, count + 1):
         target = round((len(geometry) - 1) * number / (count + 1))
         choices = [
             item
             for item in indexed
-            if item[2].get("name") not in used and 0 < item[0] < len(geometry) - 1
+            if (
+                item[2].get("name") not in used
+                and item[0] not in used_indexes
+                and 0 < item[0] < len(geometry) - 1
+            )
         ]
         if not choices:
             break
         choice = min(choices, key=lambda item: abs(item[0] - target))
         selected.append(choice)
         used.add(choice[2].get("name", ""))
-    return [(kind, place) for _, kind, place in sorted(selected)]
+        used_indexes.add(choice[0])
+    # Do not let equal geometry indexes fall through to tuple comparison of
+    # the nested POI dictionaries.  AMap commonly returns several nearby
+    # service points that map to the same sampled route vertex.
+    ordered = sorted(selected, key=lambda item: item[0])
+    return [(kind, place) for _, kind, place in ordered]
 
 
 def _nearest_geometry_index(

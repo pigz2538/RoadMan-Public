@@ -212,6 +212,43 @@ def test_long_drive_is_split_into_rest_segments_and_day_has_three_meals():
     )
 
 
+def test_tied_service_points_do_not_crash_long_drive_split():
+    """Several POIs can snap to the same route vertex; keep splitting stable."""
+    stage = _stage()
+    stage["duration_minutes"] = 360
+    stage["planned_end"] = datetime(2026, 8, 1, 15, 0, tzinfo=SHANGHAI).isoformat()
+    stage["route_segments"][0]["duration_minutes"] = 360
+    stage["route_segments"][0]["coordinates"] = [
+        {"longitude": 114.3 + index * 0.3, "latitude": 30.5 - index * 0.15}
+        for index in range(7)
+    ]
+    tied_rest = [
+        _place("服务区 A", 115.2),
+        _place("服务区 B", 115.2),
+    ]
+    plans = [
+        {
+            "id": "day_1",
+            "day_index": 1,
+            "date": "2026-08-01",
+            "title": "第 1 天",
+            "stages": [stage],
+            "activities": [],
+            "items": [],
+        }
+    ]
+    safe_vehicle = {**_vehicle(), "current_energy_percent": 100}
+
+    enriched, _ = enrich_deep_drive_plan(
+        plans,
+        safe_vehicle,
+        {"stage_long": {"rest": tied_rest}},
+        120,
+    )
+
+    assert len(enriched[0]["stages"]) == 3
+
+
 def test_unreasonable_walking_stage_is_blocked():
     stage = _stage()
     stage["mode"] = "walking"

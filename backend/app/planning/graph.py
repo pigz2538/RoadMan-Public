@@ -1114,11 +1114,19 @@ def build_planning_graph(
             if not day_targets:
                 continue
             anchor = destination
-            for sequence, target_candidate in enumerate(day_targets):
+            # Sequence numbers describe the *successful* route chain, not
+            # the candidate index.  Candidates can be skipped when a route
+            # lookup fails; using the candidate index here and a hard-coded
+            # ``2`` for the return leg allowed the return-to-base stage to
+            # sort before a later sightseeing leg (for days with three or
+            # more researched highlights).  Keep a monotonic counter so the
+            # final return leg is always last.
+            route_sequence = 0
+            for target_candidate in day_targets:
                 route = None
                 target = None
                 target = target_candidate["place"]
-                mode = modes[(day_index * 2 + sequence) % len(modes)]
+                mode = modes[(day_index * 2 + route_sequence) % len(modes)]
                 candidate_route = await _route(
                     registry,
                     anchor,
@@ -1133,7 +1141,7 @@ def build_planning_graph(
                     local_routes.append(
                         {
                             "day_index": day_index,
-                            "sequence": sequence,
+                            "sequence": route_sequence,
                             "origin": anchor,
                             "destination": target,
                             "route": route,
@@ -1141,6 +1149,7 @@ def build_planning_graph(
                     )
                     anchor = target
                     used_target_names.add(_normalize_poi_name(target.get("name")))
+                    route_sequence += 1
             if anchor is not destination:
                 route = await _route(
                     registry,
@@ -1155,7 +1164,7 @@ def build_planning_graph(
                 local_routes.append(
                     {
                         "day_index": day_index,
-                        "sequence": 2,
+                        "sequence": route_sequence,
                         "origin": anchor,
                         "destination": destination,
                         "route": route,
