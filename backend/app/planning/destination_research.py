@@ -34,7 +34,8 @@ def _url(value: str) -> str:
 
 async def _web_sources(destination: str) -> tuple[list[dict[str, Any]], list[str]]:
     queries = [
-        f"{destination} 必去景点 官方 推荐 代表性景区",
+        f"{destination} 著名景点 地标 必去 景点分布 官方 推荐",
+        f"{destination} 经典旅游路线 不同城区 必游景点",
         f"{destination} 必吃美食 老字号 地方特色 推荐",
     ]
     sources: list[dict[str, Any]] = []
@@ -84,7 +85,7 @@ async def _web_sources(destination: str) -> tuple[list[dict[str, Any]], list[str
                     )
     except (httpx.HTTPError, ValueError, asyncio.TimeoutError):
         pass
-    return sources[:20], queries
+    return sources[:30], queries
 
 
 async def research_destination(
@@ -117,14 +118,23 @@ async def research_destination(
     keyword_task = asyncio.create_task(
         registry.execute(
             "flyai.keyword_search",
-            {"query": f"{destination} 必去景点 必吃美食"},
+            {
+                "query": (
+                    f"{destination} 著名必去景点 城市地标 不同片区 代表性美食"
+                )
+            },
             SkillContext(trip_id=trip_id, metadata={"purpose": "destination_research"}),
         )
     )
     semantic_task = asyncio.create_task(
         registry.execute(
             "flyai.ai_search",
-            {"query": f"请为{destination}推荐知名必去景点、代表性地方美食，并给出来源"},
+            {
+                "query": (
+                    f"请为{destination}做目的地研究：列出不同城区的著名必去景点、"
+                    "代表性地方美食，说明适合停留时长、游览顺序和来源，不要只推荐酒店附近"
+                )
+            },
             SkillContext(trip_id=trip_id, metadata={"purpose": "destination_research"}),
         )
     )

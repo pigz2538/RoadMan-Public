@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from math import asin, cos, radians, sin, sqrt
+from math import asin, ceil, cos, radians, sin, sqrt
 import re
 from typing import Any
 
@@ -55,6 +55,10 @@ def rank_tourism_candidates(
                 item["destination_research_priority"] = round(priority, 1)
                 item["destination_research_name"] = recommendation["name"]
                 item["destination_research_reason"] = recommendation.get("reason")
+                item["research_area"] = recommendation.get("area") or None
+                suggested_minutes = _number(recommendation.get("suggested_minutes")) or 90
+                item["suggested_minutes"] = max(45, min(240, int(suggested_minutes)))
+                item["best_time"] = recommendation.get("best_time") or "any"
                 item["must_see"] = priority >= 60
                 reasons.insert(0, "目的地研究 Agent 标记为代表性推荐")
             item["score"] = round(max(0, min(100, score)), 1)
@@ -114,6 +118,84 @@ def apply_agent_ranking(
     return candidates
 
 
+def plan_attraction_coverage(
+    candidates: list[dict[str, Any]],
+    day_count: int,
+) -> dict[str, Any]:
+    """Assign researched highlights to balanced geographic day clusters.
+
+    The planner should not treat a hotel as the destination's sightseeing
+    boundary.  This pass groups source-backed highlights by the research
+    Agent's area label when available, otherwise by a small coordinate grid,
+    then assigns those groups to days with a bounded daily capacity.  It is a
+    generic destination operation: no city names or attraction dictionaries
+    are embedded here.
+    """
+    day_count = max(1, int(day_count or 1))
+    priority_items = [
+        item
+        for item in candidates
+        if item.get("place", {}).get("name")
+        and not item.get("seasonal_excluded")
+        and _research_priority(item) > 0
+    ]
+    if not priority_items:
+        return {
+            "priority_count": 0,
+            "cluster_count": 0,
+            "scheduled_capacity": 0,
+            "deferred_count": 0,
+        }
+
+    daily_capacity = max(2, min(4, ceil(len(priority_items) / day_count)))
+    clusters: dict[str, list[dict[str, Any]]] = {}
+    for item in priority_items:
+        item["coverage_cluster"] = _coverage_cluster_key(item)
+        clusters.setdefault(item["coverage_cluster"], []).append(item)
+    for items in clusters.values():
+        items.sort(
+            key=lambda candidate: (
+                -_research_priority(candidate),
+                -(_number(candidate.get("score")) or 0),
+                str(candidate.get("place", {}).get("name") or ""),
+            )
+        )
+
+    day_loads = [0] * day_count
+    assigned = 0
+    ordered_clusters = sorted(
+        clusters.values(),
+        key=lambda items: (
+            -sum(_research_priority(item) for item in items),
+            -len(items),
+            str(items[0].get("coverage_cluster") or ""),
+        ),
+    )
+    for cluster in ordered_clusters:
+        # Keep a geographic cluster together where possible.  A very large
+        # source-backed cluster is split into daily-sized chunks instead of
+        # forcing an exhausting all-day loop.
+        for offset in range(0, len(cluster), daily_capacity):
+            chunk = cluster[offset : offset + daily_capacity]
+            eligible = [
+                index
+                for index, load in enumerate(day_loads)
+                if load + len(chunk) <= daily_capacity
+            ]
+            day_index = min(eligible or range(day_count), key=lambda index: day_loads[index])
+            for item in chunk:
+                item["coverage_day_index"] = day_index + 1
+            day_loads[day_index] += len(chunk)
+            assigned += len(chunk)
+    return {
+        "priority_count": len(priority_items),
+        "cluster_count": len(clusters),
+        "scheduled_capacity": assigned,
+        "deferred_count": max(0, len(priority_items) - assigned),
+        "daily_capacity": daily_capacity,
+    }
+
+
 _RESEARCH_NAME_SEPARATORS = re.compile(r"[\s\u00b7•\-—–_/|（）()【】\[\]，,。；;:：]+")
 
 
@@ -157,6 +239,28 @@ def _match_research_recommendation(
         if candidate_key == recommendation_key or candidate_key in recommendation_key or recommendation_key in candidate_key:
             matches.append(recommendation)
     return max(matches, key=lambda item: float(item.get("importance") or 0), default=None)
+
+
+def _research_priority(candidate: dict[str, Any]) -> float:
+    try:
+        return float(candidate.get("destination_research_priority") or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _coverage_cluster_key(candidate: dict[str, Any]) -> str:
+    area = str(candidate.get("research_area") or "").strip()
+    if area:
+        return f"area:{_normalise_research_name(area)}"
+    coordinates = (candidate.get("place") or {}).get("coordinates") or {}
+    try:
+        # About 3–5 km at common Chinese city latitudes; enough to keep
+        # neighboring landmarks in one visit block without hotel anchoring.
+        longitude = round(float(coordinates["longitude"]) / 0.04)
+        latitude = round(float(coordinates["latitude"]) / 0.04)
+        return f"grid:{longitude}:{latitude}"
+    except (KeyError, TypeError, ValueError):
+        return "unknown"
 
 
 def apply_agent_suitability(

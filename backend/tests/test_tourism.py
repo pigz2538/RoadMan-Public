@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from app.planning.recommendations import rank_tourism_candidates
+from app.planning.recommendations import plan_attraction_coverage, rank_tourism_candidates
 from app.planning.tourism import review_daily_schedule, schedule_tourism_activities, verify_tourism_plan
 from app.skills.base import SkillContext
 from app.skills.flyai import (
@@ -479,6 +479,51 @@ def test_scheduler_distributes_city_highlights_across_days():
     assert set(selected) == set(names)
     assert len({name for name in selected[:3]}) == 3
     assert len(set(selected[3:])) == 3
+
+
+def test_attraction_coverage_groups_researched_places_without_city_specific_rules():
+    candidates = [
+        {
+            "place": {
+                "name": f"代表地标{index}",
+                "coordinates": {
+                    "longitude": 120.10 + (index // 2) * 0.06,
+                    "latitude": 30.10 + (index // 2) * 0.02,
+                },
+            },
+            "destination_research_priority": 100 - index,
+            "score": 90 - index,
+            "research_area": f"片区{index // 2}",
+        }
+        for index in range(6)
+    ]
+
+    summary = plan_attraction_coverage(candidates, 3)
+
+    assert summary["priority_count"] == 6
+    assert summary["cluster_count"] == 3
+    assert summary["deferred_count"] == 0
+    assert {item["coverage_day_index"] for item in candidates} == {1, 2, 3}
+    assert all(item["coverage_cluster"].startswith("area:") for item in candidates)
+
+
+def test_verifier_reports_researched_highlight_coverage_gap_without_blocking_route():
+    issues = verify_tourism_plan(
+        [{"date": "2026-08-11", "activities": [], "stages": []}],
+        {
+            "attractions": [
+                {
+                    "place": {"name": "城市代表地标"},
+                    "must_see": True,
+                }
+            ],
+            "hotels": [],
+        },
+    )
+
+    gap = next(item for item in issues if item["code"] == "DESTINATION_HIGHLIGHTS_UNCOVERED")
+    assert gap["severity"] == "warning"
+    assert "城市代表地标" in gap["description"]
 
 
 @pytest.mark.asyncio

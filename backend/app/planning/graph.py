@@ -40,7 +40,12 @@ from .llm import (
     OllamaPoiSuitabilityAgent,
     OllamaRequirementExtractor,
 )
-from .recommendations import apply_agent_ranking, apply_agent_suitability, rank_tourism_candidates
+from .recommendations import (
+    apply_agent_ranking,
+    apply_agent_suitability,
+    plan_attraction_coverage,
+    rank_tourism_candidates,
+)
 from .poi_enrichment import enrich_tourism_candidates
 from .seasonality import apply_seasonal_guard, parse_trip_date
 from .state import RoadManState
@@ -317,7 +322,7 @@ def build_planning_graph(
                     destination_research,
                     state.get("trip_request", {}),
                 ),
-                timeout=min(30, max(8, int(settings.ollama_timeout_seconds))),
+                timeout=min(45, max(15, int(settings.ollama_timeout_seconds))),
             )
         except asyncio.TimeoutError:
             destination_research["agent_recommendations"] = []
@@ -940,13 +945,19 @@ def build_planning_graph(
                 event="tool_completed",
                 tool="ollama.poi_ranker",
             )
+        destination_research["attraction_coverage"] = plan_attraction_coverage(
+            candidates.get("attractions", []),
+            len(state.get("day_plans", [])),
+        )
         await emit(
             state,
             "discover_tourism",
             (
                 f"已找到 {len(candidates['attractions'])} 个景点、"
                 f"{len(candidates['meals'])} 个餐饮和 "
-                f"{len(candidates['hotels'])} 个住宿候选"
+                f"{len(candidates['hotels'])} 个住宿候选；"
+                f"研究 Agent 规划覆盖 {destination_research['attraction_coverage'].get('priority_count', 0)} 个代表性景点，"
+                f"分为 {destination_research['attraction_coverage'].get('cluster_count', 0)} 个地理片区"
             ),
             69,
             event="tool_completed",
@@ -992,41 +1003,86 @@ def build_planning_graph(
                     },
                 ],
             }
-        places = _select_itinerary_places(
+        day_count = len(state["day_plans"])
+        # Match local route capacity to the researched highlight set.  A
+        # destination with twelve named highlights over four days gets three
+        # connected sightseeing legs per day; a small candidate pool keeps the
+        # comfortable two-leg baseline.  Transfer days are included too so
+        # city highlights are not silently dropped at either end of the trip.
+        priority_count = sum(
+            1
+            for item in attraction_candidates
+            if item.get("destination_research_priority")
+            and not item.get("seasonal_excluded")
+        )
+        daily_budget = (
+            max(2, min(4, (priority_count + day_count - 1) // day_count))
+            if priority_count
+            else 2
+        )
+        day_budgets = {index: daily_budget for index in range(day_count)}
+        selected_candidates = _select_itinerary_places(
             attraction_candidates,
             destination,
-            max(2, len(state["day_plans"]) * 2),
+            max(2, sum(day_budgets.values())),
+            return_candidates=True,
         )
-        if not places:
+        if not selected_candidates:
             return {"local_routes": []}
 
-        day_count = len(state["day_plans"])
-        local_day_indexes = list(range(1, day_count - 1))
-        if not local_day_indexes:
-            local_day_indexes = [0]
         modes = ["transit", "walking", "riding"]
         local_routes: list[dict[str, Any]] = []
-        cursor = 0
-        for day_index in local_day_indexes:
+        used_target_names: set[str] = set()
+        for day_index in range(day_count):
+            day_pool = [
+                candidate
+                for candidate in selected_candidates
+                if candidate.get("coverage_day_index") == day_index + 1
+                and _normalize_poi_name(candidate.get("place", {}).get("name"))
+                not in used_target_names
+            ]
+            day_pool.extend(
+                candidate
+                for candidate in selected_candidates
+                if candidate not in day_pool
+                and _normalize_poi_name(candidate.get("place", {}).get("name"))
+                not in used_target_names
+            )
+            # A small destination may expose fewer unique POIs than the
+            # number of comfortable sightseeing legs. Reuse only
+            # non-researched fallback places in that case; a source-backed
+            # highlight is never repeated until the full researched set has
+            # had a chance to enter the itinerary.
+            day_pool.extend(
+                candidate
+                for candidate in selected_candidates
+                if candidate not in day_pool
+                and not candidate.get("destination_research_priority")
+            )
+            day_targets = _select_itinerary_places(
+                day_pool,
+                destination,
+                day_budgets[day_index],
+                return_candidates=True,
+            )
+            if not day_targets:
+                continue
             anchor = destination
-            for sequence in range(2):
+            for sequence, target_candidate in enumerate(day_targets):
                 route = None
                 target = None
-                for _ in range(min(6, len(places))):
-                    target = places[cursor % len(places)]
-                    cursor += 1
-                    mode = modes[(day_index * 2 + sequence) % len(modes)]
-                    candidate_route = await _route(
-                        registry,
-                        anchor,
-                        target,
-                        state["trip_id"],
-                        preferred_mode=mode,
-                        fallback_modes=["walking", "riding", "transit", "driving"],
-                    )
-                    if candidate_route.get("success") and _local_route_reasonable(candidate_route.get("data", {})):
-                        route = candidate_route
-                        break
+                target = target_candidate["place"]
+                mode = modes[(day_index * 2 + sequence) % len(modes)]
+                candidate_route = await _route(
+                    registry,
+                    anchor,
+                    target,
+                    state["trip_id"],
+                    preferred_mode=mode,
+                    fallback_modes=["walking", "riding", "transit", "driving"],
+                )
+                if candidate_route.get("success") and _local_route_reasonable(candidate_route.get("data", {})):
+                    route = candidate_route
                 if route and target:
                     local_routes.append(
                         {
@@ -1038,6 +1094,7 @@ def build_planning_graph(
                         }
                     )
                     anchor = target
+                    used_target_names.add(_normalize_poi_name(target.get("name")))
             if anchor is not destination:
                 route = await _route(
                     registry,
@@ -1611,8 +1668,30 @@ def build_planning_graph(
             state.get("day_plans", []),
             state.get("tourism_candidates", {}),
         )
+        research = dict(state.get("destination_research", {}))
+        coverage = dict(research.get("attraction_coverage", {}))
+        scheduled_names = {
+            _normalize_poi_name(activity.get("place", {}).get("name"))
+            for day in plans
+            for activity in day.get("activities", [])
+            if activity.get("type") == "attraction"
+        }
+        coverage["scheduled_names"] = [
+            item.get("place", {}).get("name")
+            for item in state.get("tourism_candidates", {}).get("attractions", [])
+            if item.get("must_see")
+            and _normalize_poi_name(item.get("place", {}).get("name")) in scheduled_names
+        ]
+        coverage["uncovered_names"] = [
+            item.get("place", {}).get("name")
+            for item in state.get("tourism_candidates", {}).get("attractions", [])
+            if item.get("must_see")
+            and _normalize_poi_name(item.get("place", {}).get("name")) not in scheduled_names
+        ]
+        research["attraction_coverage"] = coverage
         return {
             "day_plans": plans,
+            "destination_research": research,
             "progress": {"node": "schedule_tourism", "value": 91},
         }
 
@@ -1987,16 +2066,23 @@ def _route_mode_feasible(data: dict[str, Any]) -> bool:
 
 
 def _local_route_reasonable(data: dict[str, Any]) -> bool:
-    """A sightseeing transfer should not consume most of a half-day."""
+    """Keep sightseeing transfers bounded while allowing city-wide highlights."""
+    mode = data.get("selected_mode")
     duration = int(data.get("duration_minutes") or 0)
     distance = float(data.get("distance_km") or 0)
-    return 0.05 <= distance <= 30 and 1 <= duration <= 75
+    if mode == "walking":
+        return 0.05 <= distance <= 8 and 1 <= duration <= 90
+    if mode == "riding":
+        return 0.05 <= distance <= 20 and 1 <= duration <= 100
+    return 0.05 <= distance <= 35 and 1 <= duration <= 120
 
 
 def _select_itinerary_places(
     candidates: list[dict[str, Any]],
     anchor: dict[str, Any],
     limit: int,
+    *,
+    return_candidates: bool = False,
 ) -> list[dict[str, Any]]:
     """Greedily balance Agent score with transfer distance to avoid scattered POIs."""
     remaining: list[dict[str, Any]] = []
@@ -2053,7 +2139,7 @@ def _select_itinerary_places(
             return score + research_priority * 1.5 - distance * 1.5
 
         chosen = max(remaining, key=utility)
-        selected.append(chosen["place"])
+        selected.append(chosen if return_candidates else chosen["place"])
         current = chosen["place"]
         remaining.remove(chosen)
     return selected

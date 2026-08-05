@@ -388,7 +388,9 @@ class OllamaDestinationResearchAgent:
             "return enough distinct attractions for the number of travel days (up to 12 attraction recommendations). "
             "Do not invent names or promote obscure nearby POIs. Do not turn an experience into a place name. "
             "Return JSON only: {\"recommendations\":[{\"name\":\"...\",\"category\":\"attractions|meals\","
-            "\"importance\":0,\"reason\":\"中文依据\",\"source_indexes\":[0]}]}. "
+            "\"importance\":0,\"area\":\"城区或地理片区\",\"suggested_minutes\":90,"
+            "\"best_time\":\"morning|afternoon|evening|any\",\"reason\":\"中文依据\","
+            "\"source_indexes\":[0]}]}. "
             "importance is 0-100 and reflects local fame and evidence quality. "
             f"Destination: {destination}; trip request: {json.dumps(trip_request, ensure_ascii=False)}; "
             f"evidence: {json.dumps(evidence, ensure_ascii=False)}"
@@ -431,6 +433,16 @@ class OllamaDestinationResearchAgent:
                     "name": name[:120],
                     "category": category,
                     "importance": max(0.0, min(100.0, importance)),
+                    "area": str(item.get("area") or "").strip()[:80],
+                    "suggested_minutes": _coerce_positive_minutes(
+                        item.get("suggested_minutes")
+                    )
+                    or 90,
+                    "best_time": (
+                        item.get("best_time")
+                        if item.get("best_time") in {"morning", "afternoon", "evening", "any"}
+                        else "any"
+                    ),
                     "reason": str(item.get("reason") or "来源支持的目的地推荐").strip()[:240],
                     "source_indexes": [
                         int(index)

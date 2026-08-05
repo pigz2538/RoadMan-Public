@@ -57,6 +57,17 @@ def _attraction_sort_key(candidate: dict[str, Any]) -> tuple[float, float, float
     )
 
 
+def _suggested_duration(candidate: dict[str, Any], default: int) -> int:
+    try:
+        return max(45, min(240, int(candidate.get("suggested_minutes") or default)))
+    except (TypeError, ValueError):
+        return default
+
+
+def _attraction_name_key(value: Any) -> str:
+    return re.sub(r"[\s\u00b7•\-—–_/|（）()【】\[\]，,。；;:：]+", "", str(value or "")).casefold()
+
+
 def _place_distance_km(left: dict[str, Any] | None, right: dict[str, Any] | None) -> float | None:
     if not left or not right:
         return None
@@ -216,7 +227,7 @@ def schedule_tourism_activities(
                 start_at,
                 slot_end,
                 preferred=start_at,
-                duration_minutes=90,
+                duration_minutes=_suggested_duration(candidate, 90),
                 occupied=_occupied_ranges(activities),
                 minimum_minutes=45,
             )
@@ -244,6 +255,7 @@ def schedule_tourism_activities(
                     detail_url=candidate.get("detail_url"),
                 )
             )
+            candidate["coverage_scheduled"] = True
             existing_names.add(candidate["place"]["name"])
             used_attraction_names.add(candidate["place"]["name"])
 
@@ -286,7 +298,15 @@ def schedule_tourism_activities(
                 for stage in stages
             ]
             occupied = [*stage_ranges, *_occupied_ranges(activities)]
-            ranked_candidates = sorted(candidates.get("attractions", []), key=_attraction_sort_key)
+            ranked_candidates = sorted(
+                candidates.get("attractions", []),
+                key=lambda item: (
+                    0
+                    if item.get("coverage_day_index") == day_index + 1
+                    else 1,
+                    *_attraction_sort_key(item),
+                ),
+            )
             for candidate in ranked_candidates:
                 if len(scheduled_attractions) >= target_attractions:
                     break
@@ -315,7 +335,7 @@ def schedule_tourism_activities(
                         time(15, 0),
                         tzinfo=SHANGHAI,
                     ),
-                    duration_minutes=75,
+                    duration_minutes=_suggested_duration(candidate, 75),
                     occupied=occupied,
                     minimum_minutes=45,
                 )
@@ -344,6 +364,7 @@ def schedule_tourism_activities(
                     )
                 )
                 occupied.append((activity_start, activity_start + timedelta(minutes=duration)))
+                candidate["coverage_scheduled"] = True
                 scheduled_attractions.append(activities[-1])
                 existing_names.add(name)
                 used_attraction_names.add(name)
@@ -745,6 +766,32 @@ def verify_tourism_plan(
     candidates: dict[str, list[dict[str, Any]]],
 ) -> list[dict[str, Any]]:
     issues: list[dict[str, Any]] = []
+    scheduled_attraction_names = {
+        _attraction_name_key(activity.get("place", {}).get("name"))
+        for day in day_plans
+        for activity in day.get("activities", [])
+        if activity.get("type") == "attraction"
+    }
+    uncovered_highlights = [
+        item.get("place", {}).get("name")
+        for item in candidates.get("attractions", [])
+        if item.get("must_see")
+        and item.get("place", {}).get("name")
+        and _attraction_name_key(item["place"]["name"]) not in scheduled_attraction_names
+        and not item.get("seasonal_excluded")
+    ]
+    if uncovered_highlights:
+        issues.append(
+            {
+                "code": "DESTINATION_HIGHLIGHTS_UNCOVERED",
+                "severity": "warning",
+                "description": (
+                    "目的地研究标记的代表性景点未全部进入当前可执行时间窗："
+                    + "、".join(uncovered_highlights[:8])
+                    + "；可延长天数、减少停留或在编辑面板中加入。"
+                ),
+            }
+        )
     if candidates.get("hotels"):
         for day in day_plans[:-1]:
             if not any(
