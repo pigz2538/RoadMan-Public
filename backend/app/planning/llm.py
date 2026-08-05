@@ -384,6 +384,8 @@ class OllamaDestinationResearchAgent:
         prompt = (
             "You are RoadMan Destination Research Agent. Based ONLY on supplied web/FlyAI evidence, "
             "identify famous, source-backed must-see attractions and representative local foods. "
+            "For a city destination, cover different districts and landmark types instead of only places near a hotel; "
+            "return enough distinct attractions for the number of travel days (up to 12 attraction recommendations). "
             "Do not invent names or promote obscure nearby POIs. Do not turn an experience into a place name. "
             "Return JSON only: {\"recommendations\":[{\"name\":\"...\",\"category\":\"attractions|meals\","
             "\"importance\":0,\"reason\":\"中文依据\",\"source_indexes\":[0]}]}. "

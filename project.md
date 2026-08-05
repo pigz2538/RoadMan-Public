@@ -8,6 +8,7 @@
 - 住宿调度会复用同城/近距离的舒适型酒店，并过滤青旅、青年旅舍、旅舍、hostel；餐饮按评分/Agent 分数排序，三餐轮换，候选不足时明确标注复用。
 - 新增 `flyai.keyword_search` 与 `flyai.ai_search` Skill，采用 FlyAI CLI 的 `keyword-search`/`ai-search --query`，保留来源、图片、详情链接、健康状态和 SkillCall 审计。
 - 目的地研究 Agent 在 POI 检索前收集公开网页与 FlyAI 的“必去/必吃”证据，再交给 Ollama POI Ranker 决定是否纳入，不使用固定目的地名单。
+- 目的地研究 Agent 标记的代表性景点现在会获得独立的 `destination_research_priority`：排序、目的地接驳选点和日程分配都会优先覆盖城市级名胜，酒店只作为住宿落点，不再把候选半径收缩成酒店周边。研究 Agent 给出的名胜若不在高德首屏，还会按来源名称回查高德坐标后再进入路线/活动排程。
 - Docker backend/worker 支持 `FLYAI_API_KEY`；当前模型默认 `deepseek-v4-flash:0731-cloud`。
 
 更新日期：2026-08-04
@@ -173,7 +174,7 @@ npm run dev
 
 ## 已验证
 
-- 后端 pytest：37 项通过，1 个真实接口集成用例默认跳过。
+- 后端 pytest：86 项通过，1 个真实接口集成用例默认跳过（本轮新增目的地研究名胜优先级和跨天覆盖回归）。
 - Alembic：Docker PostgreSQL 迁移到 `20260730_0002 (head)`。
 - 共享 Schema：18 个成功导出。
 - Docker：PostgreSQL、Redis、Backend、Worker、Frontend 全部健康。

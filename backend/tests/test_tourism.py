@@ -403,6 +403,84 @@ def test_tourism_candidates_are_ranked_by_rating_distance_and_preference():
     assert first["recommendation_reasons"]
 
 
+def test_destination_research_highlight_outranks_nearby_generic_poi():
+    candidates = {
+        "attractions": [
+            {
+                "place": {
+                    "name": "酒店旁小公园",
+                    "coordinates": {"longitude": 118.80, "latitude": 32.05},
+                    "source_id": "near",
+                },
+                "rating": 4.9,
+                "provider": "高德地图",
+            },
+            {
+                "place": {
+                    "name": "秦淮河风光带",
+                    "coordinates": {"longitude": 118.78, "latitude": 32.00},
+                    "source_id": "qinhuai",
+                },
+                "rating": 4.5,
+                "provider": "高德地图",
+            },
+        ],
+        "hotels": [],
+        "meals": [],
+    }
+    ranked = rank_tourism_candidates(
+        candidates,
+        {"coordinates": {"longitude": 118.80, "latitude": 32.05}},
+        [],
+        destination_research={
+            "agent_recommendations": [
+                {
+                    "name": "秦淮河",
+                    "category": "attractions",
+                    "importance": 98,
+                    "reason": "目的地研究来源列为南京代表性城市景观",
+                }
+            ]
+        },
+    )
+
+    assert ranked["attractions"][0]["place"]["name"] == "秦淮河风光带"
+    assert ranked["attractions"][0]["must_see"] is True
+    assert ranked["attractions"][0]["destination_research_priority"] == 98
+
+
+def test_scheduler_distributes_city_highlights_across_days():
+    days = [
+        {"id": "day_1", "date": "2026-08-11", "items": [], "activities": [], "stages": []},
+        {"id": "day_2", "date": "2026-08-12", "items": [], "activities": [], "stages": []},
+    ]
+    names = ["秦淮河", "明城墙", "大报恩寺", "中山陵", "明孝陵", "雨花台"]
+    candidates = {
+        "attractions": [
+            {
+                "place": {"name": name, "coordinates": {"longitude": 118.7 + index * 0.01, "latitude": 32.0}},
+                "score": 90 - index,
+                "destination_research_priority": 100 - index,
+                "source_records": [],
+            }
+            for index, name in enumerate(names)
+        ],
+        "hotels": [],
+        "meals": [],
+    }
+
+    scheduled = schedule_tourism_activities(days, candidates)
+    selected = [
+        item["place"]["name"]
+        for day in scheduled
+        for item in day["activities"]
+        if item["type"] == "attraction"
+    ]
+    assert set(selected) == set(names)
+    assert len({name for name in selected[:3]}) == 3
+    assert len(set(selected[3:])) == 3
+
+
 @pytest.mark.asyncio
 async def test_flyai_poi_adapter_degrades_when_cli_is_missing(monkeypatch):
     monkeypatch.setattr("app.skills.flyai.shutil.which", lambda _: None)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from math import asin, cos, radians, sin, sqrt
+import re
 from typing import Any
 
 
@@ -8,7 +9,9 @@ def rank_tourism_candidates(
     candidates: dict[str, list[dict[str, Any]]],
     destination: dict[str, Any],
     preferences: list[str],
+    destination_research: dict[str, Any] | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
+    research_recommendations = _research_recommendations(destination_research)
     center = destination.get("coordinates") or {}
     for category, items in candidates.items():
         for item in items:
@@ -37,10 +40,33 @@ def rank_tourism_candidates(
             if item.get("provider") in {"FlyAI / 飞猪", "OpenTripMap"}:
                 score += 3
                 reasons.append("含外部旅行来源")
+            recommendation = _match_research_recommendation(
+                item.get("research_hint_name") or item.get("place", {}).get("name"),
+                research_recommendations.get(category, []),
+            )
+            if recommendation:
+                # A source-backed city highlight must outrank an obscure POI
+                # merely because it happens to be close to the hotel.  Keep
+                # the Agent's importance visible so the itinerary and the
+                # local-route selector can preserve city-wide coverage.
+                importance = float(recommendation.get("importance") or 0)
+                priority = max(1.0, min(100.0, importance))
+                score += 24 + priority * 0.22
+                item["destination_research_priority"] = round(priority, 1)
+                item["destination_research_name"] = recommendation["name"]
+                item["destination_research_reason"] = recommendation.get("reason")
+                item["must_see"] = priority >= 60
+                reasons.insert(0, "目的地研究 Agent 标记为代表性推荐")
             item["score"] = round(max(0, min(100, score)), 1)
             item["distance_km"] = round(distance_km, 2) if distance_km is not None else None
             item["recommendation_reasons"] = reasons[:3] or ["按数据完整度排序"]
-        items.sort(key=lambda item: (-item.get("score", 0), item["place"]["name"]))
+        items.sort(
+            key=lambda item: (
+                -float(item.get("destination_research_priority") or 0),
+                -float(item.get("score") or 0),
+                item["place"]["name"],
+            )
+        )
         for index, item in enumerate(items):
             item["rank"] = index + 1
             item["backup"] = index > 0
@@ -76,6 +102,7 @@ def apply_agent_ranking(
             item["recommendation_reasons"] = [decision["reason"]]
         items.sort(
             key=lambda item: (
+                -float(item.get("destination_research_priority") or 0),
                 -(item.get("agent_score") if item.get("agent_score") is not None else item.get("score", 0)),
                 -item.get("score", 0),
                 item["place"]["name"],
@@ -85,6 +112,51 @@ def apply_agent_ranking(
             item["rank"] = index + 1
             item["backup"] = index > 0
     return candidates
+
+
+_RESEARCH_NAME_SEPARATORS = re.compile(r"[\s\u00b7•\-—–_/|（）()【】\[\]，,。；;:：]+")
+
+
+def _normalise_research_name(value: Any) -> str:
+    """Normalize names only for source-backed POI identity matching.
+
+    This is not an intent/requirement keyword parser.  It is deliberately
+    limited to punctuation, whitespace and case so a researched name such as
+    “南京大学” can match a provider label like “南京大学鼓楼校区”.
+    """
+    return _RESEARCH_NAME_SEPARATORS.sub("", str(value or "")).casefold()
+
+
+def _research_recommendations(
+    destination_research: dict[str, Any] | None,
+) -> dict[str, list[dict[str, Any]]]:
+    result: dict[str, list[dict[str, Any]]] = {"attractions": [], "meals": []}
+    for item in (destination_research or {}).get("agent_recommendations", []):
+        if not isinstance(item, dict):
+            continue
+        category = item.get("category")
+        name = str(item.get("name") or "").strip()
+        if category not in result or not name:
+            continue
+        result[category].append(item)
+    return result
+
+
+def _match_research_recommendation(
+    candidate_name: Any,
+    recommendations: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    candidate_key = _normalise_research_name(candidate_name)
+    if len(candidate_key) < 3:
+        return None
+    matches: list[dict[str, Any]] = []
+    for recommendation in recommendations:
+        recommendation_key = _normalise_research_name(recommendation.get("name"))
+        if len(recommendation_key) < 3:
+            continue
+        if candidate_key == recommendation_key or candidate_key in recommendation_key or recommendation_key in candidate_key:
+            matches.append(recommendation)
+    return max(matches, key=lambda item: float(item.get("importance") or 0), default=None)
 
 
 def apply_agent_suitability(

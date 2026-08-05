@@ -32,6 +32,31 @@ def _candidate_quality(candidate: dict[str, Any]) -> tuple[float, float, str]:
     return (-score, -rating, str((candidate.get("place") or {}).get("name") or ""))
 
 
+def _attraction_priority(candidate: dict[str, Any]) -> float:
+    try:
+        return float(candidate.get("destination_research_priority") or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _attraction_sort_key(candidate: dict[str, Any]) -> tuple[float, float, float, str]:
+    """Keep source-backed city highlights ahead of nearby generic POIs."""
+    try:
+        score = float(candidate.get("score") or 0)
+    except (TypeError, ValueError):
+        score = 0.0
+    try:
+        rating = float(candidate.get("rating") or 0)
+    except (TypeError, ValueError):
+        rating = 0.0
+    return (
+        -_attraction_priority(candidate),
+        -score,
+        -rating,
+        str((candidate.get("place") or {}).get("name") or ""),
+    )
+
+
 def _place_distance_km(left: dict[str, Any] | None, right: dict[str, Any] | None) -> float | None:
     if not left or not right:
         return None
@@ -232,8 +257,26 @@ def schedule_tourism_activities(
         # A multi-day stay should not collapse into one transfer plus a
         # single attraction. Keep enough breathing room for a comfortable
         # morning/afternoon/evening plan while never exceeding four curated
-        # attractions per day.
-        target_attractions = min(4, max(2, len(stages) + 1))
+        # attractions per day.  When the destination research Agent has
+        # identified a city-wide must-see set, distribute the remaining
+        # highlights over the remaining days instead of letting the hotel
+        # area's distance score consume every slot.
+        remaining_priority = [
+            item
+            for item in candidates.get("attractions", [])
+            if _attraction_priority(item) > 0
+            and item.get("place", {}).get("name") not in used_attraction_names
+        ]
+        remaining_days = max(1, len(day_plans) - day_index)
+        priority_target = (
+            (len(remaining_priority) + remaining_days - 1) // remaining_days
+            if remaining_priority
+            else 0
+        )
+        target_attractions = min(
+            4,
+            max(2, len(stages) + 1, priority_target),
+        )
         if len(scheduled_attractions) < target_attractions:
             stage_ranges = [
                 (
@@ -243,10 +286,7 @@ def schedule_tourism_activities(
                 for stage in stages
             ]
             occupied = [*stage_ranges, *_occupied_ranges(activities)]
-            ranked_candidates = sorted(
-                candidates.get("attractions", []),
-                key=lambda item: (-float(item.get("score", 0)), item.get("place", {}).get("name", "")),
-            )
+            ranked_candidates = sorted(candidates.get("attractions", []), key=_attraction_sort_key)
             for candidate in ranked_candidates:
                 if len(scheduled_attractions) >= target_attractions:
                     break

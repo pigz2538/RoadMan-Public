@@ -777,10 +777,120 @@ def build_planning_graph(
                     }
                 )
                 existing_names.add(normalized)
+        # The broad “景点” query is intentionally not the only source of
+        # attractions.  A city-wide research Agent may identify famous places
+        # that fall outside the provider's first page or far from the chosen
+        # hotel.  Resolve those source-backed names through AMap before
+        # ranking so they remain executable itinerary candidates.  This is
+        # data-driven from the research Agent; no city/POI keyword catalogue
+        # is embedded in the planner.
+        researched_attractions = [
+            item
+            for item in destination_research.get("agent_recommendations", [])
+            if isinstance(item, dict)
+            and item.get("category") == "attractions"
+            and str(item.get("name") or "").strip()
+        ]
+        if researched_attractions and "amap.poi" in registry.names():
+            existing_names = {
+                _normalize_poi_name(item.get("place", {}).get("name"))
+                for item in candidates["attractions"]
+            }
+            lookup_items = [
+                item
+                for item in researched_attractions[:12]
+                if _normalize_poi_name(item["name"]) not in existing_names
+            ]
+            if lookup_items:
+                await emit(
+                    state,
+                    "research_attraction_lookup",
+                    f"目的地研究 Agent 正在回查 {len(lookup_items)} 个代表性景点的高德坐标",
+                    67,
+                    event="tool_started",
+                    tool="amap.poi",
+                )
+                lookup_results = await asyncio.gather(
+                    *[
+                        registry.execute(
+                            "amap.poi",
+                            {
+                                "keywords": str(item["name"])[:80],
+                                "city": destination.get("city"),
+                                "page_size": 5,
+                            },
+                            SkillContext(
+                                trip_id=state["trip_id"],
+                                metadata={
+                                    "purpose": "destination_research_attraction",
+                                    "research_name": item["name"],
+                                },
+                            ),
+                        )
+                        for item in lookup_items
+                    ],
+                    return_exceptions=True,
+                )
+                for recommendation, result in zip(lookup_items, lookup_results, strict=True):
+                    if isinstance(result, Exception) or not result.success or not isinstance(result.data, dict):
+                        continue
+                    source_records = [item.model_dump(mode="json") for item in result.sources]
+                    tourism_sources.extend(source_records)
+                    for item in result.data.get("items", []):
+                        location = item.get("location")
+                        name = str(item.get("name") or "").strip()
+                        if not name or not location:
+                            continue
+                        normalized = _normalize_poi_name(name)
+                        if normalized in existing_names:
+                            continue
+                        try:
+                            longitude, latitude = location.split(",", 1)
+                            longitude_value, latitude_value = float(longitude), float(latitude)
+                        except (TypeError, ValueError):
+                            continue
+                        candidates["attractions"].append(
+                            {
+                                "place": {
+                                    "id": item.get("id") or name,
+                                    "name": name,
+                                    "address": item.get("address"),
+                                    "city": item.get("city") or destination.get("city"),
+                                    "coordinates": {
+                                        "longitude": longitude_value,
+                                        "latitude": latitude_value,
+                                    },
+                                    "source_id": item.get("id") or name,
+                                },
+                                "detail_url": f"https://www.amap.com/search?query={quote(name)}",
+                                "source_records": [
+                                    *source_records,
+                                    {
+                                        "provider": "高德地图",
+                                        "title": f"{name} 地点详情",
+                                        "url": f"https://www.amap.com/search?query={quote(name)}",
+                                    },
+                                ],
+                                "provider": result.provider,
+                                "research_hint": recommendation.get("reason"),
+                                "research_hint_name": recommendation.get("name"),
+                            }
+                        )
+                        existing_names.add(normalized)
+                await emit(
+                    state,
+                    "research_attraction_lookup",
+                    "目的地研究代表性景点已补齐坐标并合并重复地点",
+                    67,
+                    event="tool_completed",
+                    tool="amap.poi",
+                )
+
         candidates = rank_tourism_candidates(
             candidates,
             destination,
             state["trip_request"].get("preferences", []),
+            destination_research=destination_research,
         )
         if settings.enable_poi_web_enrichment:
             await emit(
@@ -1929,7 +2039,18 @@ def _select_itinerary_places(
                 )
             except (KeyError, TypeError, ValueError):
                 distance = 25.0
-            return float(item.get("score") or 0) - distance * 1.5
+            try:
+                score = float(item.get("score") or 0)
+            except (TypeError, ValueError):
+                score = 0.0
+            try:
+                research_priority = float(item.get("destination_research_priority") or 0)
+            except (TypeError, ValueError):
+                research_priority = 0.0
+            # Research-backed city highlights should be reachable even when
+            # another generic POI is closer to the hotel.  Distance still
+            # shapes the order inside the same regional cluster.
+            return score + research_priority * 1.5 - distance * 1.5
 
         chosen = max(remaining, key=utility)
         selected.append(chosen["place"])
