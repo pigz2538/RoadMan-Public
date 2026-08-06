@@ -28,6 +28,11 @@ export interface Activity {
     estimated: boolean
   }
   opening_hours?: { text: string; confirmed: boolean }
+  reservation_status?: 'required' | 'recommended' | 'not_required' | 'unknown'
+  reservation_note?: string
+  risk_level?: 'low' | 'moderate' | 'high'
+  risk_tags?: string[]
+  risk_note?: string
   source_records?: Array<{
     provider: string
     title: string

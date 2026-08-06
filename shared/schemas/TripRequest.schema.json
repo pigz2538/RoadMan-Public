@@ -237,6 +237,13 @@
       "title": "Preferences",
       "type": "array"
     },
+    "transport_modes": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Transport Modes",
+      "type": "array"
+    },
     "special_events": {
       "items": {
         "type": "string"

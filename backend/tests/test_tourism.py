@@ -3,7 +3,7 @@ import json
 import pytest
 
 from app.planning.recommendations import plan_attraction_coverage, rank_tourism_candidates
-from app.planning.tourism import review_daily_schedule, schedule_tourism_activities, verify_tourism_plan
+from app.planning.tourism import activity_checks, review_daily_schedule, schedule_tourism_activities, verify_tourism_plan
 from app.skills.base import SkillContext
 from app.skills.flyai import (
     FlyAIFerryAdapter,
@@ -99,6 +99,143 @@ def test_tourism_scheduler_adds_attraction_and_overnight_hotel():
     assert hotel["planned_end"].startswith("2026-08-03")
     assert hotel["source_records"][0]["provider"] == "高德地图"
     assert verify_tourism_plan(scheduled, candidates) == []
+
+
+def test_tourism_scheduler_never_places_destination_attraction_before_late_intercity_arrival():
+    days = [
+        {
+            "id": "day_1",
+            "date": "2026-08-07",
+            "items": [],
+            "activities": [],
+            "stages": [
+                {
+                    "id": "outbound",
+                    "title": "城市出发",
+                    "mode": "train",
+                    "sequence": 0,
+                    "origin": {"name": "武汉"},
+                    "destination": {"name": "北京", "city": "北京市"},
+                    "planned_start": "2026-08-07T16:30:00+08:00",
+                    "planned_end": "2026-08-08T00:45:00+08:00",
+                }
+            ],
+        },
+        {
+            "id": "day_2",
+            "date": "2026-08-08",
+            "items": [],
+            "activities": [],
+            "stages": [
+                {
+                    "id": "local",
+                    "title": "公共交通前往景点",
+                    "mode": "transit",
+                    "sequence": 0,
+                    "origin": {"name": "北京"},
+                    "destination": {"name": "天安门广场", "city": "北京市"},
+                    "planned_start": "2026-08-08T09:30:00+08:00",
+                    "planned_end": "2026-08-08T10:00:00+08:00",
+                }
+            ],
+        },
+    ]
+    candidates = {
+        "attractions": [
+            {
+                "place": {"name": "天安门广场", "city": "北京市"},
+                "source_records": [{"provider": "高德地图", "title": "地点详情"}],
+                "destination_research_priority": 90,
+            },
+            {
+                "place": {"name": "故宫博物院", "city": "北京市"},
+                "source_records": [{"provider": "高德地图", "title": "地点详情"}],
+                "destination_research_priority": 80,
+            },
+        ],
+        "hotels": [],
+        "meals": [],
+    }
+
+    scheduled = schedule_tourism_activities(days, candidates)
+    day_one_attractions = [item for item in scheduled[0]["activities"] if item["type"] == "attraction"]
+    assert day_one_attractions == []
+    day_two_attractions = [item for item in scheduled[1]["activities"] if item["type"] == "attraction"]
+    assert day_two_attractions
+    assert all(item["planned_start"].startswith("2026-08-08") for item in day_two_attractions)
+    assert all(int(item["planned_start"][11:13]) >= 7 for item in day_two_attractions)
+
+
+def test_tourism_scheduler_never_places_attraction_after_return_departure():
+    days = [
+        {
+            "id": "day_1",
+            "date": "2026-08-09",
+            "items": [],
+            "activities": [],
+            "stages": [
+                {
+                    "id": "local",
+                    "title": "步行游览接驳",
+                    "mode": "walking",
+                    "sequence": 0,
+                    "origin": {"name": "北京"},
+                    "destination": {"name": "天安门广场", "city": "北京市"},
+                    "planned_start": "2026-08-09T09:00:00+08:00",
+                    "planned_end": "2026-08-09T09:30:00+08:00",
+                },
+                {
+                    "id": "return",
+                    "title": "返程",
+                    "mode": "train",
+                    "sequence": 1,
+                    "origin": {"name": "北京"},
+                    "destination": {"name": "武汉", "city": "武汉市"},
+                    "planned_start": "2026-08-09T12:15:00+08:00",
+                    "planned_end": "2026-08-09T17:25:00+08:00",
+                },
+            ],
+        }
+    ]
+    candidates = {
+        "attractions": [
+            {
+                "place": {"name": "天安门广场", "city": "北京市"},
+                "source_records": [{"provider": "高德地图", "title": "地点详情"}],
+                "destination_research_priority": 90,
+            },
+            {
+                "place": {"name": "故宫博物院", "city": "北京市"},
+                "source_records": [{"provider": "FlyAI", "title": "地点详情"}],
+                "destination_research_priority": 80,
+            },
+            {
+                "place": {"name": "景山公园", "city": "北京市"},
+                "source_records": [{"provider": "OpenStreetMap", "title": "地点详情"}],
+                "destination_research_priority": 70,
+            },
+        ],
+        "hotels": [],
+        "meals": [],
+    }
+
+    scheduled = schedule_tourism_activities(days, candidates)
+    attractions = [item for item in scheduled[0]["activities"] if item["type"] == "attraction"]
+    assert all(item["planned_start"] < "2026-08-09T12:15:00+08:00" for item in attractions)
+
+
+def test_activity_checks_expose_reservation_and_risk_evidence():
+    checks = activity_checks(
+        {
+            "ticket_name": "故宫门票",
+            "ticket_date": "2026-08-08",
+            "source_records": [{"provider": "FlyAI / 飞猪", "title": "门票"}],
+        },
+        "attraction",
+    )
+    assert checks["reservation_status"] == "recommended"
+    assert "预约" in checks["reservation_note"]
+    assert "营业/开放时间待确认" in checks["risk_tags"]
 
 
 def test_tourism_scheduler_reuses_comfortable_hotel_in_same_city_and_filters_hostel():

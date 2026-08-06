@@ -304,6 +304,11 @@ class Activity(BaseModel):
     detail_url: str | None = None
     ticket_or_price: MoneyRange | None = None
     opening_hours: OpeningHours | None = None
+    reservation_status: Literal["required", "recommended", "not_required", "unknown"] = "unknown"
+    reservation_note: str | None = None
+    risk_level: Literal["low", "moderate", "high"] = "low"
+    risk_tags: list[str] = Field(default_factory=list)
+    risk_note: str | None = None
     source_records: list[SourceRecord] = Field(default_factory=list)
     warnings: list[PlanWarning] = Field(default_factory=list)
 

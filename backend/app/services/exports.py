@@ -63,12 +63,23 @@ def build_report_html(trip: Trip, markdown: str = "") -> str:
         description = escape(activity.description or activity.user_note or "详情见来源链接")
         detail = escape(activity.detail_url or "")
         link = f'<a href="{detail}" target="_blank" rel="noreferrer">查看详情与来源</a>' if detail else ""
+        reservation = {
+            "required": "需预约",
+            "recommended": "建议预约",
+            "not_required": "无需预约",
+            "unknown": "预约待核查",
+        }.get(activity.reservation_status, "预约待核查")
+        checks = (
+            f'<div class="report-checks"><span>{reservation}</span>'
+            + "".join(f"<span>{escape(tag)}</span>" for tag in activity.risk_tags[:3])
+            + "</div>"
+        )
         return (
             f'<article class="report-card"><div class="report-card-media">{image_markup}'
             f'<span class="report-card-type">{escape(_activity_label(activity.type))}</span></div>'
             f'<h3>{escape(activity.place.name)}</h3>'
             f'<time>{activity.planned_start:%m月%d日 %H:%M}–{activity.planned_end:%H:%M}</time>'
-            f'<p>{description[:180]}</p>{link}</article>'
+            f'<p>{description[:180]}</p>{checks}{link}</article>'
         )
 
     day_sections = []
@@ -106,7 +117,8 @@ h1 {{ margin:16px 0 8px; font-size:42px; }} .subtitle {{ color:#d7e8fb; font-siz
 .report-card-media {{ position:relative; height:170px; background:#edf4ff; }} .report-card-media img {{ width:100%; height:100%; object-fit:cover; }}
 .report-card-placeholder {{ display:grid; place-items:center; height:100%; color:#2377e8; font-weight:800; font-size:20px; }}
 .report-card-type {{ position:absolute; left:12px; top:12px; padding:5px 9px; border-radius:999px; color:#fff; background:#2377e8dd; font-size:12px; font-weight:800; }}
-.report-card h3 {{ margin:14px 14px 5px; font-size:17px; }} .report-card time,.report-card p,.report-card a {{ display:block; margin:0 14px 9px; color:#657b98; font-size:13px; line-height:1.5; }} .report-card a {{ color:#176fe1; text-decoration:none; font-weight:700; }}
+ .report-card h3 {{ margin:14px 14px 5px; font-size:17px; }} .report-card time,.report-card p,.report-card a {{ display:block; margin:0 14px 9px; color:#657b98; font-size:13px; line-height:1.5; }} .report-card a {{ color:#176fe1; text-decoration:none; font-weight:700; }}
+.report-checks {{ display:flex; flex-wrap:wrap; gap:5px; margin:0 14px 9px; }} .report-checks span {{ padding:3px 7px; border-radius:999px; color:#7d5d21; background:#fff4d8; font-size:11px; }}
 .report-day {{ margin-top:28px; padding:26px; border:1px solid #d9e6f4; border-radius:24px; background:#f8fbff; }}
 .day-route {{ width:100%; margin:8px 0 18px; border-radius:16px; background:#eef5fc; }}
 .report-day-heading {{ display:flex; align-items:baseline; gap:12px; flex-wrap:wrap; }} .report-day-heading span {{ color:#176fe1; font-weight:800; }} .report-day-heading h2 {{ margin:0; font-size:25px; }} .report-day-heading small {{ color:#7186a0; }}
@@ -619,6 +631,16 @@ def _render_activity_board(
             time_text = f"{activity.planned_start:%m月%d日 %H:%M}–{activity.planned_end:%H:%M}"
             draw.text((left + 14, text_y), time_text, fill="#3e5c82", font=small_font)
             text_y += max(20, width // 78)
+            check_text = {
+                "required": "需预约",
+                "recommended": "建议预约",
+                "not_required": "无需预约",
+                "unknown": "预约待核查",
+            }.get(activity.reservation_status, "预约待核查")
+            if activity.risk_tags:
+                check_text += " · " + "、".join(activity.risk_tags[:2])
+            draw.text((left + 14, text_y), check_text[:28], fill="#9a6a24", font=small_font)
+            text_y += max(18, width // 88)
             note = activity.description or activity.user_note or next(
                 (source.title for source in activity.source_records if source.title),
                 "详情见来源链接",

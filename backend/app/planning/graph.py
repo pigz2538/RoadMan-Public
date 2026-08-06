@@ -428,15 +428,59 @@ def build_planning_graph(
             # intercity fallback candidates.  This keeps ordinary trips on the
             # user's default self-drive plan while still recovering from a
             # missing road/bridge route (including water crossings).
+            attempted: list[str] = []
+            last_route: dict[str, Any] = {"success": False, "error_code": "ROUTE_UNAVAILABLE"}
+            if explicit_intercity:
+                # Compare every explicitly allowed intercity schedule.  The
+                # first provider in the list must not win when it arrives in
+                # the small hours and another allowed mode has a daytime
+                # option; otherwise the local planner can put sightseeing at
+                # 03:00 immediately after the terminal transfer.
+                intercity_results: list[tuple[str, dict[str, Any]]] = []
+                for mode in intercity_order:
+                    attempted.append(mode)
+                    route, mode_warnings = await scheduled(
+                        mode,
+                        leg_origin,
+                        leg_destination,
+                        travel_date,
+                        requested_departure=requested_departure,
+                        arrival_deadline=arrival_deadline,
+                    )
+                    warnings.extend(mode_warnings)
+                    if route.get("success"):
+                        intercity_results.append((mode, route))
+                    else:
+                        last_route = route
+                if intercity_results:
+                    selected_mode, selected = min(
+                        intercity_results,
+                        key=lambda item: _intercity_route_quality(
+                            item[1],
+                            requested_departure=requested_departure,
+                            arrival_deadline=arrival_deadline,
+                            mode_order=intercity_order.index(item[0]),
+                        ),
+                    )
+                    if selected_mode != primary_mode:
+                        warnings.append(
+                            {
+                                "code": "INTERCITY_COMFORT_OPTIMIZED",
+                                "message": (
+                                    f"已在允许的交通方式中选择{_transport_mode_label(selected_mode)}，"
+                                    "优先避开凌晨抵达并保留舒适接驳时间"
+                                ),
+                                "severity": "info",
+                            }
+                        )
+                    return selected
             modes = (
-                [*intercity_order, "driving"]
+                ["driving"]
                 if explicit_intercity
                 else [*local_order, "driving"]
                 if explicit_local
                 else ["driving", "train", "flight", "ferry"]
             )
-            attempted: list[str] = []
-            last_route: dict[str, Any] = {"success": False, "error_code": "ROUTE_UNAVAILABLE"}
             for mode in modes:
                 attempted.append(mode)
                 if mode in {"driving", "transit", "walking", "riding"}:
@@ -1515,7 +1559,23 @@ def build_planning_graph(
             # sightseeing transfers to the departure calendar day after the
             # traveller is still on the train; those items belong to the
             # destination day and are regenerated there by the daily planner.
-            if index == 0 and stages and stages[-1].planned_end.date() > day_date:
+            if (
+                index == 0
+                and stages
+                and (
+                    stages[-1].planned_end.date() > day_date
+                    or local_start.date() != day_date
+                    or local_start.time() < time(7, 0)
+                    # A comfortable intercity arrival leaves no useful
+                    # sightseeing window late in the evening.  Previously a
+                    # 19:10 arrival still spawned a 20:10 transfer, which
+                    # chained past midnight and eventually rendered a 03:00
+                    # attraction.  Keep the arrival day for dinner, hotel
+                    # check-in and rest; the next calendar day owns local
+                    # sightseeing.
+                    or stages[-1].planned_end.time() >= time(18, 0)
+                )
+            ):
                 local_items = []
             for local in sorted(local_items, key=lambda item: item["sequence"]):
                 local["route"] = await prepare_route(local["route"])
@@ -1531,6 +1591,20 @@ def build_planning_graph(
                     route=local["route"],
                     start_at=local_start,
                 )
+                if (
+                    index == 0
+                    and stages
+                    and (
+                        stage.planned_start.date() != day_date
+                        or stage.planned_end.date() != day_date
+                        or stage.planned_end.time() > time(21, 30)
+                    )
+                ):
+                    # The arrival day has a strict evening boundary.  A
+                    # connector that would cross midnight is never a valid
+                    # sightseeing leg; stop the local chain and let the
+                    # following day start from the destination city.
+                    break
                 if return_cutoff and stage.planned_end > return_cutoff:
                     # A scheduled intercity return is a hard timetable.  Do
                     # not let a late local transfer push the traveller onto a
@@ -2692,6 +2766,11 @@ async def _train_route(
                     "severity": "warning",
                 }
             )
+    candidates = _prefer_daylight_arrivals(
+        candidates,
+        mode="train",
+        warnings=warnings,
+    )
 
     if arrival_deadline:
         selected = min(
@@ -2910,6 +2989,11 @@ async def _scheduled_route(
                     "severity": "warning",
                 }
             )
+    candidates = _prefer_daylight_arrivals(
+        candidates,
+        mode=mode,
+        warnings=warnings,
+    )
     if arrival_deadline:
         selected = min(
             candidates,
@@ -2952,6 +3036,66 @@ def _transport_mode_label(mode: str) -> str:
 def _intercity_departure_buffer(mode: Any) -> int:
     """Minutes needed before a scheduled intercity departure."""
     return {"flight": 150, "train": 45, "ferry": 45}.get(str(mode or ""), 45)
+
+
+def _intercity_route_quality(
+    route: dict[str, Any],
+    *,
+    requested_departure: datetime | None,
+    arrival_deadline: datetime | None,
+    mode_order: int,
+) -> tuple[int, int, float, int, int]:
+    """Rank allowed intercity schedules by safety, comfort and feasibility."""
+    data = route.get("data") or {}
+    departure = _parse_train_datetime(data.get("scheduled_departure_at"))
+    arrival = _parse_train_datetime(data.get("scheduled_arrival_at"))
+    if not departure or not arrival:
+        return (9, 9, 999999.0, 999999, mode_order)
+    arrival_clock = arrival.timetz().replace(tzinfo=None)
+    # 07:00–23:00 is the comfortable arrival window.  A quiet-hour arrival
+    # remains usable as a last resort, but it can never beat a daytime option.
+    quiet_penalty = 0 if time(7, 0) <= arrival_clock < time(23, 0) else 1
+    deadline_penalty = 0
+    deadline_distance = 0.0
+    if arrival_deadline:
+        deadline_penalty = 0 if arrival + timedelta(minutes=30) <= arrival_deadline else 1
+        deadline_distance = abs((arrival_deadline - arrival).total_seconds())
+    departure_wait = (
+        max(0.0, (departure - requested_departure).total_seconds())
+        if requested_departure
+        else 0.0
+    )
+    duration = int(data.get("duration_minutes") or 0)
+    return (
+        quiet_penalty,
+        deadline_penalty,
+        deadline_distance if arrival_deadline else departure_wait,
+        duration,
+        mode_order,
+    )
+
+
+def _prefer_daylight_arrivals(
+    candidates: list[tuple[dict[str, Any], datetime, datetime]],
+    *,
+    mode: str,
+    warnings: list[dict[str, Any]],
+) -> list[tuple[dict[str, Any], datetime, datetime]]:
+    daylight = [
+        item
+        for item in candidates
+        if time(7, 0) <= item[2].timetz().replace(tzinfo=None) < time(23, 0)
+    ]
+    if daylight and len(daylight) < len(candidates):
+        warnings.append(
+            {
+                "code": f"{mode.upper()}_QUIET_HOUR_AVOIDED",
+                "message": f"已避开{_intercity_mode_label(mode)}凌晨抵达班次，优先选择白天到达",
+                "severity": "info",
+            }
+        )
+        return daylight
+    return candidates
 
 
 async def _flight_route(

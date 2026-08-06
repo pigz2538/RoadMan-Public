@@ -322,6 +322,15 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .activity-copy .activity-meta { font-size: 12px; line-height: 1.35; white-space: normal; }
 .activity-copy .activity-source { color: #2670ce; font-size: 12px; }
 .activity-note { margin: 2px 0; color: #536b89; font-size: 12px; line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.activity-checks { display: flex; flex-wrap: wrap; gap: 5px; margin: 4px 0 2px; }
+.activity-check { display: inline-flex; align-items: center; padding: 2px 7px; border-radius: 999px; font-size: 11px; line-height: 1.4; border: 1px solid #d6e2f2; color: #526b8c; background: #f3f7fc; }
+.activity-check.reservation-required { color: #a64332; border-color: #f1c0b6; background: #fff1ed; }
+.activity-check.reservation-recommended { color: #9b6415; border-color: #f0d59a; background: #fff8e7; }
+.activity-check.reservation-not_required { color: #1c8067; border-color: #bfe6d7; background: #effaf6; }
+.activity-check.risk-moderate { color: #94611e; border-color: #efd59e; background: #fff8e9; }
+.activity-check.risk-high { color: #a43f36; border-color: #f2beb6; background: #fff0ed; }
+.activity-check-note { margin: 2px 0; color: #7a6b57; font-size: 11px; line-height: 1.4; }
+.activity-check-note.risk-note { color: #a25245; }
 .activity-detail-link { width: max-content; color: #166ad5; font-size: 12px; font-weight: 700; text-decoration: none; }
 .activity-detail-link:hover { text-decoration: underline; }
 .activity-copy div { display: flex; gap: 7px; }

@@ -132,6 +132,58 @@
           ],
           "default": null
         },
+        "reservation_status": {
+          "default": "unknown",
+          "enum": [
+            "required",
+            "recommended",
+            "not_required",
+            "unknown"
+          ],
+          "title": "Reservation Status",
+          "type": "string"
+        },
+        "reservation_note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reservation Note"
+        },
+        "risk_level": {
+          "default": "low",
+          "enum": [
+            "low",
+            "moderate",
+            "high"
+          ],
+          "title": "Risk Level",
+          "type": "string"
+        },
+        "risk_tags": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Risk Tags",
+          "type": "array"
+        },
+        "risk_note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Risk Note"
+        },
         "source_records": {
           "items": {
             "$ref": "#/$defs/SourceRecord"
@@ -937,6 +989,13 @@
             "type": "string"
           },
           "title": "Preferences",
+          "type": "array"
+        },
+        "transport_modes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Transport Modes",
           "type": "array"
         },
         "special_events": {

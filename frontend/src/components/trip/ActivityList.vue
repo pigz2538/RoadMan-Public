@@ -32,6 +32,13 @@ function activityKindLabel(activity: Activity) {
   if (activity.type === 'hotel') return '住宿'
   return `停留 ${formatStayDuration(activity.duration_minutes)}`
 }
+
+const reservationLabels: Record<string, string> = {
+  required: '需预约',
+  recommended: '建议预约',
+  not_required: '无需预约',
+  unknown: '预约待核查',
+}
 </script>
 
 <template>
@@ -61,6 +68,21 @@ function activityKindLabel(activity: Activity) {
           {{ activity.ticket_or_price.estimated ? '预计' : '' }}
           ¥{{ activity.ticket_or_price.minimum }}–{{ activity.ticket_or_price.maximum }}
         </span>
+        <div v-if="activity.reservation_status || activity.risk_tags?.length" class="activity-checks">
+          <span
+            v-if="activity.reservation_status"
+            :class="['activity-check', `reservation-${activity.reservation_status}`]"
+            :title="activity.reservation_note"
+          >{{ reservationLabels[activity.reservation_status] || '预约待核查' }}</span>
+          <span
+            v-for="tag in (activity.risk_tags || []).slice(0, 3)"
+            :key="tag"
+            :class="['activity-check', `risk-${activity.risk_level || 'moderate'}`]"
+            :title="activity.risk_note"
+          >{{ tag }}</span>
+        </div>
+        <p v-if="activity.reservation_note" class="activity-check-note">{{ activity.reservation_note }}</p>
+        <p v-if="activity.risk_note" class="activity-check-note risk-note">{{ activity.risk_note }}</p>
         <span v-if="activity.source_records?.length" class="activity-source">
           来源：{{ [...new Set(activity.source_records.map((item) => item.provider))].join('、') }}
         </span>

@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 
 _INCOMFORTABLE_LODGING_RE = re.compile(
-    r"(?:青旅|青年旅舍|青年旅社|旅舍|背包客栈|hostel|backpacker)",
+    r"(?:青旅|青年旅舍|青年旅社|青年公寓|学生公寓|旅舍|背包客栈|hostel|backpacker)",
     re.IGNORECASE,
 )
 
@@ -62,6 +62,92 @@ def _suggested_duration(candidate: dict[str, Any], default: int) -> int:
         return max(45, min(240, int(candidate.get("suggested_minutes") or default)))
     except (TypeError, ValueError):
         return default
+
+
+def activity_checks(
+    candidate: dict[str, Any] | None,
+    activity_type: str,
+    *,
+    start_at: datetime | None = None,
+    end_at: datetime | None = None,
+) -> dict[str, Any]:
+    """Return visible booking and safety checks for one itinerary item.
+
+    Provider data is deliberately kept as evidence: a missing ticket/booking
+    record is reported as ``unknown`` rather than silently treated as safe.
+    The planner can therefore show the traveller what still needs checking
+    without turning a provider outage into a false hard failure.
+    """
+    item = candidate or {}
+    reservation = str(item.get("reservation_status") or "").strip().lower()
+    if reservation not in {"required", "recommended", "not_required", "unknown"}:
+        reservation = ""
+    reservation_note = str(item.get("reservation_note") or "").strip() or None
+    if not reservation:
+        if activity_type == "hotel":
+            reservation = "required"
+            reservation_note = reservation_note or "住宿需要确认入住日期、房态、取消政策与实名要求"
+        elif activity_type == "meal":
+            reservation = "recommended"
+            reservation_note = reservation_note or "热门餐厅建议提前预约，并在当天确认营业与排队情况"
+        elif activity_type == "attraction":
+            # A dated ticket or a ticket product is provider evidence that the
+            # venue has an admission/booking flow, but it is not proof that
+            # every visit requires a reservation.
+            if item.get("ticket_date") or item.get("ticket_name"):
+                reservation = "recommended"
+                reservation_note = reservation_note or "已找到门票/票务信息，请核对预约、实名和入园时段"
+            elif item.get("source_records"):
+                reservation = "unknown"
+                reservation_note = reservation_note or "已找到地点来源，未发现明确预约规则，请查看官方公告"
+            else:
+                reservation = "unknown"
+                reservation_note = reservation_note or "暂无可验证预约信息，请出发前查看官方渠道"
+        else:
+            reservation = "unknown"
+            reservation_note = reservation_note or "暂无预约核查结果"
+
+    risk_tags: list[str] = []
+    risk_note = str(item.get("risk_note") or "").strip() or None
+    if item.get("seasonal_excluded") is True or item.get("agent_suitability") is False:
+        risk_tags.append("时令/条件不适配")
+        risk_note = risk_note or str(
+            item.get("suitability_reason")
+            or item.get("seasonal_warning")
+            or "Agent 复核认为当前日期或条件不适合"
+        )
+    if item.get("suitability_confidence") in {"low", None} and item.get("agent_suitability") is not True:
+        risk_tags.append("适配性待确认")
+    if not item.get("source_records"):
+        risk_tags.append("来源不足")
+        risk_note = risk_note or "没有可追溯的公开来源，建议出发前再次核验"
+    opening = item.get("opening_hours")
+    if not isinstance(opening, dict) or opening.get("confirmed") is not True:
+        risk_tags.append("营业/开放时间待确认")
+        risk_note = risk_note or "开放时间以出发日前官方公告为准"
+    if start_at is not None:
+        if activity_type == "attraction" and (start_at.hour < 7 or start_at.hour >= 22):
+            risk_tags.append("非舒适时段")
+            risk_note = risk_note or "景点已被排到夜间，规划器会将其移动到白天"
+        if activity_type != "hotel" and end_at is not None and end_at.date() != start_at.date():
+            risk_tags.append("跨日活动")
+            risk_note = risk_note or "活动跨越日历日，需重新核对营业和交通"
+    risk_tags = list(dict.fromkeys(risk_tags))
+    if item.get("risk_level") in {"low", "moderate", "high"}:
+        risk_level = item["risk_level"]
+    elif any(tag in {"时令/条件不适配", "非舒适时段", "跨日活动"} for tag in risk_tags):
+        risk_level = "high"
+    elif risk_tags or reservation == "unknown":
+        risk_level = "moderate"
+    else:
+        risk_level = "low"
+    return {
+        "reservation_status": reservation,
+        "reservation_note": reservation_note,
+        "risk_level": risk_level,
+        "risk_tags": risk_tags,
+        "risk_note": risk_note,
+    }
 
 
 def _attraction_name_key(value: Any) -> str:
@@ -148,6 +234,7 @@ def schedule_tourism_activities(
         # deterministic fallback instead of failing the whole planning job at
         # the final persistence step.
         day.setdefault("title", f"第 {day.get('day_index', day_index + 1)} 天")
+        day_date = datetime.fromisoformat(f"{day['date']}T00:00:00+08:00").date()
         activities: list[dict[str, Any]] = []
         for activity in list(day.get("activities", [])):
             name = activity.get("place", {}).get("name")
@@ -171,8 +258,45 @@ def schedule_tourism_activities(
                     # ranked pool fill later days with different places.
                     continue
                 used_attraction_names.add(name)
+            if activity.get("type") in {"attraction", "meal", "hotel"}:
+                # Agent-produced activities can arrive without the structured
+                # check fields.  Normalize them before any scheduling pass so
+                # every visible item has an explicit reservation state and
+                # risk explanation, even when its provider metadata is sparse.
+                try:
+                    existing_checks = activity_checks(
+                        None,
+                        str(activity.get("type")),
+                        start_at=datetime.fromisoformat(activity["planned_start"]),
+                        end_at=datetime.fromisoformat(activity["planned_end"]),
+                    )
+                except (KeyError, TypeError, ValueError):
+                    existing_checks = activity_checks(None, str(activity.get("type")))
+                for key, value in existing_checks.items():
+                    activity.setdefault(key, value)
             activities.append(activity)
         stages = sorted(day.get("stages", []), key=lambda item: item.get("sequence", 0))
+        # On a return day the final stage is the intercity leg home.  Local
+        # attraction filling must stop before that departure; otherwise the
+        # generic gap filler can put a destination POI *after* the traveller
+        # has already returned to the origin city.
+        return_cutoff = None
+        if day_index == len(day_plans) - 1 and stages:
+            final_stage = stages[-1]
+            final_mode = final_stage.get("mode")
+            final_title = str(final_stage.get("title") or "")
+            is_return_stage = (
+                final_mode in {"train", "flight", "ferry", "driving"}
+                or "返程" in final_title
+                or "return" in final_title.lower()
+            )
+            if not is_return_stage:
+                final_stage = None
+            try:
+                if final_stage is not None:
+                    return_cutoff = datetime.fromisoformat(final_stage["planned_start"])
+            except (KeyError, TypeError, ValueError):
+                return_cutoff = None
         _ensure_meals(
             day,
             activities,
@@ -213,6 +337,17 @@ def schedule_tourism_activities(
             ):
                 continue
             start_at = datetime.fromisoformat(stage["planned_end"])
+            # A stage may finish after midnight (for example, a late train
+            # into Beijing).  Do not attach a sightseeing stop to the previous
+            # calendar day or place it at 01:00–05:00.  The next day's local
+            # route pass will provide daytime sightseeing instead.
+            if start_at.date() != day_date:
+                continue
+            daylight_start = datetime.combine(day_date, time(7, 0), tzinfo=SHANGHAI)
+            daylight_end = datetime.combine(day_date, time(21, 0), tzinfo=SHANGHAI)
+            if return_cutoff is not None:
+                daylight_end = min(daylight_end, return_cutoff)
+            start_at = max(start_at, daylight_start)
             next_start = (
                 datetime.fromisoformat(stages[stage_index + 1]["planned_start"])
                 if stage_index + 1 < len(stages)
@@ -223,6 +358,9 @@ def schedule_tourism_activities(
                 if next_start
                 else start_at + timedelta(minutes=120)
             )
+            slot_end = min(slot_end, daylight_end)
+            if slot_end <= start_at:
+                continue
             slot = _closest_free_slot(
                 start_at,
                 slot_end,
@@ -239,6 +377,7 @@ def schedule_tourism_activities(
                     day=day,
                     sequence=len(activities),
                     activity_type="attraction",
+                    candidate=candidate,
                     place=candidate["place"],
                     start_at=activity_start,
                     duration_minutes=duration,
@@ -290,6 +429,20 @@ def schedule_tourism_activities(
             max(2, len(stages) + 1, priority_target),
         )
         if len(scheduled_attractions) < target_attractions:
+            outbound_intercity_day = day_index == 0 and any(
+                stage.get("title") == "城市出发"
+                and stage.get("mode") in {"train", "flight", "ferry"}
+                for stage in stages
+            )
+            if outbound_intercity_day:
+                # The first calendar day is a departure day, not a destination
+                # sightseeing day.  Never place Beijing attractions in the
+                # morning before a Friday-afternoon train/flight or after a
+                # cross-midnight arrival.
+                scheduled_attractions = [
+                    item for item in activities if item.get("type") == "attraction"
+                ]
+                target_attractions = len(scheduled_attractions)
             stage_ranges = [
                 (
                     datetime.fromisoformat(stage["planned_start"]),
@@ -319,17 +472,21 @@ def schedule_tourism_activities(
                     or name in used_attraction_names
                 ):
                     continue
+                activity_day_start = datetime.combine(
+                    datetime.fromisoformat(f"{day['date']}T00:00:00+08:00").date(),
+                    time(9, 0),
+                    tzinfo=SHANGHAI,
+                )
+                activity_day_end = datetime.combine(
+                    datetime.fromisoformat(f"{day['date']}T00:00:00+08:00").date(),
+                    time(21, 0),
+                    tzinfo=SHANGHAI,
+                )
+                if return_cutoff is not None:
+                    activity_day_end = min(activity_day_end, return_cutoff)
                 slot = _closest_free_slot(
-                    datetime.combine(
-                        datetime.fromisoformat(f"{day['date']}T00:00:00+08:00").date(),
-                        time(9, 0),
-                        tzinfo=SHANGHAI,
-                    ),
-                    datetime.combine(
-                        datetime.fromisoformat(f"{day['date']}T00:00:00+08:00").date(),
-                        time(21, 0),
-                        tzinfo=SHANGHAI,
-                    ),
+                    activity_day_start,
+                    activity_day_end,
                     preferred=datetime.combine(
                         datetime.fromisoformat(f"{day['date']}T00:00:00+08:00").date(),
                         time(15, 0),
@@ -347,6 +504,7 @@ def schedule_tourism_activities(
                         day=day,
                         sequence=len(activities),
                         activity_type="attraction",
+                        candidate=candidate,
                         place=place,
                         start_at=activity_start,
                         duration_minutes=duration,
@@ -386,7 +544,6 @@ def schedule_tourism_activities(
             if hotel is None:
                 continue
             selected_hotels.append((hotel, hotel_anchor))
-            day_date = datetime.fromisoformat(f"{day['date']}T00:00:00+08:00").date()
             last_end = max(
                 (
                     datetime.fromisoformat(stage["planned_end"])
@@ -420,6 +577,7 @@ def schedule_tourism_activities(
                     day=day,
                     sequence=len(activities),
                     activity_type="hotel",
+                    candidate=hotel,
                     place=hotel["place"],
                     start_at=check_in,
                     duration_minutes=int((check_out - check_in).total_seconds() // 60),
@@ -545,6 +703,7 @@ def _ensure_meals(
             day=day,
             sequence=len(activities),
             activity_type="meal",
+            candidate=candidate,
             place=place,
             start_at=start_at,
             duration_minutes=duration,
@@ -607,7 +766,16 @@ def review_daily_schedule(
             # Keep the afternoon/evening visible in the itinerary even when
             # no additional POI can be safely placed. This is an explicit,
             # adjustable free-time block rather than an invented attraction.
-            day_date = last_stage_end.date()
+            day_date = datetime.fromisoformat(f"{day['date']}T00:00:00+08:00").date()
+            if last_stage_end.date() != day_date:
+                notes.append(
+                    {
+                        "code": "CROSS_DAY_ARRIVAL_REST",
+                        "severity": "info",
+                        "message": f"{day.get('date')} 的跨日抵达已留给次日恢复，不安排凌晨景点",
+                    }
+                )
+                continue
             rest_start = max(
                 last_stage_end + timedelta(minutes=30),
                 datetime.combine(day_date, time(14, 0), tzinfo=SHANGHAI),
@@ -806,6 +974,10 @@ def verify_tourism_plan(
                     }
                 )
     for day in day_plans:
+        try:
+            day_date = datetime.fromisoformat(f"{day['date']}T00:00:00+08:00").date()
+        except (KeyError, TypeError, ValueError):
+            day_date = None
         ranges: list[tuple[datetime, datetime, str]] = [
             (
                 datetime.fromisoformat(stage["planned_start"]),
@@ -824,6 +996,26 @@ def verify_tourism_plan(
                         "severity": "blocker",
                         "description": (
                             f"{activity['place']['name']} 的结束时间不晚于开始时间"
+                        ),
+                    }
+                )
+            if (
+                day_date is not None
+                and activity.get("type") == "attraction"
+                and (
+                    start_at.date() != day_date
+                    or start_at.hour < 7
+                    or start_at.hour >= 22
+                    or end_at.date() != day_date
+                )
+            ):
+                issues.append(
+                    {
+                        "code": "ATTRACTION_OUTSIDE_COMFORT_WINDOW",
+                        "severity": "blocker",
+                        "description": (
+                            f"{activity['place']['name']} 被安排在 {start_at:%m月%d日 %H:%M}，"
+                            "景点仅允许在当天 07:00–22:00 的白天舒适窗口内游览"
                         ),
                     }
                 )
@@ -848,6 +1040,7 @@ def _activity(
     day: dict[str, Any],
     sequence: int,
     activity_type: str,
+    candidate: dict[str, Any] | None = None,
     place: dict[str, Any],
     start_at: datetime,
     duration_minutes: int,
@@ -861,6 +1054,18 @@ def _activity(
     detail_url: str | None = None,
 ) -> dict[str, Any]:
     end_at = start_at + timedelta(minutes=duration_minutes)
+    checks = activity_checks(
+        candidate,
+        activity_type,
+        start_at=start_at,
+        end_at=end_at,
+    )
+    candidate_opening = (candidate or {}).get("opening_hours")
+    opening_hours = (
+        candidate_opening
+        if isinstance(candidate_opening, dict) and candidate_opening.get("text")
+        else {"text": opening_text, "confirmed": False}
+    )
     return {
         "id": f"activity_{day['id']}_{activity_type}_{sequence}",
         "day_id": day["id"],
@@ -874,7 +1079,8 @@ def _activity(
         "required": required,
         "backup": False,
         "ticket_or_price": ticket_or_price,
-        "opening_hours": {"text": opening_text, "confirmed": False},
+        "opening_hours": opening_hours,
+        **checks,
         "source_records": sources,
         "user_note": user_note,
         "description": description,

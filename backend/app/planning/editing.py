@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from ..core.errors import AppError
 from ..domain.models import Activity, DayItemRef, MoneyRange, PlanPatch, Trip
 from ..skills.registry import SkillRegistry
+from .tourism import activity_checks
 
 
 CATEGORY_ACTIVITY_TYPE = {
@@ -663,6 +664,7 @@ def _activity_from_candidate(
     *,
     sequence: int,
 ) -> Activity:
+    checks = activity_checks(candidate, CATEGORY_ACTIVITY_TYPE[category], start_at=start, end_at=end)
     return Activity(
         day_id=day_id,
         sequence=sequence,
@@ -673,6 +675,7 @@ def _activity_from_candidate(
         duration_minutes=max(0, int((end - start).total_seconds() // 60)),
         ticket_or_price=_candidate_price(candidate),
         opening_hours=candidate.get("opening_hours"),
+        **checks,
         source_records=candidate.get("source_records", []),
         user_note="由地图选点或 Agent 备选方案加入",
         description=candidate.get("description"),
