@@ -10,7 +10,10 @@ export interface PlanningSnapshot {
   clarification_question?: string
   defaults_applied: string[]
   progress: { node?: string; value?: number; label?: string }
-  verification_result?: { passed: boolean; issues: Array<{ code: string; description: string }> }
+  verification_result?: {
+    passed: boolean
+    issues: Array<{ code: string; severity?: 'blocker' | 'warning' | string; description: string }>
+  }
   special_event_research?: SpecialEventResearch[]
   plan_markdown?: string
   job_id?: string

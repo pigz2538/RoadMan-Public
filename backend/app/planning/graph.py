@@ -1843,6 +1843,11 @@ def build_planning_graph(
                 # preflight; never make verification crash while reporting the
                 # rest of the route issues.
                 pass
+        # Present actionable blockers before degradations.  Weather gaps and
+        # uncovered optional highlights are warnings by design; if another
+        # constraint really blocks completion, the UI should explain that
+        # constraint instead of showing the first warning as the failure.
+        issues.sort(key=lambda item: 0 if item.get("severity") == "blocker" else 1)
         return {
             "day_plans": normalized_days,
             "verification_result": {

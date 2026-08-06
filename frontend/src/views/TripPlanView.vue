@@ -84,7 +84,12 @@ const planningProgress = computed(() => {
 const visiblePlanningEvents = computed(() => store.planningEvents.slice(-7))
 const planningFailure = computed(() => {
   if (planningSnapshot.value?.status !== 'failed') return null
-  const description = planningSnapshot.value.verification_result?.issues?.[0]?.description
+  const issues = planningSnapshot.value.verification_result?.issues ?? []
+  // A missing forecast is a non-blocking warning.  When another constraint
+  // fails, show that actionable blocker first instead of misleadingly
+  // presenting the weather warning as the reason the plan stopped.
+  const issue = issues.find((item) => item.severity === 'blocker') || issues[0]
+  const description = issue?.description
   const preferences = store.trip?.request?.preferences ?? []
   const hint = preferences.length
     ? `已保留你的偏好：${preferences.slice(0, 3).join('、')}。可先放宽时间窗口或减少连续移动，再重新规划。`
@@ -719,7 +724,7 @@ watch(
       </div>
       <div v-if="planningSnapshot.status === 'failed'" class="planning-recovery">
         <p class="planning-error-detail">
-          {{ planningSnapshot.verification_result?.issues?.[0]?.description || '请调整时间、交通方式或停留安排后重新规划。' }}
+          {{ planningFailure?.description || '请调整时间、交通方式或停留安排后重新规划。' }}
         </p>
         <div class="preflight-actions">
           <button class="secondary-button" @click="router.push('/home')">返回修改需求</button>

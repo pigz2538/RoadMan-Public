@@ -236,7 +236,18 @@ def verify_deep_drive_plan(
             ):
                 issues.append(_issue("CONTINUOUS_DRIVE", "blocker", f"{stage['title']} 缺少驾驶休息"))
             if not stage.get("weather_samples"):
-                issues.append(_issue("WEATHER_DEGRADED", "warning", f"{stage['title']} 无逐时天气"))
+                # Forecast gaps are expected for far-future dates or when a
+                # provider is temporarily degraded.  Keep the itinerary
+                # executable and surface this as a review reminder; weather
+                # data alone must never turn an otherwise valid plan into a
+                # failed verification.
+                issues.append(
+                    _issue(
+                        "WEATHER_DEGRADED",
+                        "warning",
+                        f"{stage['title']} 天气数据暂缺，已继续规划，出发前复核",
+                    )
+                )
             start = datetime.fromisoformat(stage["planned_start"])
             end = datetime.fromisoformat(stage["planned_end"])
             elapsed_minutes = int((end - start).total_seconds() / 60)
