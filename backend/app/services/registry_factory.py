@@ -13,6 +13,7 @@ from ..skills.flyai import (
     FlyAIPoiAdapter,
     FlyAIKeywordSearchAdapter,
     FlyAISemanticSearchAdapter,
+    FlyAITrainAdapter,
 )
 from ..skills.opentripmap import OpenTripMapNearbyAdapter
 from ..skills.registry import SkillRegistry
@@ -37,6 +38,7 @@ def build_skill_registry(settings: Settings | None = None) -> SkillRegistry:
     registry.register(CarInfoDemoAdapter())
     registry.register(FlyAIHotelAdapter())
     registry.register(FlyAIPoiAdapter())
+    registry.register(FlyAITrainAdapter())
     registry.register(FlyAIKeywordSearchAdapter())
     registry.register(FlyAISemanticSearchAdapter())
     registry.register(OpenTripMapNearbyAdapter(config.opentripmap_api_key))

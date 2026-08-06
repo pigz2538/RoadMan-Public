@@ -63,6 +63,7 @@ export interface PreflightResult {
     travelers?: number
     max_days?: number
     preferences?: string[]
+    transport_modes?: string[]
     clarifications?: string[]
   }
   special_event_research?: SpecialEventResearch[]
@@ -152,6 +153,7 @@ export async function createTrip(
         return_time: extracted.return_time,
         travelers: extracted.travelers,
         preferences: extracted.preferences,
+        transport_modes: extracted.transport_modes,
         special_events: extracted.special_events,
         max_days: extracted.max_days,
       },

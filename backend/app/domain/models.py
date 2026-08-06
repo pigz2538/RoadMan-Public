@@ -180,6 +180,11 @@ class TripRequest(BaseModel):
     return_before: datetime | None = None
     travelers: int | None = Field(default=None, ge=1)
     preferences: list[str] = Field(default_factory=list)
+    # Semantic transport preferences returned by the Requirement Agent.  The
+    # list is intentionally open-ended at the schema boundary so the Agent
+    # can preserve future modes; route execution currently understands
+    # driving/train/flight/transit/walking/riding.
+    transport_modes: list[str] = Field(default_factory=list)
     special_events: list[str] = Field(default_factory=list)
     max_days: int | None = Field(default=None, ge=1, le=30)
     must_visit: list[PlaceRef] = Field(default_factory=list)

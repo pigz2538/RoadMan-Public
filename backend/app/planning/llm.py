@@ -38,7 +38,7 @@ class OllamaRequirementExtractor:
             "You are RoadMan Requirement Agent. Extract requirements only; never plan a route. "
             f"Today is {today.isoformat()}. Return ONLY one valid JSON object (no markdown, no explanation) "
             "with exactly these keys: origin_name, destination_name, start_date, end_date, "
-            "departure_time, return_time, travelers, max_days, preferences, special_events, "
+            "departure_time, return_time, travelers, max_days, preferences, transport_modes, special_events, "
             "cross_sea_required, cross_sea_mode, past_return_requested, time_window_minutes. "
             "Dates must be YYYY-MM-DD; unknown scalar fields must be null and preferences/special_events must be arrays. "
             "Only fill start_date/end_date when the user's text explicitly gives a calendar date, a relative date "
@@ -53,6 +53,11 @@ class OllamaRequirementExtractor:
             "When a weekday pair is present, resolve both concrete dates from Today instead of leaving one null. "
             "Infer travelers semantically (情侣/夫妻=2, 一家三口=3); do not default to 1 when evidence is absent. "
             "请根据语义判断同行人数，不要机械默认 1。"
+            "transport_modes must be an array containing only explicitly preferred or explicitly allowed modes from "
+            "driving, train, flight, transit, walking, riding.  Interpret 高铁/动车/火车 as train, 飞机/航班 as flight, "
+            "自驾/开车 as driving, and 公交/地铁/公共交通 as transit.  ‘可以坐高铁’ means train is an allowed and "
+            "preferred intercity option; do not silently force driving for a long-distance trip.  If no transport "
+            "preference is stated, return an empty array. "
             "cross_sea_required must be true only when the trip actually requires crossing a sea or water barrier; "
             "cross_sea_mode may be ferry, flight, bridge or null. past_return_requested is true only when the user "
             "explicitly requests returning before the current date. time_window_minutes is the user's explicit "
@@ -105,6 +110,9 @@ class OllamaRequirementExtractor:
                 merged["travelers"] = _coerce_travelers(merged.get("travelers"))
                 if merged.get("travelers") is None:
                     merged.pop("travelers", None)
+                merged["transport_modes"] = _normalize_transport_modes(
+                    merged.get("transport_modes")
+                )
                 max_days = _coerce_positive_int(merged.get("max_days"), maximum=30)
                 if max_days is None:
                     merged.pop("max_days", None)
@@ -858,6 +866,7 @@ def _parse_json_object(text: str) -> dict[str, Any]:
         "return_time",
         "travelers",
         "preferences",
+        "transport_modes",
         "special_events",
         "max_days",
         "issues",
@@ -925,6 +934,19 @@ def _extract_literal_constraints(raw_text: str, today: date) -> dict[str, Any]:
         result["start_date"] = explicit_dates[0]
         if len(explicit_dates) > 1:
             result["end_date"] = explicit_dates[1]
+    return result
+
+
+def _normalize_transport_modes(value: Any) -> list[str]:
+    """Keep only transport mode decisions returned by the Requirement Agent."""
+    allowed = {"driving", "train", "flight", "transit", "walking", "riding"}
+    if not isinstance(value, list):
+        return []
+    result: list[str] = []
+    for item in value:
+        mode = str(item or "").strip().lower()
+        if mode in allowed and mode not in result:
+            result.append(mode)
     return result
 
 

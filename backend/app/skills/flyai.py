@@ -6,7 +6,7 @@ import os
 import re
 import shutil
 import time
-from datetime import date
+from datetime import date, datetime
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -35,6 +35,17 @@ class FlyAISearchInput(BaseModel):
     query: str = Field(min_length=2, max_length=240)
 
 
+class FlyAITrainInput(BaseModel):
+    origin: str = Field(min_length=1, max_length=80)
+    destination: str = Field(min_length=1, max_length=80)
+    dep_date: date
+    back_date: date | None = None
+    dep_hour_start: int | None = Field(default=None, ge=0, le=23)
+    dep_hour_end: int | None = Field(default=None, ge=0, le=23)
+    total_duration_hour: int | None = Field(default=None, ge=1, le=48)
+    sort_type: int = Field(default=4, ge=1, le=8)
+
+
 FLYAI_POI_CATEGORIES = {
     "自然风光", "山湖田园", "森林丛林", "峡谷瀑布", "沙滩海岛", "沙漠草原",
     "人文古迹", "古镇古村", "历史古迹", "园林花园", "宗教场所", "公园乐园",
@@ -45,6 +56,27 @@ FLYAI_POI_CATEGORIES = {
 }
 
 
+def _train_duration_minutes(value: object) -> int | None:
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return max(1, round(float(value)))
+    match = re.search(r"(\d+(?:\.\d+)?)", str(value or ""))
+    if not match:
+        return None
+    return max(1, round(float(match.group(1))))
+
+
+def _train_datetime(value: object) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"):
+        try:
+            return datetime.strptime(text, fmt)
+        except ValueError:
+            continue
+    return None
+
+
 def _flyai_process_env() -> dict[str, str]:
     """Pass Docker/host proxy settings to Node's built-in fetch client."""
     environment = os.environ.copy()
@@ -53,6 +85,148 @@ def _flyai_process_env() -> dict[str, str]:
     # DNS resolution before the FlyAI service can be reached.
     environment.setdefault("NODE_USE_ENV_PROXY", "1")
     return environment
+
+
+class FlyAITrainAdapter(SkillAdapter):
+    """Search real intercity train options through the FlyAI CLI."""
+
+    name = "flyai.train"
+    version = "1.0.0"
+    category = "travel_search"
+    timeout_seconds = 25
+    max_retries = 0
+    cache_ttl_seconds = 15 * 60
+
+    async def validate_input(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return FlyAITrainInput.model_validate(payload).model_dump(
+            mode="json",
+            exclude_none=True,
+        )
+
+    async def execute(self, payload: dict[str, Any], _: SkillContext) -> SkillResult:
+        command = shutil.which("flyai")
+        if not command:
+            return SkillResult(
+                success=False,
+                provider="FlyAI / 飞猪",
+                warnings=["运行环境未安装 flyai CLI"],
+                error_code="SKILL_NOT_CONFIGURED",
+            )
+        request = FlyAITrainInput.model_validate(payload)
+        arguments = [
+            command,
+            "search-train",
+            "--origin",
+            request.origin,
+            "--destination",
+            request.destination,
+            "--dep-date",
+            request.dep_date.isoformat(),
+            "--sort-type",
+            str(request.sort_type),
+        ]
+        if request.back_date:
+            arguments.extend(["--back-date", request.back_date.isoformat()])
+        if request.dep_hour_start is not None:
+            arguments.extend(["--dep-hour-start", str(request.dep_hour_start)])
+        if request.dep_hour_end is not None:
+            arguments.extend(["--dep-hour-end", str(request.dep_hour_end)])
+        if request.total_duration_hour is not None:
+            arguments.extend(["--total-duration-hour", str(request.total_duration_hour)])
+
+        started = time.perf_counter()
+        process = await asyncio.create_subprocess_exec(
+            *arguments,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=_flyai_process_env(),
+        )
+        stdout, stderr = await process.communicate()
+        text = stdout.decode("utf-8", errors="replace").strip()
+        try:
+            body = json.loads(text)
+        except json.JSONDecodeError:
+            return SkillResult(
+                success=False,
+                provider="FlyAI / 飞猪",
+                warnings=[
+                    "FlyAI 火车搜索未返回可解析的 JSON",
+                    stderr.decode("utf-8", errors="replace")[:160],
+                ],
+                error_code="FLYAI_INVALID_RESPONSE",
+            )
+
+        items: list[dict[str, Any]] = []
+        raw_items = (body.get("data") or {}).get("itemList", [])
+        for index, raw in enumerate(raw_items if isinstance(raw_items, list) else []):
+            if not isinstance(raw, dict):
+                continue
+            journeys = raw.get("journeys") or []
+            journey = journeys[0] if journeys and isinstance(journeys[0], dict) else {}
+            raw_segments = journey.get("segments") or []
+            segments = [
+                segment
+                for segment in raw_segments
+                if isinstance(segment, dict)
+                and _train_datetime(segment.get("depDateTime"))
+                and _train_datetime(segment.get("arrDateTime"))
+            ]
+            if not segments:
+                continue
+            first, last = segments[0], segments[-1]
+            departure_at = _train_datetime(first.get("depDateTime"))
+            arrival_at = _train_datetime(last.get("arrDateTime"))
+            if not departure_at or not arrival_at:
+                continue
+            duration = _train_duration_minutes(
+                journey.get("totalDuration") or raw.get("totalDuration")
+            )
+            if duration is None:
+                duration = max(1, round((arrival_at - departure_at).total_seconds() / 60))
+            items.append(
+                {
+                    "id": raw.get("id") or f"train_{index}",
+                    "journey_type": journey.get("journeyType"),
+                    "segments": segments,
+                    "departure_at": departure_at.isoformat(),
+                    "arrival_at": arrival_at.isoformat(),
+                    "duration_minutes": duration,
+                    "train_number": first.get("marketingTransportNo"),
+                    "transport_name": first.get("marketingTransportName") or first.get("transportType"),
+                    "departure_station": first.get("depStationName"),
+                    "arrival_station": last.get("arrStationName"),
+                    "seat_class": first.get("seatClassName"),
+                    "price": raw.get("price") or raw.get("adultPrice"),
+                    "detail_url": raw.get("jumpUrl"),
+                }
+            )
+        if not items:
+            return SkillResult(
+                success=False,
+                provider="FlyAI / 飞猪",
+                warnings=["FlyAI 未返回可用高铁/火车车次"],
+                error_code="FLYAI_NO_RESULTS",
+            )
+        return SkillResult(
+            success=True,
+            provider="FlyAI / 飞猪",
+            data={"items": items, "count": len(items)},
+            sources=[
+                SourceRecord(
+                    provider="FlyAI / 飞猪",
+                    title="高铁/火车实时车次搜索",
+                    url="https://www.fliggy.com/",
+                )
+            ],
+            latency_ms=int((time.perf_counter() - started) * 1000),
+        )
+
+    async def health_check(self) -> dict[str, Any]:
+        return {
+            "status": "ready" if shutil.which("flyai") else "degraded",
+            "configured": bool(shutil.which("flyai")),
+            "api_key_configured": bool(os.getenv("FLYAI_API_KEY")),
+        }
 
 
 class FlyAIHotelAdapter(SkillAdapter):

@@ -97,6 +97,7 @@ export interface Trip {
     raw_text: string
     defaults_applied: string[]
     preferences?: string[]
+    transport_modes?: string[]
   }
 }
 

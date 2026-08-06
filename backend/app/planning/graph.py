@@ -165,6 +165,11 @@ def build_planning_graph(
         current["preferences"] = list(
             dict.fromkeys([*current.get("preferences", []), *extracted.get("preferences", [])])
         )
+        current["transport_modes"] = list(
+            dict.fromkeys(
+                [*current.get("transport_modes", []), *extracted.get("transport_modes", [])]
+            )
+        )
         current["special_events"] = list(
             dict.fromkeys([*current.get("special_events", []), *extracted.get("special_events", [])])
         )
@@ -281,15 +286,23 @@ def build_planning_graph(
         }
 
     async def build_base_route(state: RoadManState) -> dict[str, Any]:
+        request = dict(state["trip_request"])
+        requested_modes = {
+            str(mode).strip().casefold()
+            for mode in request.get("transport_modes", [])
+            if str(mode).strip()
+        }
+        prefer_train = "train" in requested_modes
         await emit(
             state,
             "build_base_route",
-            "正在查询真实驾车道路",
+            "正在查询 FlyAI 高铁车次与站点接驳"
+            if prefer_train
+            else "正在查询真实驾车道路",
             40,
             event="tool_started",
-            tool="amap.route",
+            tool="flyai.train" if prefer_train else "amap.route",
         )
-        request = dict(state["trip_request"])
         origin = await _ensure_coordinates(registry, request["origin"], state["trip_id"])
         destination = await _ensure_coordinates(
             registry,
@@ -305,8 +318,59 @@ def build_planning_graph(
                 "error": {"code": "GEOCODE_UNAVAILABLE", "message": "无法确定起终点坐标"},
                 "route_candidates": [],
             }
-        outbound = await _route(registry, origin, destination, state["trip_id"])
-        inbound = await _route(registry, destination, origin, state["trip_id"])
+        warnings: list[dict[str, Any]] = []
+        if prefer_train:
+            start_date = _parse_request_date(request.get("start_date"))
+            end_date = _parse_request_date(request.get("end_date")) or start_date
+            departure_at = _request_clock(
+                start_date or date.today(),
+                request.get("departure_time"),
+                default=time(8, 0),
+            )
+            deadline = _request_clock(
+                end_date or date.today(),
+                request.get("return_time"),
+                default=time(20, 0),
+            )
+            outbound, outbound_warnings = await _train_route(
+                registry,
+                origin,
+                destination,
+                state["trip_id"],
+                travel_date=start_date or date.today(),
+                requested_departure=departure_at,
+            )
+            inbound, inbound_warnings = await _train_route(
+                registry,
+                destination,
+                origin,
+                state["trip_id"],
+                travel_date=end_date or date.today(),
+                arrival_deadline=deadline,
+            )
+            warnings.extend(outbound_warnings)
+            warnings.extend(inbound_warnings)
+            if not outbound.get("success"):
+                warnings.append(
+                    {
+                        "code": "TRAIN_OPTION_UNAVAILABLE",
+                        "message": "未找到可用去程高铁，已回退到高德路线",
+                        "severity": "warning",
+                    }
+                )
+                outbound = await _route(registry, origin, destination, state["trip_id"])
+            if not inbound.get("success"):
+                warnings.append(
+                    {
+                        "code": "TRAIN_OPTION_UNAVAILABLE",
+                        "message": "未找到可用返程高铁，已回退到高德路线",
+                        "severity": "warning",
+                    }
+                )
+                inbound = await _route(registry, destination, origin, state["trip_id"])
+        else:
+            outbound = await _route(registry, origin, destination, state["trip_id"])
+            inbound = await _route(registry, destination, origin, state["trip_id"])
         candidates = [item for item in (outbound, inbound) if item.get("success")]
         error = None
         if not outbound.get("success"):
@@ -314,10 +378,12 @@ def build_planning_graph(
         await emit(
             state,
             "build_base_route",
-            "真实道路查询完成" if not error else "路线查询未成功",
+            ("高铁与接驳查询完成" if prefer_train else "真实道路查询完成")
+            if not error
+            else "路线查询未成功",
             55,
             event="tool_completed",
-            tool="amap.route",
+            tool="flyai.train" if prefer_train else "amap.route",
         )
         return {
             "trip_request": request,
@@ -329,6 +395,7 @@ def build_planning_graph(
                 for route in candidates
                 for source in route.get("sources", [])
             ],
+            "warnings": [*state.get("warnings", []), *warnings],
             "progress": {"node": "build_base_route", "value": 55},
         }
 
@@ -1265,6 +1332,20 @@ def build_planning_graph(
             day_date = date.fromisoformat(day_def["date"])
             if index == 0:
                 outbound = await prepare_route(outbound)
+                outbound_start = _request_clock(
+                    day_date,
+                    request.get("departure_time"),
+                    default=time(8, 0),
+                )
+                scheduled_departure = _parse_train_datetime(
+                    (outbound.get("data") or {}).get("scheduled_departure_at")
+                )
+                if scheduled_departure and scheduled_departure < outbound_start:
+                    # A late-evening request can have its final available
+                    # train a few minutes earlier.  Start the stage with the
+                    # station-access buffer instead of displaying a leg that
+                    # begins after the train has already departed.
+                    outbound_start = scheduled_departure - timedelta(minutes=45)
                 stages.append(
                     _movement_stage(
                         day_id=f"day_{index + 1}",
@@ -1273,11 +1354,7 @@ def build_planning_graph(
                         origin=request["origin"],
                         destination=request["destination"],
                         route=outbound,
-                        start_at=_request_clock(
-                            day_date,
-                            request.get("departure_time"),
-                            default=time(8, 0),
-                        ),
+                        start_at=outbound_start,
                     )
                 )
             local_start = (
@@ -1285,14 +1362,25 @@ def build_planning_graph(
                 if stages
                 else datetime.combine(day_date, time(9, 30), tzinfo=SHANGHAI)
             )
-            for local in sorted(
-                (
-                    item
-                    for item in state.get("local_routes", [])
-                    if item["day_index"] == index
-                ),
-                key=lambda item: item["sequence"],
-            ):
+            return_cutoff: datetime | None = None
+            if index == len(day_defs) - 1:
+                scheduled_departure = _parse_train_datetime(
+                    (inbound.get("data") or {}).get("scheduled_departure_at")
+                )
+                if scheduled_departure:
+                    return_cutoff = scheduled_departure - timedelta(minutes=45)
+            local_items = [
+                item
+                for item in state.get("local_routes", [])
+                if item["day_index"] == index
+            ]
+            # A late intercity train can cross midnight.  Do not append local
+            # sightseeing transfers to the departure calendar day after the
+            # traveller is still on the train; those items belong to the
+            # destination day and are regenerated there by the daily planner.
+            if index == 0 and stages and stages[-1].planned_end.date() > day_date:
+                local_items = []
+            for local in sorted(local_items, key=lambda item: item["sequence"]):
                 local["route"] = await prepare_route(local["route"])
                 stage = _movement_stage(
                     day_id=f"day_{index + 1}",
@@ -1306,8 +1394,110 @@ def build_planning_graph(
                     route=local["route"],
                     start_at=local_start,
                 )
+                if return_cutoff and stage.planned_end > return_cutoff:
+                    # A scheduled intercity return is a hard timetable.  Do
+                    # not let a late local transfer push the traveller onto a
+                    # train they can no longer catch; keep the feasible
+                    # morning items and leave for the station on time.
+                    break
                 stages.append(stage)
                 local_start = stage.planned_end + timedelta(minutes=105)
+            if index == len(day_defs) - 1 and return_cutoff:
+                # The local-route builder may have stopped before its
+                # generated "back to base" connector because that connector
+                # would miss the train.  Reconcile the chain here: retain as
+                # many morning activities as fit, then add a final connector
+                # to the destination city so the return stage is continuous.
+                destination_coordinates = request["destination"].get("coordinates") or {}
+
+                def reaches_destination(stage: MovementStage) -> bool:
+                    coordinates = stage.destination.coordinates
+                    try:
+                        return _haversine_km(
+                            RoutePoint(
+                                longitude=float(coordinates.longitude),
+                                latitude=float(coordinates.latitude),
+                            ),
+                            RoutePoint(
+                                longitude=float(destination_coordinates["longitude"]),
+                                latitude=float(destination_coordinates["latitude"]),
+                            ),
+                        ) <= 0.2
+                    except (AttributeError, KeyError, TypeError, ValueError):
+                        return stage.destination.name == request["destination"].get("name")
+
+                if stages and not reaches_destination(stages[-1]):
+                    connector_route = await _route(
+                        registry,
+                        stages[-1].destination.model_dump(mode="json"),
+                        request["destination"],
+                        state["trip_id"],
+                        preferred_mode="transit",
+                        fallback_modes=["walking", "riding", "driving"],
+                    )
+                    if not connector_route.get("success"):
+                        connector_route = _fallback_local_route(
+                            stages[-1].destination.model_dump(mode="json"),
+                            request["destination"],
+                            "transit",
+                        )
+                    connector_route = await prepare_route(connector_route)
+                    connector_start = stages[-1].planned_end + timedelta(minutes=45)
+                    connector_stage = _movement_stage(
+                        day_id=f"day_{index + 1}",
+                        sequence=len(stages),
+                        title="返程接驳",
+                        origin=stages[-1].destination.model_dump(mode="json"),
+                        destination=request["destination"],
+                        route=connector_route,
+                        start_at=connector_start,
+                    )
+                    while connector_stage.planned_end > return_cutoff and stages:
+                        stages.pop()
+                        if stages:
+                            connector_start = stages[-1].planned_end + timedelta(minutes=45)
+                            next_origin = stages[-1].destination.model_dump(mode="json")
+                            connector_route = await _route(
+                                registry,
+                                next_origin,
+                                request["destination"],
+                                state["trip_id"],
+                                preferred_mode="transit",
+                                fallback_modes=["walking", "riding", "driving"],
+                            )
+                            if not connector_route.get("success"):
+                                connector_route = _fallback_local_route(
+                                    next_origin, request["destination"], "transit"
+                                )
+                            connector_route = await prepare_route(connector_route)
+                            connector_stage = _movement_stage(
+                                day_id=f"day_{index + 1}",
+                                sequence=len(stages),
+                                title="返程接驳",
+                                origin=next_origin,
+                                destination=request["destination"],
+                                route=connector_route,
+                                start_at=connector_start,
+                            )
+                        else:
+                            connector_start = datetime.combine(
+                                day_date, time(9, 30), tzinfo=SHANGHAI
+                            )
+                            connector_stage = _movement_stage(
+                                day_id=f"day_{index + 1}",
+                                sequence=0,
+                                title="返程接驳",
+                                origin=request["destination"],
+                                destination=request["destination"],
+                                route=_fallback_local_route(
+                                    request["destination"], request["destination"], "transit"
+                                ),
+                                start_at=connector_start,
+                            )
+                            break
+                    if not stages or connector_stage.planned_end <= return_cutoff:
+                        stages.append(connector_stage)
+                        local_start = connector_stage.planned_end + timedelta(minutes=15)
             if index == len(day_defs) - 1:
                 inbound = await prepare_route(inbound)
                 return_start = _return_stage_start(
@@ -1885,8 +2075,9 @@ def build_planning_graph(
         request = state["trip_request"]
         traveler_count = request.get("travelers")
         traveler_label = f"{traveler_count} 人" if traveler_count else "待确认人数"
+        transport_label = "自驾" if "train" not in request.get("transport_modes", []) else "出行"
         lines = [
-            f"# {request['origin']['name']}—{request['destination']['name']}自驾行程安排",
+            f"# {request['origin']['name']}—{request['destination']['name']}{transport_label}行程安排",
             "",
             f"- 日期：{request['start_date']} 至 {request['end_date']}",
             f"- 出行人数：{traveler_label}",
@@ -2159,6 +2350,220 @@ async def _route(
     }
 
 
+def _parse_request_date(value: Any) -> date | None:
+    if isinstance(value, date) and not isinstance(value, datetime):
+        return value
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(str(value)[:10])
+    except ValueError:
+        return None
+
+
+def _parse_train_datetime(value: Any) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"):
+        try:
+            parsed = datetime.strptime(text, fmt)
+            return parsed.replace(tzinfo=SHANGHAI)
+        except ValueError:
+            continue
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=SHANGHAI)
+
+
+def _train_route_result(
+    item: dict[str, Any],
+    origin: dict[str, Any],
+    destination: dict[str, Any],
+    sources: list[dict[str, Any]],
+) -> dict[str, Any]:
+    departure_at = _parse_train_datetime(item.get("departure_at"))
+    arrival_at = _parse_train_datetime(item.get("arrival_at"))
+    if not departure_at or not arrival_at:
+        return {"success": False, "error_code": "TRAIN_INVALID_SCHEDULE", "warnings": [], "sources": []}
+    origin_coordinates = origin.get("coordinates") or {}
+    destination_coordinates = destination.get("coordinates") or {}
+    try:
+        origin_point = RoutePoint(
+            longitude=float(origin_coordinates["longitude"]),
+            latitude=float(origin_coordinates["latitude"]),
+        )
+        destination_point = RoutePoint(
+            longitude=float(destination_coordinates["longitude"]),
+            latitude=float(destination_coordinates["latitude"]),
+        )
+        distance_km = round(_haversine_km(origin_point, destination_point), 2)
+        geometry = [
+            {"longitude": origin_point.longitude, "latitude": origin_point.latitude},
+            {"longitude": destination_point.longitude, "latitude": destination_point.latitude},
+        ]
+    except (KeyError, TypeError, ValueError):
+        return {"success": False, "error_code": "TRAIN_COORDINATES_INVALID", "warnings": [], "sources": []}
+    train_minutes = max(1, round((arrival_at - departure_at).total_seconds() / 60))
+    try:
+        listed_minutes = int(item.get("duration_minutes") or train_minutes)
+    except (TypeError, ValueError):
+        listed_minutes = train_minutes
+    # Reserve time for getting to the station, boarding, and the final
+    # station-to-destination transfer.  This keeps the schedule honest and
+    # gives the verifier a usable arrival deadline instead of a raw train
+    # timetable that ignores station access.
+    duration_minutes = max(train_minutes, listed_minutes) + 75
+    departure_station = item.get("departure_station") or "出发站"
+    arrival_station = item.get("arrival_station") or "到达站"
+    train_number = item.get("train_number") or "高铁"
+    price = item.get("price")
+    return {
+        "success": True,
+        "data": {
+            "selected_mode": "train",
+            "distance_km": distance_km,
+            "duration_minutes": duration_minutes,
+            "tolls_cny": 0,
+            "geometry": geometry,
+            "steps": [
+                {
+                    "road": f"{departure_station} → {arrival_station}",
+                    "distance_m": distance_km * 1000,
+                    "duration_s": duration_minutes * 60,
+                }
+            ],
+            "traffic_summary": (
+                f"{train_number} {departure_station} {departure_at:%H:%M} → "
+                f"{arrival_station} {arrival_at:%H:%M}，已预留车站接驳时间"
+            ),
+            "elevation_gain_m": None,
+            "estimated": True,
+            "scheduled_departure_at": departure_at.isoformat(),
+            "scheduled_arrival_at": arrival_at.isoformat(),
+            "train_number": train_number,
+            "departure_station": departure_station,
+            "arrival_station": arrival_station,
+            "seat_class": item.get("seat_class"),
+            "price": price,
+            "detail_url": item.get("detail_url"),
+        },
+        "warnings": [],
+        "sources": sources,
+    }
+
+
+async def _train_route(
+    registry: SkillRegistry,
+    origin: dict[str, Any],
+    destination: dict[str, Any],
+    trip_id: str,
+    *,
+    travel_date: date,
+    requested_departure: datetime | None = None,
+    arrival_deadline: datetime | None = None,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Select a real FlyAI train option for an intercity leg.
+
+    The requirement Agent decides whether trains are allowed/preferred.  This
+    helper only consumes that semantic decision; it does not inspect raw
+    text or maintain a keyword list.
+    """
+    result = await registry.execute(
+        "flyai.train",
+        {
+            "origin": origin.get("city") or origin.get("name"),
+            "destination": destination.get("city") or destination.get("name"),
+            "dep_date": travel_date.isoformat(),
+            "sort_type": 4,
+        },
+        SkillContext(trip_id=trip_id),
+    )
+    warnings: list[dict[str, Any]] = []
+    if not result.success or not isinstance(result.data, dict):
+        return (
+            {
+                "success": False,
+                "error_code": result.error_code or "TRAIN_SEARCH_FAILED",
+                "warnings": result.warnings,
+                "sources": [item.model_dump(mode="json") for item in result.sources],
+            },
+            warnings,
+        )
+    items = [item for item in result.data.get("items", []) if isinstance(item, dict)]
+    parsed: list[tuple[dict[str, Any], datetime, datetime]] = []
+    for item in items:
+        departure_at = _parse_train_datetime(item.get("departure_at"))
+        arrival_at = _parse_train_datetime(item.get("arrival_at"))
+        if departure_at and arrival_at and arrival_at > departure_at:
+            parsed.append((item, departure_at, arrival_at))
+    if not parsed:
+        return (
+            {
+                "success": False,
+                "error_code": "TRAIN_NO_VALID_SCHEDULE",
+                "warnings": result.warnings,
+                "sources": [item.model_dump(mode="json") for item in result.sources],
+            },
+            warnings,
+        )
+
+    # Prefer options satisfying the user's time window.  A small station
+    # buffer is accounted for when testing the arrival deadline.
+    candidates = parsed
+    if requested_departure:
+        on_or_after = [item for item in parsed if item[1] >= requested_departure]
+        if on_or_after:
+            candidates = on_or_after
+        else:
+            # If the last train has already left, take the latest available
+            # train rather than the first morning service.  This preserves a
+            # user's "晚上出发" intent and avoids an obviously wrong timetable.
+            candidates = [max(parsed, key=lambda item: item[1])]
+            warnings.append(
+                {
+                    "code": "TRAIN_DEPARTURE_WINDOW_RELAXED",
+                    "message": "当天没有晚于期望出发时间的直达车次，已选择最接近班次",
+                    "severity": "warning",
+                }
+            )
+    if arrival_deadline:
+        before_deadline = [item for item in candidates if item[2] + timedelta(minutes=30) <= arrival_deadline]
+        if before_deadline:
+            candidates = before_deadline
+        else:
+            warnings.append(
+                {
+                    "code": "TRAIN_ARRIVAL_WINDOW_RELAXED",
+                    "message": "当天车次无法在截止时间前完成站点接驳，已选择最早抵达班次",
+                    "severity": "warning",
+                }
+            )
+
+    if arrival_deadline:
+        selected = min(
+            candidates,
+            key=lambda item: (
+                0 if item[2] + timedelta(minutes=30) <= arrival_deadline else 1,
+                abs((arrival_deadline - item[2]).total_seconds()),
+            ),
+        )
+    elif requested_departure:
+        selected = min(candidates, key=lambda item: item[1])
+    else:
+        selected = min(candidates, key=lambda item: item[2] - item[1])
+    route = _train_route_result(
+        selected[0],
+        origin,
+        destination,
+        [item.model_dump(mode="json") for item in result.sources],
+    )
+    route["warnings"] = [*result.warnings, *warnings]
+    return route, warnings
+
+
 def _route_mode_feasible(data: dict[str, Any]) -> bool:
     mode = data.get("selected_mode")
     duration = int(data.get("duration_minutes") or 0)
@@ -2280,6 +2685,7 @@ def _movement_stage(
         duration_minutes=duration,
         road_name=" / ".join(road_names[:3]) or None,
         toll=bool(data.get("tolls_cny")),
+        estimated=bool(data.get("estimated", False)),
         elevation_gain_m=data.get("elevation_gain_m"),
     )
     traffic_summary = data.get("traffic_summary")
@@ -2298,6 +2704,7 @@ def _movement_stage(
         else:
             traffic_summary = {
                 "transit": "公共交通按高德当前班次规划",
+                "train": traffic_summary or "已按 FlyAI 实时高铁车次规划，并预留车站接驳时间",
             }.get(mode, "按高德路线规划")
     return MovementStage(
         day_id=day_id,
@@ -2360,6 +2767,12 @@ def _return_stage_start(
     deadline = _request_clock(day, return_time, default=time(14, 30))
     if return_time is None:
         return max(earliest_start, deadline)
+    train_departure = _parse_train_datetime((route.get("data") or {}).get("scheduled_departure_at"))
+    if train_departure:
+        # The train timetable is authoritative.  Start the stage before the
+        # scheduled departure to leave room for station access, while still
+        # respecting local sightseeing that already consumed the window.
+        return max(earliest_start, train_departure - timedelta(minutes=45))
     try:
         duration_minutes = int((route.get("data") or {}).get("duration_minutes") or 0)
     except (TypeError, ValueError):

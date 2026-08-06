@@ -102,7 +102,8 @@ async def run_planning(
             trip.request = request
             if request.origin and request.destination and request.start_date and request.end_date:
                 day_count = max(1, (request.end_date - request.start_date).days + 1)
-                trip.title = f"{request.origin.name}—{request.destination.name}{day_count}天自驾行程"
+                mode_label = "自驾" if "train" not in request.transport_modes else "出行"
+                trip.title = f"{request.origin.name}—{request.destination.name}{day_count}天{mode_label}行程"
             trip.origin = request.origin
             trip.destination = request.destination
             trip.start_date = request.start_date
@@ -321,7 +322,8 @@ async def _persist_partial_result(
             trip.end_date = request.end_date
             if request.origin and request.destination and request.start_date and request.end_date:
                 day_count = max(1, (request.end_date - request.start_date).days + 1)
-                trip.title = f"{request.origin.name}—{request.destination.name}{day_count}天自驾行程"
+                mode_label = "自驾" if "train" not in request.transport_modes else "出行"
+                trip.title = f"{request.origin.name}—{request.destination.name}{day_count}天{mode_label}行程"
         except (TypeError, ValueError):
             pass
 
