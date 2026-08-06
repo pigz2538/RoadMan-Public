@@ -101,7 +101,11 @@ def interpret_edit_intent(
             state,
             DeleteActivityPatchRequest(day_id=day.id, activity_id=target.id),
         )
-        return reply or f"已生成删除“{target.place.name}”的修改预览。", patch, False
+        # Keep the user-facing verb stable even when the language model uses
+        # the synonymous “移除”; clients and audit logs consistently describe
+        # this operation as 删除.
+        normalized_reply = reply.replace("移除", "删除") if reply else ""
+        return normalized_reply or f"已生成删除“{target.place.name}”的修改预览。", patch, False
 
     category = agent_intent.get("category")
     if category not in {"attractions", "hotels", "meals"}:

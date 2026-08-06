@@ -427,6 +427,34 @@ class FakeRouteAdapter(SkillAdapter):
         return {"status": "ready"}
 
 
+class FakeFlightAdapter(SkillAdapter):
+    name = "flyai.flight"
+
+    async def execute(self, payload: dict[str, Any], _: SkillContext) -> SkillResult:
+        dep_date = payload["dep_date"]
+        return SkillResult(
+            success=True,
+            provider="fake-flyai",
+            data={
+                "items": [
+                    {
+                        "departure_at": f"{dep_date}T09:00:00",
+                        "arrival_at": f"{dep_date}T11:00:00",
+                        "duration_minutes": 120,
+                        "flight_number": "RM100",
+                        "departure_airport": "天河机场",
+                        "arrival_airport": "九江机场",
+                        "price": "¥500",
+                        "detail_url": "https://example.test/flight",
+                    }
+                ]
+            },
+        )
+
+    async def health_check(self) -> dict[str, Any]:
+        return {"status": "ready"}
+
+
 class FakePoiAdapter(SkillAdapter):
     name = "amap.poi"
 
@@ -738,6 +766,44 @@ async def test_runner_persists_state_markdown_and_trip_days():
         assert risks["summary"]["moderate"] >= 1
         assert services["services"]
         assert services["selected"]
+
+
+@pytest.mark.asyncio
+async def test_explicit_flight_uses_schedule_adapter_instead_of_default_driving():
+    registry = fake_registry()
+    registry.register(FakeFlightAdapter())
+    graph = build_planning_graph(
+        registry,
+        Settings(
+            load_local_skill_credentials=False,
+            enable_llm_requirement_extraction=False,
+        ),
+    )
+    result = await graph.ainvoke(
+        {
+            "trip_id": "trip_flight_mode",
+            "raw_input": "周六从武汉去庐山，明确乘飞机，两天返回",
+            "trip_request": {
+                "raw_text": "周六从武汉去庐山，明确乘飞机，两天返回",
+                "origin": {"name": "武汉"},
+                "destination": {"name": "庐山"},
+                "start_date": "2026-08-08",
+                "end_date": "2026-08-09",
+                "transport_modes": ["flight"],
+            },
+            "clarification_round": 0,
+        }
+    )
+    assert result["verification_result"]["passed"] is True
+    intercity = [
+        stage
+        for day in result["day_plans"]
+        for stage in day["stages"]
+        if stage["title"] in {"城市出发", "返程"}
+    ]
+    assert intercity
+    assert {stage["mode"] for stage in intercity} == {"flight"}
+    assert all(stage["traffic_summary"] for stage in intercity)
 
 
 @pytest.mark.asyncio

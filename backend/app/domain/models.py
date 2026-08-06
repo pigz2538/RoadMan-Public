@@ -182,8 +182,8 @@ class TripRequest(BaseModel):
     preferences: list[str] = Field(default_factory=list)
     # Semantic transport preferences returned by the Requirement Agent.  The
     # list is intentionally open-ended at the schema boundary so the Agent
-    # can preserve future modes; route execution currently understands
-    # driving/train/flight/transit/walking/riding.
+    # can preserve future modes; route execution understands the intercity
+    # schedule modes (train/flight/ferry) as well as AMap local modes.
     transport_modes: list[str] = Field(default_factory=list)
     special_events: list[str] = Field(default_factory=list)
     max_days: int | None = Field(default=None, ge=1, le=30)
@@ -255,8 +255,8 @@ class MovementStage(BaseModel):
     day_id: str
     sequence: int = Field(ge=0)
     title: str
-    mode: Literal["driving", "transit", "walking", "riding", "taxi", "flight", "train"]
-    transit_type: Literal["bus", "subway", "shuttle"] | None = None
+    mode: Literal["driving", "transit", "walking", "riding", "taxi", "flight", "train", "ferry"]
+    transit_type: Literal["bus", "subway", "shuttle", "ferry"] | None = None
     origin: PlaceRef
     destination: PlaceRef
     waypoints: list[PlaceRef] = Field(default_factory=list)

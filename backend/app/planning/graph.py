@@ -292,16 +292,57 @@ def build_planning_graph(
             for mode in request.get("transport_modes", [])
             if str(mode).strip()
         }
-        prefer_train = "train" in requested_modes
+        if "ship" in requested_modes or "boat" in requested_modes:
+            requested_modes.add("ferry")
+        intercity_order = [
+            mode for mode in ("train", "flight", "ferry")
+            if mode in requested_modes
+        ]
+        local_order = [
+            mode for mode in ("transit", "walking", "riding")
+            if mode in requested_modes
+        ]
+        cross_sea_mode = str(request.get("cross_sea_mode") or "").casefold()
+        cross_sea_mode = {
+            "ship": "ferry",
+            "boat": "ferry",
+            "ferryboat": "ferry",
+            "轮船": "ferry",
+            "渡轮": "ferry",
+            "船": "ferry",
+            "飞机": "flight",
+            "桥": "bridge",
+            "跨海大桥": "bridge",
+        }.get(cross_sea_mode, cross_sea_mode)
+        if (
+            not intercity_order
+            and request.get("cross_sea_required") is True
+            and cross_sea_mode in {"ferry", "flight"}
+        ):
+            intercity_order.append(cross_sea_mode)
+        explicit_intercity = bool(intercity_order)
+        explicit_local = not explicit_intercity and bool(local_order)
+        primary_mode = (
+            intercity_order[0]
+            if intercity_order
+            else local_order[0]
+            if local_order
+            else "driving"
+        )
+        primary_tool = f"flyai.{primary_mode}" if explicit_intercity else "amap.route"
         await emit(
             state,
             "build_base_route",
-            "正在查询 FlyAI 高铁车次与站点接驳"
-            if prefer_train
-            else "正在查询真实驾车道路",
+            (
+                f"正在查询 FlyAI {_intercity_mode_label(primary_mode)}与接驳"
+                if explicit_intercity
+                else f"正在查询高德{_transport_mode_label(primary_mode)}路线"
+                if explicit_local
+                else "正在查询真实驾车道路（默认方式）"
+            ),
             40,
             event="tool_started",
-            tool="flyai.train" if prefer_train else "amap.route",
+            tool=primary_tool,
         )
         origin = await _ensure_coordinates(registry, request["origin"], state["trip_id"])
         destination = await _ensure_coordinates(
@@ -319,71 +360,159 @@ def build_planning_graph(
                 "route_candidates": [],
             }
         warnings: list[dict[str, Any]] = []
-        if prefer_train:
-            start_date = _parse_request_date(request.get("start_date"))
-            end_date = _parse_request_date(request.get("end_date")) or start_date
-            departure_at = _request_clock(
-                start_date or date.today(),
-                request.get("departure_time"),
-                default=time(8, 0),
-            )
-            deadline = _request_clock(
-                end_date or date.today(),
-                request.get("return_time"),
-                default=time(20, 0),
-            )
-            outbound, outbound_warnings = await _train_route(
-                registry,
-                origin,
-                destination,
-                state["trip_id"],
-                travel_date=start_date or date.today(),
-                requested_departure=departure_at,
-            )
-            inbound, inbound_warnings = await _train_route(
-                registry,
-                destination,
-                origin,
-                state["trip_id"],
-                travel_date=end_date or date.today(),
-                arrival_deadline=deadline,
-            )
-            warnings.extend(outbound_warnings)
-            warnings.extend(inbound_warnings)
-            if not outbound.get("success"):
-                warnings.append(
-                    {
-                        "code": "TRAIN_OPTION_UNAVAILABLE",
-                        "message": "未找到可用去程高铁，已回退到高德路线",
-                        "severity": "warning",
-                    }
+        start_date = _parse_request_date(request.get("start_date")) or date.today()
+        end_date = _parse_request_date(request.get("end_date")) or start_date
+        departure_at = _request_clock(
+            start_date,
+            request.get("departure_time"),
+            default=time(8, 0),
+        )
+        deadline = _request_clock(
+            end_date,
+            request.get("return_time"),
+            default=time(20, 0),
+        )
+
+        async def scheduled(
+            mode: str,
+            leg_origin: dict[str, Any],
+            leg_destination: dict[str, Any],
+            travel_date: date,
+            *,
+            requested_departure: datetime | None = None,
+            arrival_deadline: datetime | None = None,
+        ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+            if mode == "train":
+                return await _train_route(
+                    registry,
+                    leg_origin,
+                    leg_destination,
+                    state["trip_id"],
+                    travel_date=travel_date,
+                    requested_departure=requested_departure,
+                    arrival_deadline=arrival_deadline,
                 )
-                outbound = await _route(registry, origin, destination, state["trip_id"])
-            if not inbound.get("success"):
-                warnings.append(
-                    {
-                        "code": "TRAIN_OPTION_UNAVAILABLE",
-                        "message": "未找到可用返程高铁，已回退到高德路线",
-                        "severity": "warning",
-                    }
+            if mode == "flight":
+                return await _flight_route(
+                    registry,
+                    leg_origin,
+                    leg_destination,
+                    state["trip_id"],
+                    travel_date=travel_date,
+                    requested_departure=requested_departure,
+                    arrival_deadline=arrival_deadline,
                 )
-                inbound = await _route(registry, destination, origin, state["trip_id"])
-        else:
-            outbound = await _route(registry, origin, destination, state["trip_id"])
-            inbound = await _route(registry, destination, origin, state["trip_id"])
+            return await _ferry_route(
+                registry,
+                leg_origin,
+                leg_destination,
+                state["trip_id"],
+                travel_date=travel_date,
+                requested_departure=requested_departure,
+                arrival_deadline=arrival_deadline,
+            )
+
+        async def resolve_leg(
+            leg_origin: dict[str, Any],
+            leg_destination: dict[str, Any],
+            travel_date: date,
+            *,
+            requested_departure: datetime | None = None,
+            arrival_deadline: datetime | None = None,
+        ) -> dict[str, Any]:
+            # A non-driving mode is used only when the Requirement Agent
+            # explicitly selected/allowed it (or it is required by a semantic
+            # cross-sea decision).  With no such signal, driving is always the
+            # first and only normal attempt.
+            # In the default path only a failed driving lookup unlocks the
+            # intercity fallback candidates.  This keeps ordinary trips on the
+            # user's default self-drive plan while still recovering from a
+            # missing road/bridge route (including water crossings).
+            modes = (
+                [*intercity_order, "driving"]
+                if explicit_intercity
+                else [*local_order, "driving"]
+                if explicit_local
+                else ["driving", "train", "flight", "ferry"]
+            )
+            attempted: list[str] = []
+            last_route: dict[str, Any] = {"success": False, "error_code": "ROUTE_UNAVAILABLE"}
+            for mode in modes:
+                attempted.append(mode)
+                if mode in {"driving", "transit", "walking", "riding"}:
+                    route = await _route(
+                        registry,
+                        leg_origin,
+                        leg_destination,
+                        state["trip_id"],
+                        preferred_mode=mode,
+                    )
+                    mode_warnings: list[dict[str, Any]] = []
+                else:
+                    route, mode_warnings = await scheduled(
+                        mode,
+                        leg_origin,
+                        leg_destination,
+                        travel_date,
+                        requested_departure=requested_departure,
+                        arrival_deadline=arrival_deadline,
+                    )
+                warnings.extend(mode_warnings)
+                if route.get("success"):
+                    if mode != primary_mode:
+                        warnings.append(
+                            {
+                                "code": "TRANSPORT_FALLBACK_USED",
+                                "message": (
+                                    f"{_transport_mode_label(primary_mode)}不可用，"
+                                    f"已切换为{_transport_mode_label(mode)}"
+                                ),
+                                "severity": "warning",
+                            }
+                        )
+                    return route
+                last_route = route
+            last_route.setdefault("warnings", []).append(
+                f"已尝试交通方式：{'、'.join(_transport_mode_label(mode) for mode in attempted)}"
+            )
+            return last_route
+
+        outbound = await resolve_leg(
+            origin,
+            destination,
+            start_date,
+            requested_departure=departure_at,
+        )
+        inbound = await resolve_leg(
+            destination,
+            origin,
+            end_date,
+            arrival_deadline=deadline,
+        )
         candidates = [item for item in (outbound, inbound) if item.get("success")]
         error = None
         if not outbound.get("success"):
             error = {"code": outbound.get("error_code") or "ROUTE_UNAVAILABLE", "message": "去程路线不可用"}
+        elif not inbound.get("success"):
+            error = {
+                "code": inbound.get("error_code") or "ROUTE_UNAVAILABLE",
+                "message": "返程路线不可用",
+            }
         await emit(
             state,
             "build_base_route",
-            ("高铁与接驳查询完成" if prefer_train else "真实道路查询完成")
+            (
+                f"{_intercity_mode_label(primary_mode)}与接驳查询完成"
+                if explicit_intercity
+                else f"高德{_transport_mode_label(primary_mode)}路线查询完成"
+                if explicit_local
+                else "真实驾车道路查询完成"
+            )
             if not error
             else "路线查询未成功",
             55,
             event="tool_completed",
-            tool="flyai.train" if prefer_train else "amap.route",
+            tool=primary_tool,
         )
         return {
             "trip_request": request,
@@ -1345,7 +1474,11 @@ def build_planning_graph(
                     # train a few minutes earlier.  Start the stage with the
                     # station-access buffer instead of displaying a leg that
                     # begins after the train has already departed.
-                    outbound_start = scheduled_departure - timedelta(minutes=45)
+                    outbound_start = scheduled_departure - timedelta(
+                        minutes=_intercity_departure_buffer(
+                            (outbound.get("data") or {}).get("selected_mode")
+                        )
+                    )
                 stages.append(
                     _movement_stage(
                         day_id=f"day_{index + 1}",
@@ -1368,7 +1501,11 @@ def build_planning_graph(
                     (inbound.get("data") or {}).get("scheduled_departure_at")
                 )
                 if scheduled_departure:
-                    return_cutoff = scheduled_departure - timedelta(minutes=45)
+                    return_cutoff = scheduled_departure - timedelta(
+                        minutes=_intercity_departure_buffer(
+                            (inbound.get("data") or {}).get("selected_mode")
+                        )
+                    )
             local_items = [
                 item
                 for item in state.get("local_routes", [])
@@ -2075,7 +2212,17 @@ def build_planning_graph(
         request = state["trip_request"]
         traveler_count = request.get("travelers")
         traveler_label = f"{traveler_count} 人" if traveler_count else "待确认人数"
-        transport_label = "自驾" if "train" not in request.get("transport_modes", []) else "出行"
+        stage_modes = {
+            stage.get("mode")
+            for day in state.get("day_plans", [])
+            for stage in day.get("stages", [])
+        }
+        transport_label = (
+            "飞机" if "flight" in stage_modes
+            else "轮船" if "ferry" in stage_modes
+            else "火车" if "train" in stage_modes
+            else "自驾"
+        )
         lines = [
             f"# {request['origin']['name']}—{request['destination']['name']}{transport_label}行程安排",
             "",
@@ -2471,6 +2618,10 @@ async def _train_route(
     helper only consumes that semantic decision; it does not inspect raw
     text or maintain a keyword list.
     """
+    if requested_departure and requested_departure.tzinfo is None:
+        requested_departure = requested_departure.replace(tzinfo=SHANGHAI)
+    if arrival_deadline and arrival_deadline.tzinfo is None:
+        arrival_deadline = arrival_deadline.replace(tzinfo=SHANGHAI)
     result = await registry.execute(
         "flyai.train",
         {
@@ -2562,6 +2713,289 @@ async def _train_route(
     )
     route["warnings"] = [*result.warnings, *warnings]
     return route, warnings
+
+
+def _scheduled_route_result(
+    item: dict[str, Any],
+    origin: dict[str, Any],
+    destination: dict[str, Any],
+    sources: list[dict[str, Any]],
+    *,
+    mode: str,
+) -> dict[str, Any]:
+    """Turn a FlyAI train/flight/ferry result into a route-shaped record.
+
+    Intercity providers do not return an AMap road polyline.  The map therefore
+    receives a geodesic connector between the two terminals, while the stage
+    retains the real schedule, terminal names and booking source.  A connector
+    is deliberately marked estimated so the UI never presents it as a road.
+    """
+    departure_at = _parse_train_datetime(item.get("departure_at"))
+    arrival_at = _parse_train_datetime(item.get("arrival_at"))
+    if not departure_at or not arrival_at or arrival_at <= departure_at:
+        return {
+            "success": False,
+            "error_code": f"{mode.upper()}_INVALID_SCHEDULE",
+            "warnings": [],
+            "sources": [],
+        }
+    origin_coordinates = origin.get("coordinates") or {}
+    destination_coordinates = destination.get("coordinates") or {}
+    try:
+        origin_point = RoutePoint(
+            longitude=float(origin_coordinates["longitude"]),
+            latitude=float(origin_coordinates["latitude"]),
+        )
+        destination_point = RoutePoint(
+            longitude=float(destination_coordinates["longitude"]),
+            latitude=float(destination_coordinates["latitude"]),
+        )
+        distance_km = round(_haversine_km(origin_point, destination_point), 2)
+        geometry = [
+            {"longitude": origin_point.longitude, "latitude": origin_point.latitude},
+            {"longitude": destination_point.longitude, "latitude": destination_point.latitude},
+        ]
+    except (KeyError, TypeError, ValueError):
+        return {
+            "success": False,
+            "error_code": f"{mode.upper()}_COORDINATES_INVALID",
+            "warnings": [],
+            "sources": [],
+        }
+    elapsed_minutes = max(1, round((arrival_at - departure_at).total_seconds() / 60))
+    try:
+        listed_minutes = int(item.get("duration_minutes") or elapsed_minutes)
+    except (TypeError, ValueError):
+        listed_minutes = elapsed_minutes
+    buffer_minutes = {"flight": 150, "ferry": 45}.get(mode, 75)
+    duration_minutes = max(elapsed_minutes, listed_minutes) + buffer_minutes
+    if mode == "flight":
+        identifier = item.get("flight_number") or item.get("carrier") or "航班"
+        departure_terminal = item.get("departure_airport") or "出发机场"
+        arrival_terminal = item.get("arrival_airport") or "到达机场"
+        detail_label = "已预留值机、安检与机场接驳时间"
+    elif mode == "ferry":
+        identifier = item.get("ship_name") or "轮船"
+        departure_terminal = item.get("departure_port") or "出发码头"
+        arrival_terminal = item.get("arrival_port") or "到达码头"
+        detail_label = "轮船班次为语义检索结果，已预留码头接驳时间"
+    else:
+        identifier = item.get("train_number") or "高铁"
+        departure_terminal = item.get("departure_station") or "出发站"
+        arrival_terminal = item.get("arrival_station") or "到达站"
+        detail_label = "已预留车站接驳时间"
+    return {
+        "success": True,
+        "data": {
+            "selected_mode": mode,
+            "distance_km": distance_km,
+            "duration_minutes": duration_minutes,
+            "tolls_cny": 0,
+            "geometry": geometry,
+            "steps": [
+                {
+                    "road": f"{departure_terminal} → {arrival_terminal}",
+                    "distance_m": distance_km * 1000,
+                    "duration_s": duration_minutes * 60,
+                }
+            ],
+            "traffic_summary": (
+                f"{identifier} {departure_terminal} {departure_at:%H:%M} → "
+                f"{arrival_terminal} {arrival_at:%H:%M}，{detail_label}"
+            ),
+            "elevation_gain_m": None,
+            "estimated": bool(item.get("estimated", False)) or mode == "ferry",
+            "scheduled_departure_at": departure_at.isoformat(),
+            "scheduled_arrival_at": arrival_at.isoformat(),
+            "flight_number": item.get("flight_number"),
+            "train_number": item.get("train_number"),
+            "ship_name": item.get("ship_name"),
+            "departure_station": item.get("departure_station") or departure_terminal,
+            "arrival_station": item.get("arrival_station") or arrival_terminal,
+            "departure_airport": item.get("departure_airport") or departure_terminal,
+            "arrival_airport": item.get("arrival_airport") or arrival_terminal,
+            "departure_port": item.get("departure_port") or departure_terminal,
+            "arrival_port": item.get("arrival_port") or arrival_terminal,
+            "seat_class": item.get("seat_class"),
+            "price": item.get("price"),
+            "detail_url": item.get("detail_url"),
+        },
+        "warnings": [],
+        "sources": sources,
+    }
+
+
+async def _scheduled_route(
+    registry: SkillRegistry,
+    origin: dict[str, Any],
+    destination: dict[str, Any],
+    trip_id: str,
+    *,
+    mode: str,
+    travel_date: date,
+    requested_departure: datetime | None = None,
+    arrival_deadline: datetime | None = None,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Select a schedule returned by a FlyAI intercity adapter."""
+    if requested_departure and requested_departure.tzinfo is None:
+        requested_departure = requested_departure.replace(tzinfo=SHANGHAI)
+    if arrival_deadline and arrival_deadline.tzinfo is None:
+        arrival_deadline = arrival_deadline.replace(tzinfo=SHANGHAI)
+    adapter_name = f"flyai.{mode}"
+    payload: dict[str, Any] = {
+        "origin": origin.get("city") or origin.get("name"),
+        "destination": destination.get("city") or destination.get("name"),
+        "dep_date": travel_date.isoformat(),
+    }
+    result = await registry.execute(
+        adapter_name,
+        payload,
+        SkillContext(trip_id=trip_id),
+    )
+    warnings: list[dict[str, Any]] = []
+    mode_upper = mode.upper()
+    if not result.success or not isinstance(result.data, dict):
+        return (
+            {
+                "success": False,
+                "error_code": result.error_code or f"{mode_upper}_SEARCH_FAILED",
+                "warnings": result.warnings,
+                "sources": [item.model_dump(mode="json") for item in result.sources],
+            },
+            warnings,
+        )
+    items = [item for item in result.data.get("items", []) if isinstance(item, dict)]
+    parsed: list[tuple[dict[str, Any], datetime, datetime]] = []
+    for item in items:
+        departure_at = _parse_train_datetime(item.get("departure_at"))
+        arrival_at = _parse_train_datetime(item.get("arrival_at"))
+        if departure_at and arrival_at and arrival_at > departure_at:
+            parsed.append((item, departure_at, arrival_at))
+    if not parsed:
+        return (
+            {
+                "success": False,
+                "error_code": f"{mode_upper}_NO_VALID_SCHEDULE",
+                "warnings": result.warnings,
+                "sources": [item.model_dump(mode="json") for item in result.sources],
+            },
+            warnings,
+        )
+    candidates = parsed
+    if requested_departure:
+        on_or_after = [item for item in parsed if item[1] >= requested_departure]
+        if on_or_after:
+            candidates = on_or_after
+        else:
+            candidates = [max(parsed, key=lambda item: item[1])]
+            warnings.append(
+                {
+                    "code": f"{mode_upper}_DEPARTURE_WINDOW_RELAXED",
+                    "message": f"当天没有满足期望时间的{_intercity_mode_label(mode)}，已选择最接近班次",
+                    "severity": "warning",
+                }
+            )
+    if arrival_deadline:
+        before_deadline = [
+            item for item in candidates
+            if item[2] + timedelta(minutes=30) <= arrival_deadline
+        ]
+        if before_deadline:
+            candidates = before_deadline
+        else:
+            warnings.append(
+                {
+                    "code": f"{mode_upper}_ARRIVAL_WINDOW_RELAXED",
+                    "message": f"当天{_intercity_mode_label(mode)}无法在截止时间前完成接驳，已选择最接近班次",
+                    "severity": "warning",
+                }
+            )
+    if arrival_deadline:
+        selected = min(
+            candidates,
+            key=lambda item: (
+                0 if item[2] + timedelta(minutes=30) <= arrival_deadline else 1,
+                abs((arrival_deadline - item[2]).total_seconds()),
+            ),
+        )
+    elif requested_departure:
+        selected = min(candidates, key=lambda item: item[1])
+    else:
+        selected = min(candidates, key=lambda item: item[2] - item[1])
+    route = _scheduled_route_result(
+        selected[0],
+        origin,
+        destination,
+        [item.model_dump(mode="json") for item in result.sources],
+        mode=mode,
+    )
+    route["warnings"] = [*result.warnings, *warnings]
+    return route, warnings
+
+
+def _intercity_mode_label(mode: str) -> str:
+    return {"train": "火车", "flight": "航班", "ferry": "轮船"}.get(mode, "交通班次")
+
+
+def _transport_mode_label(mode: str) -> str:
+    return {
+        "driving": "驾车",
+        "train": "火车",
+        "flight": "航班",
+        "ferry": "轮船",
+        "transit": "公共交通",
+        "walking": "步行",
+        "riding": "骑行",
+    }.get(mode, _intercity_mode_label(mode))
+
+
+def _intercity_departure_buffer(mode: Any) -> int:
+    """Minutes needed before a scheduled intercity departure."""
+    return {"flight": 150, "train": 45, "ferry": 45}.get(str(mode or ""), 45)
+
+
+async def _flight_route(
+    registry: SkillRegistry,
+    origin: dict[str, Any],
+    destination: dict[str, Any],
+    trip_id: str,
+    *,
+    travel_date: date,
+    requested_departure: datetime | None = None,
+    arrival_deadline: datetime | None = None,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    return await _scheduled_route(
+        registry,
+        origin,
+        destination,
+        trip_id,
+        mode="flight",
+        travel_date=travel_date,
+        requested_departure=requested_departure,
+        arrival_deadline=arrival_deadline,
+    )
+
+
+async def _ferry_route(
+    registry: SkillRegistry,
+    origin: dict[str, Any],
+    destination: dict[str, Any],
+    trip_id: str,
+    *,
+    travel_date: date,
+    requested_departure: datetime | None = None,
+    arrival_deadline: datetime | None = None,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    return await _scheduled_route(
+        registry,
+        origin,
+        destination,
+        trip_id,
+        mode="ferry",
+        travel_date=travel_date,
+        requested_departure=requested_departure,
+        arrival_deadline=arrival_deadline,
+    )
 
 
 def _route_mode_feasible(data: dict[str, Any]) -> bool:
@@ -2705,13 +3139,19 @@ def _movement_stage(
             traffic_summary = {
                 "transit": "公共交通按高德当前班次规划",
                 "train": traffic_summary or "已按 FlyAI 实时高铁车次规划，并预留车站接驳时间",
+                "flight": traffic_summary or "已按 FlyAI 实时航班规划，并预留机场接驳时间",
+                "ferry": traffic_summary or "已按 FlyAI 轮船候选规划，并预留码头接驳时间",
             }.get(mode, "按高德路线规划")
     return MovementStage(
         day_id=day_id,
         sequence=sequence,
         title=title,
         mode=data.get("selected_mode", "driving"),
-        transit_type="bus" if data.get("selected_mode") == "transit" else None,
+        transit_type=(
+            "ferry" if data.get("selected_mode") == "ferry"
+            else "bus" if data.get("selected_mode") == "transit"
+            else None
+        ),
         origin=PlaceRef.model_validate(origin),
         destination=PlaceRef.model_validate(destination),
         route_segments=[segment],
@@ -2767,12 +3207,21 @@ def _return_stage_start(
     deadline = _request_clock(day, return_time, default=time(14, 30))
     if return_time is None:
         return max(earliest_start, deadline)
-    train_departure = _parse_train_datetime((route.get("data") or {}).get("scheduled_departure_at"))
-    if train_departure:
-        # The train timetable is authoritative.  Start the stage before the
-        # scheduled departure to leave room for station access, while still
-        # respecting local sightseeing that already consumed the window.
-        return max(earliest_start, train_departure - timedelta(minutes=45))
+    scheduled_departure = _parse_train_datetime(
+        (route.get("data") or {}).get("scheduled_departure_at")
+    )
+    if scheduled_departure:
+        # The provider timetable is authoritative.  Flights need a much
+        # larger airport check-in/security buffer than a train or ferry.
+        return max(
+            earliest_start,
+            scheduled_departure
+            - timedelta(
+                minutes=_intercity_departure_buffer(
+                    (route.get("data") or {}).get("selected_mode")
+                )
+            ),
+        )
     try:
         duration_minutes = int((route.get("data") or {}).get("duration_minutes") or 0)
     except (TypeError, ValueError):

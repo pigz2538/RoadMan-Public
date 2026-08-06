@@ -42,7 +42,7 @@ export interface Stage {
   sequence: number
   title: string
   mode: string
-  transit_type?: 'bus' | 'subway' | 'shuttle'
+  transit_type?: 'bus' | 'subway' | 'shuttle' | 'ferry'
   origin: Place
   destination: Place
   waypoints: Place[]

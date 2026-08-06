@@ -54,7 +54,8 @@ class OllamaRequirementExtractor:
             "Infer travelers semantically (情侣/夫妻=2, 一家三口=3); do not default to 1 when evidence is absent. "
             "请根据语义判断同行人数，不要机械默认 1。"
             "transport_modes must be an array containing only explicitly preferred or explicitly allowed modes from "
-            "driving, train, flight, transit, walking, riding.  Interpret 高铁/动车/火车 as train, 飞机/航班 as flight, "
+            "driving, train, flight, ferry, transit, walking, riding.  Interpret 高铁/动车/火车 as train, "
+            "飞机/航班 as flight, 轮船/渡轮/船 as ferry, "
             "自驾/开车 as driving, and 公交/地铁/公共交通 as transit.  ‘可以坐高铁’ means train is an allowed and "
             "preferred intercity option; do not silently force driving for a long-distance trip.  If no transport "
             "preference is stated, return an empty array. "
@@ -121,8 +122,21 @@ class OllamaRequirementExtractor:
                 merged["cross_sea_required"] = _coerce_optional_bool(
                     merged.get("cross_sea_required")
                 )
-                if merged.get("cross_sea_mode") not in {"ferry", "flight", "bridge"}:
-                    merged["cross_sea_mode"] = None
+                cross_sea_mode = str(merged.get("cross_sea_mode") or "").strip().casefold()
+                cross_sea_mode = {
+                    "ship": "ferry",
+                    "boat": "ferry",
+                    "ferryboat": "ferry",
+                    "轮船": "ferry",
+                    "渡轮": "ferry",
+                    "船": "ferry",
+                    "飞机": "flight",
+                    "桥": "bridge",
+                    "跨海大桥": "bridge",
+                }.get(cross_sea_mode, cross_sea_mode)
+                merged["cross_sea_mode"] = (
+                    cross_sea_mode if cross_sea_mode in {"ferry", "flight", "bridge"} else None
+                )
                 merged["past_return_requested"] = _coerce_optional_bool(
                     merged.get("past_return_requested")
                 )
@@ -939,12 +953,14 @@ def _extract_literal_constraints(raw_text: str, today: date) -> dict[str, Any]:
 
 def _normalize_transport_modes(value: Any) -> list[str]:
     """Keep only transport mode decisions returned by the Requirement Agent."""
-    allowed = {"driving", "train", "flight", "transit", "walking", "riding"}
+    allowed = {"driving", "train", "flight", "ferry", "transit", "walking", "riding"}
     if not isinstance(value, list):
         return []
     result: list[str] = []
     for item in value:
         mode = str(item or "").strip().lower()
+        if mode in {"ship", "boat", "ferryboat", "轮船", "渡轮", "船"}:
+            mode = "ferry"
         if mode in allowed and mode not in result:
             result.append(mode)
     return result

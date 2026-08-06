@@ -6,6 +6,8 @@ from app.planning.recommendations import plan_attraction_coverage, rank_tourism_
 from app.planning.tourism import review_daily_schedule, schedule_tourism_activities, verify_tourism_plan
 from app.skills.base import SkillContext
 from app.skills.flyai import (
+    FlyAIFerryAdapter,
+    FlyAIFlightAdapter,
     FlyAIHotelAdapter,
     FlyAIKeywordSearchAdapter,
     FlyAIPoiAdapter,
@@ -580,3 +582,91 @@ async def test_flyai_destination_search_adapters_execute_cli_and_keep_sources(mo
     assert keyword.sources[0].provider == "FlyAI / 飞猪"
     assert calls[0][1:3] == ("keyword-search", "--query")
     assert calls[1][1:3] == ("ai-search", "--query")
+
+
+@pytest.mark.asyncio
+async def test_flyai_flight_adapter_normalizes_schedule(monkeypatch):
+    class FakeProcess:
+        async def communicate(self):
+            return (
+                json.dumps({
+                    "data": {
+                        "itemList": [{
+                            "adultPrice": "¥680",
+                            "jumpUrl": "https://example.test/flight",
+                            "journeys": [{
+                                "segments": [{
+                                    "depDateTime": "2026-08-14 18:10:00",
+                                    "arrDateTime": "2026-08-14 20:25:00",
+                                    "depStationName": "天河机场",
+                                    "arrStationName": "首都机场",
+                                    "marketingTransportNo": "CA123",
+                                    "marketingTransportName": "中国国航",
+                                    "duration": "135分钟",
+                                }],
+                                "totalDuration": "135分钟",
+                            }],
+                        }],
+                    }
+                }).encode("utf-8"),
+                b"",
+            )
+
+    calls = []
+    monkeypatch.setattr("app.skills.flyai.shutil.which", lambda _: "flyai")
+
+    async def fake_create(*args, **kwargs):
+        calls.append(args)
+        return FakeProcess()
+
+    monkeypatch.setattr("app.skills.flyai.asyncio.create_subprocess_exec", fake_create)
+    result = await FlyAIFlightAdapter().execute(
+        {
+            "origin": "武汉",
+            "destination": "北京",
+            "dep_date": "2026-08-14",
+        },
+        SkillContext(),
+    )
+    assert result.success
+    assert result.data["items"][0]["flight_number"] == "CA123"
+    assert result.data["items"][0]["duration_minutes"] == 135
+    assert calls[0][1:3] == ("search-flight", "--origin")
+
+
+@pytest.mark.asyncio
+async def test_flyai_ferry_adapter_marks_semantic_schedule_estimated(monkeypatch):
+    class FakeProcess:
+        async def communicate(self):
+            return (
+                json.dumps({
+                    "data": {
+                        "itemList": [{
+                            "info": {
+                                "title": "舟山—普陀山客运轮渡",
+                                "description": "08:30 开船，约 2 小时",
+                                "jumpUrl": "https://example.test/ferry",
+                            }
+                        }]
+                    }
+                }).encode("utf-8"),
+                b"",
+            )
+
+    monkeypatch.setattr("app.skills.flyai.shutil.which", lambda _: "flyai")
+    async def fake_create(*args, **kwargs):
+        return FakeProcess()
+
+    monkeypatch.setattr("app.skills.flyai.asyncio.create_subprocess_exec", fake_create)
+    result = await FlyAIFerryAdapter().execute(
+        {
+            "origin": "舟山",
+            "destination": "普陀山",
+            "dep_date": "2026-08-14",
+        },
+        SkillContext(),
+    )
+    assert result.success
+    assert result.data["estimated_schedule"] is True
+    assert result.data["items"][0]["departure_at"].endswith("08:30:00")
+    assert result.data["items"][0]["estimated"] is True

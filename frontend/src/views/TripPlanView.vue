@@ -117,7 +117,7 @@ const dayTimeline = computed(() => {
       label: stage.title,
       start: stage.planned_start,
       end: stage.planned_end,
-      icon: stage.mode === 'driving' ? '🚙' : stage.mode === 'walking' ? '🚶' : stage.mode === 'riding' ? '🚲' : '🚌',
+      icon: modeEmoji(stage.mode, stage.transit_type),
     })),
     ...day.activities.map((activity) => ({
       id: activity.id,
@@ -566,7 +566,11 @@ function roadNames(stage: NonNullable<typeof store.currentStage>) {
 }
 
 function stageConditionLabel(mode: string) {
-  return mode === 'walking' || mode === 'riding' ? '路线起伏' : mode === 'transit' ? '班次' : '路况'
+  return mode === 'walking' || mode === 'riding'
+    ? '路线起伏'
+    : ['transit', 'train', 'flight', 'ferry'].includes(mode)
+      ? '班次'
+      : '路况'
 }
 
 function stageCondition(stage: NonNullable<typeof store.currentStage>) {
@@ -579,17 +583,23 @@ function stageCondition(stage: NonNullable<typeof store.currentStage>) {
       : '高程数据暂不可用'
   }
   if (stage.mode === 'transit') return '按高德当前班次规划'
+  if (stage.mode === 'train') return '按 FlyAI 实时火车班次规划'
+  if (stage.mode === 'flight') return '按 FlyAI 实时航班规划'
+  if (stage.mode === 'ferry') return '按 FlyAI 轮船候选规划（出发前确认班次）'
   return '当前路况：高德暂无分段实时数据'
 }
 
 function modeEmoji(mode: string, transitType?: string) {
   if (mode === 'transit') {
-    return { bus: '🚌', subway: '🚇', shuttle: '🚐' }[transitType ?? ''] ?? '🚌'
+    return { bus: '🚌', subway: '🚇', shuttle: '🚐', ferry: '⛴️' }[transitType ?? ''] ?? '🚌'
   }
   return {
     driving: '🚙',
     walking: '🚶',
     riding: '🚲',
+    train: '🚄',
+    flight: '✈️',
+    ferry: '⛴️',
   }[mode] ?? '📍'
 }
 

@@ -20,7 +20,8 @@ const routeOverlays = shallowRef<Array<{ stageId: string; polyline: any }>>([])
 const otherOverlays = shallowRef<any[]>([])
 const pickedMarker = shallowRef<any>(null)
 type TravelMode = 'driving' | 'riding' | 'walking' | 'transit'
-type PlannedRoute = { path: any[]; mode: TravelMode | 'direct'; fallback: boolean }
+type IntercityMode = 'train' | 'flight' | 'ferry'
+type PlannedRoute = { path: any[]; mode: TravelMode | IntercityMode | 'direct'; fallback: boolean }
 type MarkerKind = 'start' | 'end' | 'attraction' | 'charging' | 'fueling' | 'meal' | 'rest' | 'hotel' | 'parking' | 'service'
 const routePathCache = shallowRef(new Map<string, PlannedRoute>())
 const loading = shallowRef(true)
@@ -177,9 +178,9 @@ function stagePath(stage: NonNullable<typeof props.day>['stages'][number]): Prom
   if (persistedPath.length >= 2) {
     return Promise.resolve({
       path: persistedPath,
-      mode: (['driving', 'riding', 'walking', 'transit'].includes(stage.mode)
+      mode: (['driving', 'riding', 'walking', 'transit', 'train', 'flight', 'ferry'].includes(stage.mode)
         ? stage.mode
-        : 'driving') as TravelMode,
+        : 'driving') as PlannedRoute['mode'],
       // A two-point estimated segment is the explicit direct-line fallback;
       // never ask JSAPI to redraw it and accidentally create another long
       // cross-city dashed connector.
@@ -308,6 +309,9 @@ async function renderRoutes() {
     riding: '#f2a51a',
     walking: '#f2a51a',
     transit: '#18a66a',
+    train: '#18a66a',
+    flight: '#7c5ce8',
+    ferry: '#13a9c7',
     direct: '#9aa5b4',
   }
   const inactiveRouteColor = '#98a3b2'

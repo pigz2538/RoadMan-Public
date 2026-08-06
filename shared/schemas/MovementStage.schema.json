@@ -440,7 +440,8 @@
         "riding",
         "taxi",
         "flight",
-        "train"
+        "train",
+        "ferry"
       ],
       "title": "Mode",
       "type": "string"
@@ -450,8 +451,9 @@
         {
           "enum": [
             "bus",
-            "subway",
-            "shuttle"
+                "subway",
+            "shuttle",
+            "ferry"
           ],
           "type": "string"
         },

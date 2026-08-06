@@ -253,7 +253,7 @@ class MovementStage:
     id: str
     day_id: str
     sequence: int
-    mode: str  # driving/transit/walking/taxi/flight/train
+    mode: str  # driving/transit/walking/taxi/flight/train/ferry
     origin: PlaceRef
     destination: PlaceRef
     waypoints: list[PlaceRef]

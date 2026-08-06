@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import os
 import re
 import shutil
 import time
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -46,6 +48,24 @@ class FlyAITrainInput(BaseModel):
     sort_type: int = Field(default=4, ge=1, le=8)
 
 
+class FlyAIFlightInput(BaseModel):
+    origin: str = Field(min_length=1, max_length=80)
+    destination: str = Field(min_length=1, max_length=80)
+    dep_date: date
+    back_date: date | None = None
+    dep_hour_start: int | None = Field(default=None, ge=0, le=23)
+    dep_hour_end: int | None = Field(default=None, ge=0, le=23)
+    total_duration_hour: int | None = Field(default=None, ge=1, le=48)
+    sort_type: int = Field(default=4, ge=1, le=8)
+
+
+class FlyAIFerryInput(BaseModel):
+    origin: str = Field(min_length=1, max_length=80)
+    destination: str = Field(min_length=1, max_length=80)
+    dep_date: date
+    query: str | None = Field(default=None, max_length=240)
+
+
 FLYAI_POI_CATEGORIES = {
     "自然风光", "山湖田园", "森林丛林", "峡谷瀑布", "沙滩海岛", "沙漠草原",
     "人文古迹", "古镇古村", "历史古迹", "园林花园", "宗教场所", "公园乐园",
@@ -77,6 +97,48 @@ def _train_datetime(value: object) -> datetime | None:
     return None
 
 
+def _flight_datetime(value: object) -> datetime | None:
+    """Parse the date/time format returned by FlyAI flight search."""
+    return _train_datetime(value)
+
+
+def _duration_minutes(value: object) -> int | None:
+    """Normalize minutes/hours returned by different FlyAI providers."""
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        numeric = float(value)
+        # Structured flight/train responses use minutes; a decimal hour is
+        # only treated as hours when the value is clearly below one hour.
+        return max(1, round(numeric))
+    text = str(value or "").strip().lower()
+    if not text:
+        return None
+    hour_match = re.search(r"(\d+(?:\.\d+)?)\s*(?:小时|小時|hour|hr|h)", text)
+    minute_match = re.search(r"(\d+(?:\.\d+)?)\s*(?:分钟|分鐘|minute|min|m)", text)
+    if hour_match:
+        return max(1, round(float(hour_match.group(1)) * 60))
+    if minute_match:
+        return max(1, round(float(minute_match.group(1))))
+    match = re.search(r"(\d+(?:\.\d+)?)", text)
+    return max(1, round(float(match.group(1)))) if match else None
+
+
+def _place_variants(value: object) -> set[str]:
+    """Build conservative name variants for provider-result validation."""
+    text = str(value or "").strip().casefold()
+    if not text:
+        return set()
+    variants = {text}
+    trimmed = re.sub(r"(?:国际机场|机场|火车站|高铁站|客运站|站|市|县|区)$", "", text)
+    if trimmed:
+        variants.add(trimmed)
+    return {item for item in variants if item}
+
+
+def _place_in_text(place: object, text: object) -> bool:
+    haystack = str(text or "").strip().casefold()
+    return any(token in haystack for token in _place_variants(place))
+
+
 def _flyai_process_env() -> dict[str, str]:
     """Pass Docker/host proxy settings to Node's built-in fetch client."""
     environment = os.environ.copy()
@@ -85,6 +147,38 @@ def _flyai_process_env() -> dict[str, str]:
     # DNS resolution before the FlyAI service can be reached.
     environment.setdefault("NODE_USE_ENV_PROXY", "1")
     return environment
+
+
+def _flyai_spawn_args(command: str, *arguments: str) -> list[str]:
+    """Invoke the npm CLI without a Windows ``.cmd`` code-page hop.
+
+    ``asyncio.create_subprocess_exec`` launches ``flyai.CMD`` directly on
+    Windows.  That wrapper can transcode Chinese city names before Node sees
+    them, which makes the provider return an empty result even though the same
+    command works in PowerShell.  Calling the bundled Node entrypoint directly
+    preserves UTF-8 arguments while keeping Linux/container execution intact.
+    """
+    command_path = Path(command)
+    if os.name == "nt" and command_path.suffix.lower() in {".cmd", ".bat"}:
+        node = shutil.which("node")
+        bundle = command_path.parent / "node_modules" / "@fly-ai" / "flyai-cli" / "dist" / "flyai-bundle.cjs"
+        if node and bundle.is_file():
+            # Python's Windows subprocess layer in the desktop deployment can
+            # replace non-ASCII argv characters with ``?`` before CreateProcess
+            # reaches Node.  Keep the actual argv ASCII-only and let a tiny
+            # Node bootstrap decode the UTF-8 arguments from an inline base64
+            # payload before loading the FlyAI bundle.
+            encoded_args = base64.b64encode(
+                json.dumps(list(arguments), ensure_ascii=False).encode("utf-8")
+            ).decode("ascii")
+            bundle_literal = json.dumps(str(bundle))
+            script = (
+                f"const a=JSON.parse(Buffer.from('{encoded_args}','base64').toString('utf8'));"
+                f"process.argv=[process.execPath,...a];"
+                f"require({bundle_literal});"
+            )
+            return [node, "-e", script]
+    return [command, *arguments]
 
 
 class FlyAITrainAdapter(SkillAdapter):
@@ -133,6 +227,7 @@ class FlyAITrainAdapter(SkillAdapter):
             arguments.extend(["--dep-hour-end", str(request.dep_hour_end)])
         if request.total_duration_hour is not None:
             arguments.extend(["--total-duration-hour", str(request.total_duration_hour)])
+        arguments = _flyai_spawn_args(command, *arguments[1:])
 
         started = time.perf_counter()
         process = await asyncio.create_subprocess_exec(
@@ -229,6 +324,313 @@ class FlyAITrainAdapter(SkillAdapter):
         }
 
 
+class FlyAIFlightAdapter(SkillAdapter):
+    """Search real intercity flight options through the FlyAI CLI."""
+
+    name = "flyai.flight"
+    version = "1.0.0"
+    category = "travel_search"
+    timeout_seconds = 25
+    max_retries = 0
+    cache_ttl_seconds = 15 * 60
+
+    async def validate_input(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return FlyAIFlightInput.model_validate(payload).model_dump(
+            mode="json",
+            exclude_none=True,
+        )
+
+    async def execute(self, payload: dict[str, Any], _: SkillContext) -> SkillResult:
+        command = shutil.which("flyai")
+        if not command:
+            return SkillResult(
+                success=False,
+                provider="FlyAI / 飞猪",
+                warnings=["运行环境未安装 flyai CLI"],
+                error_code="SKILL_NOT_CONFIGURED",
+            )
+        request = FlyAIFlightInput.model_validate(payload)
+        arguments = [
+            command,
+            "search-flight",
+            "--origin",
+            request.origin,
+            "--destination",
+            request.destination,
+            "--dep-date",
+            request.dep_date.isoformat(),
+            "--sort-type",
+            str(request.sort_type),
+        ]
+        if request.back_date:
+            arguments.extend(["--back-date", request.back_date.isoformat()])
+        if request.dep_hour_start is not None:
+            arguments.extend(["--dep-hour-start", str(request.dep_hour_start)])
+        if request.dep_hour_end is not None:
+            arguments.extend(["--dep-hour-end", str(request.dep_hour_end)])
+        if request.total_duration_hour is not None:
+            arguments.extend(["--total-duration-hour", str(request.total_duration_hour)])
+        arguments = _flyai_spawn_args(command, *arguments[1:])
+
+        started = time.perf_counter()
+        process = await asyncio.create_subprocess_exec(
+            *arguments,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=_flyai_process_env(),
+        )
+        stdout, stderr = await process.communicate()
+        text = stdout.decode("utf-8", errors="replace").strip()
+        try:
+            body = json.loads(text)
+        except json.JSONDecodeError:
+            return SkillResult(
+                success=False,
+                provider="FlyAI / 飞猪",
+                warnings=[
+                    "FlyAI 航班搜索未返回可解析的 JSON",
+                    stderr.decode("utf-8", errors="replace")[:160],
+                ],
+                error_code="FLYAI_INVALID_RESPONSE",
+            )
+
+        items: list[dict[str, Any]] = []
+        raw_items = (body.get("data") or {}).get("itemList", [])
+        for index, raw in enumerate(raw_items if isinstance(raw_items, list) else []):
+            if not isinstance(raw, dict):
+                continue
+            journeys = raw.get("journeys") or []
+            journey = journeys[0] if journeys and isinstance(journeys[0], dict) else {}
+            raw_segments = journey.get("segments") or []
+            segments = [
+                segment
+                for segment in raw_segments
+                if isinstance(segment, dict)
+                and _flight_datetime(segment.get("depDateTime"))
+                and _flight_datetime(segment.get("arrDateTime"))
+            ]
+            if not segments:
+                continue
+            first, last = segments[0], segments[-1]
+            departure_at = _flight_datetime(first.get("depDateTime"))
+            arrival_at = _flight_datetime(last.get("arrDateTime"))
+            if not departure_at or not arrival_at or arrival_at <= departure_at:
+                continue
+            # FlyAI can occasionally return a stale cached journey for a
+            # different route.  Do not expose it as a valid option; the route
+            # planner will then use the next candidate or its normal fallback.
+            departure_city = first.get("depCityName")
+            arrival_city = last.get("arrCityName")
+            if (
+                departure_city
+                and not _place_in_text(request.origin, departure_city)
+            ) or (
+                arrival_city
+                and not _place_in_text(request.destination, arrival_city)
+            ):
+                continue
+            duration = _duration_minutes(
+                journey.get("totalDuration")
+                or first.get("duration")
+                or raw.get("totalDuration")
+            )
+            if duration is None:
+                duration = max(1, round((arrival_at - departure_at).total_seconds() / 60))
+            items.append(
+                {
+                    "id": raw.get("id") or f"flight_{index}",
+                    "journey_type": journey.get("journeyType"),
+                    "segments": segments,
+                    "departure_at": departure_at.isoformat(),
+                    "arrival_at": arrival_at.isoformat(),
+                    "duration_minutes": duration,
+                    "flight_number": first.get("marketingTransportNo"),
+                    "carrier": first.get("marketingTransportName") or first.get("transportType"),
+                    "departure_city": departure_city,
+                    "arrival_city": arrival_city,
+                    "departure_airport": first.get("depStationName"),
+                    "arrival_airport": last.get("arrStationName"),
+                    "seat_class": first.get("seatClassName"),
+                    "price": raw.get("adultPrice") or raw.get("ticketPrice") or raw.get("price"),
+                    "detail_url": raw.get("jumpUrl"),
+                }
+            )
+        if not items:
+            return SkillResult(
+                success=False,
+                provider="FlyAI / 飞猪",
+                warnings=["FlyAI 未返回可用航班"],
+                error_code="FLYAI_NO_RESULTS",
+            )
+        return SkillResult(
+            success=True,
+            provider="FlyAI / 飞猪",
+            data={"items": items, "count": len(items)},
+            sources=[
+                SourceRecord(
+                    provider="FlyAI / 飞猪",
+                    title="航班实时搜索",
+                    url="https://www.fliggy.com/",
+                )
+            ],
+            latency_ms=int((time.perf_counter() - started) * 1000),
+        )
+
+    async def health_check(self) -> dict[str, Any]:
+        return {
+            "status": "ready" if shutil.which("flyai") else "degraded",
+            "configured": bool(shutil.which("flyai")),
+            "api_key_configured": bool(os.getenv("FLYAI_API_KEY")),
+        }
+
+
+class FlyAIFerryAdapter(SkillAdapter):
+    """Discover ferry/ship options when a water crossing is required.
+
+    FlyAI currently exposes cruise/ship discovery through semantic search rather
+    than a structured timetable command.  We preserve the provider result and
+    mark the generated departure window as estimated, so the planner can keep a
+    connected itinerary without pretending that a free-form result is a ticket.
+    """
+
+    name = "flyai.ferry"
+    version = "1.0.0"
+    category = "travel_search"
+    timeout_seconds = 25
+    max_retries = 0
+    cache_ttl_seconds = 15 * 60
+
+    async def validate_input(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return FlyAIFerryInput.model_validate(payload).model_dump(
+            mode="json",
+            exclude_none=True,
+        )
+
+    async def execute(self, payload: dict[str, Any], _: SkillContext) -> SkillResult:
+        command = shutil.which("flyai")
+        if not command:
+            return SkillResult(
+                success=False,
+                provider="FlyAI / 飞猪",
+                warnings=["运行环境未安装 flyai CLI"],
+                error_code="SKILL_NOT_CONFIGURED",
+            )
+        request = FlyAIFerryInput.model_validate(payload)
+        query = request.query or (
+            f"{request.dep_date.isoformat()} {request.origin} 到 {request.destination} "
+            "轮渡 渡船 船票 班次"
+        )
+        started = time.perf_counter()
+        process = await asyncio.create_subprocess_exec(
+            *_flyai_spawn_args(command, "keyword-search", "--query", query),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=_flyai_process_env(),
+        )
+        stdout, stderr = await process.communicate()
+        text = stdout.decode("utf-8", errors="replace").strip()
+        try:
+            body = json.loads(text)
+        except json.JSONDecodeError:
+            return SkillResult(
+                success=False,
+                provider="FlyAI / 飞猪",
+                warnings=[
+                    "FlyAI 轮船搜索未返回可解析的 JSON",
+                    stderr.decode("utf-8", errors="replace")[:160],
+                ],
+                error_code="FLYAI_INVALID_RESPONSE",
+            )
+        raw_items = (body.get("data") or {}).get("itemList", [])
+        items: list[dict[str, Any]] = []
+        for index, raw in enumerate(raw_items if isinstance(raw_items, list) else []):
+            info = raw.get("info") if isinstance(raw, dict) and isinstance(raw.get("info"), dict) else raw
+            if not isinstance(info, dict):
+                continue
+            title = str(info.get("title") or info.get("name") or "").strip()
+            if not title:
+                continue
+            snippet = str(
+                info.get("description")
+                or info.get("summary")
+                or info.get("tags")
+                or ""
+            ).strip()
+            combined = f"{title} {snippet}".casefold()
+            ferry_tokens = ("轮渡", "渡轮", "船票", "客运", "码头", "邮轮", "游船", "渡船", "船班", "开船", "ferry", "cruise")
+            if not any(token in combined for token in ferry_tokens):
+                continue
+            # A semantic search for a ferry route often also returns local
+            # sightseeing cruises or generic hotel/attraction cards.  A
+            # cross-city candidate must mention both endpoints in its title or
+            # snippet; otherwise it is not safe to turn it into a timetable.
+            if not (
+                _place_in_text(request.origin, combined)
+                and _place_in_text(request.destination, combined)
+            ):
+                continue
+            # Scenic-ticket packages are not a transport schedule.  Keep a
+            # package only when it also names a real port/operator signal.
+            if "门票" in combined and not any(token in combined for token in ("码头", "客运", "轮渡", "渡轮", "船班")):
+                continue
+            time_matches = re.findall(r"(?<!\d)([01]?\d|2[0-3]):([0-5]\d)(?!\d)", f"{title} {snippet}")
+            departure = datetime.combine(request.dep_date, datetime.min.time())
+            departure = departure.replace(hour=8, minute=0)
+            duration = 120
+            if time_matches:
+                hour, minute = map(int, time_matches[0])
+                departure = departure.replace(hour=hour, minute=minute)
+            duration_match = re.search(
+                r"(\d+(?:\.\d+)?)\s*(?:小时|小時|hour|hr|h|分钟|分鐘|minute|min|m)",
+                f"{title} {snippet}",
+                re.IGNORECASE,
+            )
+            if duration_match:
+                duration = _duration_minutes(duration_match.group(0)) or duration
+            items.append(
+                {
+                    "id": info.get("id") or f"ferry_{index}",
+                    "departure_at": departure.isoformat(),
+                    "arrival_at": (departure + timedelta(minutes=duration)).isoformat(),
+                    "duration_minutes": duration,
+                    "ship_name": title,
+                    "departure_port": request.origin,
+                    "arrival_port": request.destination,
+                    "detail_url": info.get("jumpUrl") or info.get("detailUrl") or info.get("url"),
+                    "snippet": snippet[:500],
+                    "estimated": True,
+                }
+            )
+        if not items:
+            return SkillResult(
+                success=False,
+                provider="FlyAI / 飞猪",
+                warnings=["FlyAI 未返回可用轮船/渡轮候选"],
+                error_code="FLYAI_NO_RESULTS",
+            )
+        return SkillResult(
+            success=True,
+            provider="FlyAI / 飞猪",
+            data={"items": items, "count": len(items), "estimated_schedule": True},
+            warnings=["轮船班次来自语义检索，出发前需以船公司实时班次确认"],
+            sources=[
+                SourceRecord(
+                    provider="FlyAI / 飞猪",
+                    title="轮船/渡轮语义检索",
+                    url="https://www.fliggy.com/",
+                )
+            ],
+            latency_ms=int((time.perf_counter() - started) * 1000),
+        )
+
+    async def health_check(self) -> dict[str, Any]:
+        return {
+            "status": "ready" if shutil.which("flyai") else "degraded",
+            "configured": bool(shutil.which("flyai")),
+            "api_key_configured": bool(os.getenv("FLYAI_API_KEY")),
+        }
+
+
 class FlyAIHotelAdapter(SkillAdapter):
     name = "flyai.hotel"
     version = "1.1.0"
@@ -269,6 +671,7 @@ class FlyAIHotelAdapter(SkillAdapter):
             arguments.extend(["--poi-name", request.poi_name])
         if request.max_price:
             arguments.extend(["--max-price", str(request.max_price)])
+        arguments = _flyai_spawn_args(command, *arguments[1:])
 
         started = time.perf_counter()
         process = await asyncio.create_subprocess_exec(
@@ -377,6 +780,7 @@ class FlyAIPoiAdapter(SkillAdapter):
             arguments.extend(["--category", request.category])
         if request.poi_level:
             arguments.extend(["--poi-level", str(request.poi_level)])
+        arguments = _flyai_spawn_args(command, *arguments[1:])
         started = time.perf_counter()
         process = await asyncio.create_subprocess_exec(
             *arguments,
@@ -478,10 +882,7 @@ class _FlyAISearchAdapter(SkillAdapter):
         request = FlyAISearchInput.model_validate(payload)
         started = time.perf_counter()
         process = await asyncio.create_subprocess_exec(
-            command,
-            self.command_name,
-            "--query",
-            request.query,
+            *_flyai_spawn_args(command, self.command_name, "--query", request.query),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             env=_flyai_process_env(),

@@ -102,7 +102,17 @@ async def run_planning(
             trip.request = request
             if request.origin and request.destination and request.start_date and request.end_date:
                 day_count = max(1, (request.end_date - request.start_date).days + 1)
-                mode_label = "自驾" if "train" not in request.transport_modes else "出行"
+                stage_modes = {
+                    stage.get("mode")
+                    for day in result.get("day_plans", [])
+                    for stage in day.get("stages", [])
+                }
+                mode_label = (
+                    "飞机" if "flight" in stage_modes
+                    else "轮船" if "ferry" in stage_modes
+                    else "火车" if "train" in stage_modes
+                    else "自驾"
+                )
                 trip.title = f"{request.origin.name}—{request.destination.name}{day_count}天{mode_label}行程"
             trip.origin = request.origin
             trip.destination = request.destination
@@ -322,7 +332,17 @@ async def _persist_partial_result(
             trip.end_date = request.end_date
             if request.origin and request.destination and request.start_date and request.end_date:
                 day_count = max(1, (request.end_date - request.start_date).days + 1)
-                mode_label = "自驾" if "train" not in request.transport_modes else "出行"
+                stage_modes = {
+                    stage.get("mode")
+                    for day in result.get("day_plans", [])
+                    for stage in day.get("stages", [])
+                }
+                mode_label = (
+                    "飞机" if "flight" in stage_modes
+                    else "轮船" if "ferry" in stage_modes
+                    else "火车" if "train" in stage_modes
+                    else "自驾"
+                )
                 trip.title = f"{request.origin.name}—{request.destination.name}{day_count}天{mode_label}行程"
         except (TypeError, ValueError):
             pass
