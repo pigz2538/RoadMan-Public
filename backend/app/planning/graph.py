@@ -53,6 +53,41 @@ from .tourism import review_daily_schedule, schedule_tourism_activities, verify_
 
 ProgressCallback = Callable[[str, str, str, int, str, str | None], Awaitable[None]]
 SHANGHAI = ZoneInfo("Asia/Shanghai")
+# A return-time phrase is often a preference rather than a minute-precise
+# appointment. Keep a half-day planning window before treating the itinerary
+# as impossible; a few minutes of drift should not block completion.
+RETURN_DEADLINE_GRACE_MINUTES = 12 * 60
+RETURN_DEADLINE_SILENT_TOLERANCE_MINUTES = 15
+
+
+def _return_deadline_issue(
+    arrival: datetime,
+    deadline: datetime,
+) -> dict[str, str] | None:
+    """Classify a late return without blocking on minute-level drift.
+
+    The requested return time is a planning target.  A delay of a few minutes
+    is silently accepted; a later arrival within the half-day window is shown
+    as a warning; only a delay beyond that window blocks verification.
+    """
+    delay_minutes = max(0, int((arrival - deadline).total_seconds() / 60))
+    if delay_minutes <= RETURN_DEADLINE_SILENT_TOLERANCE_MINUTES:
+        return None
+    if delay_minutes <= RETURN_DEADLINE_GRACE_MINUTES:
+        return {
+            "code": "RETURN_WINDOW_FLEXIBLE",
+            "severity": "warning",
+            "description": "返程预计略晚于目标时间，但仍在半天弹性范围内；可按实际路况灵活抵达。",
+        }
+    return {
+        "code": "RETURN_DEADLINE_UNACHIEVABLE",
+        "severity": "blocker",
+        "description": (
+            f"返程预计 {arrival.strftime('%m月%d日 %H:%M')} 抵达，"
+            f"晚于用户要求的 {deadline.strftime('%m月%d日 %H:%M')}；"
+            "请延长行程、提前离开或改用更快的交通方式。"
+        ),
+    }
 
 
 def _normalize_poi_name(value: Any) -> str:
@@ -2248,18 +2283,9 @@ def build_planning_graph(
                 )
                 if final_stage:
                     arrival = datetime.fromisoformat(final_stage["planned_end"])
-                    if arrival > deadline:
-                        issues.append(
-                            {
-                                "code": "RETURN_DEADLINE_UNACHIEVABLE",
-                                "severity": "blocker",
-                                "description": (
-                                    f"返程预计 {arrival.strftime('%m月%d日 %H:%M')} 抵达，"
-                                    f"晚于用户要求的 {deadline.strftime('%m月%d日 %H:%M')}；"
-                                    "请延长行程、提前离开或改用更快的交通方式。"
-                                ),
-                            }
-                        )
+                    deadline_issue = _return_deadline_issue(arrival, deadline)
+                    if deadline_issue:
+                        issues.append(deadline_issue)
             except (KeyError, TypeError, ValueError):
                 # Invalid optional clocks are already handled by Requirement
                 # preflight; never make verification crash while reporting the

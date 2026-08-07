@@ -1,12 +1,19 @@
-# 车型数据库接入
+# 车型目录
 
-车型管理使用 `Skills/carinfo` 的 Bitefu CarApi 车型目录：
+车型管理的搜索能力由 `carinfo.catalog` Adapter 提供，接口为：
 
-- 后端适配器：`carinfo.catalog`
-- 接口：`POST /api/v1/skills/carinfo/search`
-- 请求：`{"query":"特斯拉 Model 3","limit":12}`
-- 返回：品牌、车系、具体年款、动力类型、在售状态、价格区间和来源链接
+```text
+POST /api/v1/skills/carinfo/search
+```
 
-目录接口不保证每个具体配置的续航、能耗、电池容量、车身尺寸等参数。搜索结果会明确标记缺失字段；前端一键填入/直接添加时不会把演示车型的数值复制到新车型，用户可以在表单中确认后补充。
+请求示例：
 
-不需要新增 API Key 或 Python 依赖；适配器使用现有 `httpx` 和 Skill Registry 的超时、缓存、审计机制。
+```json
+{"query": "Tesla Model 3", "limit": 12}
+```
+
+响应返回品牌、车系、具体年款/车型、动力类型、在售状态、价格区间和来源链接。目录服务无法访问时返回结构化失败或空结果，不伪造续航/能耗。
+
+前端添加车型时应先搜索并让用户确认具体车型，再把可确认字段写入 `VehicleProfile`；不把演示 SUV 的默认值复制到新车型。用户仍可手动补充目录缺失字段。
+
+车型 CRUD：`/api/v1/vehicles`。凭据和目录响应不写入日志。

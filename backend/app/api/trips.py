@@ -196,8 +196,13 @@ async def preflight_trip(
     # A clarification round sends the previous extraction back to us. Refresh
     # only the calendar fields from the original text so an earlier partial
     # Agent response cannot keep asking for a date that was already explicit.
-    for field in ("start_date", "end_date"):
-        if structural_dates.get(field):
+    answered_fields = {
+        key.partition(":")[2]
+        for key, value in payload.answers.items()
+        if value.strip() and key.partition(":")[2]
+    }
+    for field in ("start_date", "end_date", "cross_sea_required"):
+        if structural_dates.get(field) and field not in answered_fields:
             extracted[field] = structural_dates[field]
     # A clarification round may carry a partial Agent response.  Preserve an
     # explicitly written origin/destination if that response omitted it, but
@@ -265,6 +270,11 @@ async def preflight_trip(
 
     start_value = _safe_date(extracted.get("start_date"))
     end_value = _safe_date(extracted.get("end_date"))
+    # A clarification can replace a relative phrase such as “yesterday
+    # returned” with an explicit future date. Clear the stale semantic flag so
+    # the next preflight does not ask the same contradiction again.
+    if end_value and end_value >= today and extracted.get("past_return_requested") is True:
+        extracted["past_return_requested"] = False
     if start_value and end_value and end_value < start_value:
         issues.append(
             PreflightIssue(
@@ -329,7 +339,10 @@ async def preflight_trip(
         )
 
     window = extracted.get("time_window_minutes")
-    if not isinstance(window, int) or window <= 0:
+    # Zero is a valid parsed value for an explicitly contradictory phrase such
+    # as “15:00 出发、15:00 抵达”; it must surface as a safety question rather
+    # than being silently discarded.
+    if not isinstance(window, int) or window < 0:
         window = None
     different_places = extracted.get("origin_name") != extracted.get("destination_name")
     if (
@@ -385,7 +398,13 @@ async def preflight_trip(
         deduped = [
             PreflightIssue.model_validate(item)
             for item in semantic_issues
-            if not answered(str(item.get("code")), str(item.get("field") or "preferences"))
+            if (
+                str(item.get("field") or "preferences") not in answered_fields
+                and not answered(
+                    str(item.get("code")),
+                    str(item.get("field") or "preferences"),
+                )
+            )
         ]
         semantic_checked = True
     summary = {

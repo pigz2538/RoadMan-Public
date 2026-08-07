@@ -97,7 +97,8 @@ map.plugin(['AMap.Weather'], function() {
 	//构造 Weather 类
 	var amapWeather = new AMap.Weather(); 
 
-	//查询实时天气信息，cityName 见 http://restapi.amap.com/v3/config/district?level=city&sublevel=0&extensions=all&output=xml&key=d9fba2f3196b6a4419358693a2b0d9a9
+	// 查询实时天气信息；请使用环境变量中的 key，不要把真实 key 写入示例 URL。
+	// http://restapi.amap.com/v3/config/district?level=city&sublevel=0&extensions=all&output=xml&key=<AMAP_KEY>
 	amapWeather.getLive('北京'); 
 
 	//查询四天预报天气，包括查询当天天气信息

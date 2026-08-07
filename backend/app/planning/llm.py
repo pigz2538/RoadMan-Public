@@ -92,6 +92,22 @@ class OllamaRequirementExtractor:
                 for date_field in ("start_date", "end_date"):
                     if structural.get(date_field):
                         merged[date_field] = structural[date_field]
+                # Explicit clock windows are hard constraints just like
+                # literal calendar dates.  Do not let a partial/cloud Agent
+                # response erase an impossible same-leg window.
+                for clock_field in (
+                    "departure_time",
+                    "return_time",
+                    "time_window_minutes",
+                ):
+                    if structural.get(clock_field) is not None:
+                        merged[clock_field] = structural[clock_field]
+                if structural.get("cross_sea_required") is True:
+                    merged["cross_sea_required"] = True
+                # The cloud Agent must not invent a ferry/flight choice just
+                # because a trip crosses water. Keep a mode only when the
+                # user explicitly wrote one; otherwise preflight asks.
+                merged["cross_sea_mode"] = structural.get("cross_sea_mode")
                 if not merged.get("start_date"):
                     merged.pop("end_date", None)
                 if merged.get("destination_name"):
@@ -140,7 +156,7 @@ class OllamaRequirementExtractor:
                 merged["past_return_requested"] = _coerce_optional_bool(
                     merged.get("past_return_requested")
                 )
-                merged["time_window_minutes"] = _coerce_positive_minutes(
+                merged["time_window_minutes"] = _coerce_time_window_minutes(
                     merged.get("time_window_minutes")
                 )
                 return merged
@@ -1032,6 +1048,20 @@ def extract_structural_constraints(raw_text: str, today: date) -> dict[str, Any]
     """
     result = _extract_literal_constraints(raw_text, today)
 
+    # An explicit request to cross a water barrier is a safety constraint, not
+    # a destination or preference guess.  Preserve it across clarification
+    # rounds even when the cloud Requirement Agent is unavailable; do not
+    # infer it from names such as "海岛" or from a geography dictionary.
+    if re.search(r"跨海|跨水|过海|渡海|跨海峡", raw_text or ""):
+        result["cross_sea_required"] = True
+        explicit_mode = _explicit_cross_sea_mode(raw_text or "")
+        if explicit_mode:
+            result["cross_sea_mode"] = explicit_mode
+
+    explicit_window = _extract_explicit_time_window(raw_text or "")
+    if explicit_window:
+        result.update(explicit_window)
+
     relative = list(
         re.finditer(
             r"大后天|后天|明天|今天|昨天|前天|the day after tomorrow|day after tomorrow|"
@@ -1178,6 +1208,15 @@ def _coerce_positive_minutes(value: Any) -> int | None:
     return minutes if 1 <= minutes <= 7 * 24 * 60 else None
 
 
+def _coerce_time_window_minutes(value: Any) -> int | None:
+    """Validate an explicit travel window, including a zero-minute conflict."""
+    try:
+        minutes = int(value)
+    except (TypeError, ValueError):
+        return None
+    return minutes if 0 <= minutes <= 7 * 24 * 60 else None
+
+
 def _normalize_place_name(value: str) -> str:
     """Normalize whitespace without interpreting place language."""
     return " ".join(value.split()).strip("，,。；;、")
@@ -1226,6 +1265,73 @@ def _normalize_clock(value: Any) -> str | None:
     if hour > 23 or minute > 59:
         return None
     return f"{hour:02d}:{minute:02d}"
+
+
+_CLOCK_LITERAL = (
+    r"(?:(?:凌晨|清晨|早上|上午|中午|下午|傍晚|晚上|夜间)\s*)?"
+    r"\d{1,2}(?:(?::\d{1,2})|(?:点|时)(?:\d{1,2}分?)?)"
+)
+
+
+def _clock_literal_to_minutes(value: str) -> int | None:
+    match = re.fullmatch(
+        r"\s*(?P<period>凌晨|清晨|早上|上午|中午|下午|傍晚|晚上|夜间)?\s*"
+        r"(?P<hour>\d{1,2})(?:(?::(?P<colon_minute>\d{1,2}))|"
+        r"(?:点|时)(?P<cn_minute>\d{1,2})?分?)\s*",
+        value,
+    )
+    if not match:
+        return None
+    hour = int(match.group("hour"))
+    minute = int(match.group("colon_minute") or match.group("cn_minute") or 0)
+    if hour > 23 or minute > 59:
+        return None
+    period = match.group("period") or ""
+    if period in {"下午", "傍晚", "晚上", "中午"} and hour < 12:
+        hour += 12
+    elif period in {"凌晨"} and hour == 12:
+        hour = 0
+    return hour * 60 + minute
+
+
+def _extract_explicit_time_window(raw_text: str) -> dict[str, Any]:
+    """Read an explicit same-leg departure/arrival clock window.
+
+    This is a structural safety check, not a semantic classifier.  It only
+    activates when the text contains two clock literals connected to an
+    explicit departure and arrival phrase, so ordinary times in a day plan do
+    not become a guessed travel constraint.
+    """
+    match = re.search(
+        rf"(?P<start>{_CLOCK_LITERAL})\s*(?:出发|启程|离开)"
+        rf".{{0,32}}?(?:到|抵达|到达)\s*(?P<end>{_CLOCK_LITERAL})",
+        raw_text or "",
+    )
+    if not match:
+        return {}
+    start_minutes = _clock_literal_to_minutes(match.group("start"))
+    end_minutes = _clock_literal_to_minutes(match.group("end"))
+    if start_minutes is None or end_minutes is None:
+        return {}
+    elapsed = end_minutes - start_minutes
+    if elapsed < 0:
+        elapsed += 24 * 60
+    return {
+        "departure_time": f"{start_minutes // 60:02d}:{start_minutes % 60:02d}",
+        "return_time": f"{end_minutes // 60:02d}:{end_minutes % 60:02d}",
+        "time_window_minutes": elapsed,
+    }
+
+
+def _explicit_cross_sea_mode(raw_text: str) -> str | None:
+    """Return a water-crossing mode only when the user explicitly states it."""
+    if re.search(r"轮渡|渡轮|坐船|乘船|船运|ferry|boat|ship", raw_text, re.IGNORECASE):
+        return "ferry"
+    if re.search(r"飞机|航班|飞过去|flight|plane", raw_text, re.IGNORECASE):
+        return "flight"
+    if re.search(r"跨海大桥|大桥通行|bridge", raw_text, re.IGNORECASE):
+        return "bridge"
+    return None
 
 
 # Compatibility symbol retained for callers that import the old helper. The

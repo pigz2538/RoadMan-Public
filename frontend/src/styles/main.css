@@ -350,7 +350,7 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .activity-copy button { border: 1px solid #dce5f1; border-radius: 20px; background: white; padding: 5px 8px; font-size: 13px; display: flex; align-items: center; gap: 3px; cursor: pointer; }
 .activity-copy button svg { width: 11px; height: 11px; }
 .empty-state { margin: 25px 0; color: var(--muted); display: grid; place-items: center; gap: 8px; font-size: 12px; }
-.map-workspace { min-width: 0; display: grid; grid-template-rows: minmax(0, 1fr) auto; gap: 13px; position: relative; }
+.map-workspace { min-width: 0; min-height: 0; display: grid; grid-template-rows: minmax(0, 1fr) auto; gap: 13px; position: relative; }
 .map-pick-toolbar { position: absolute; z-index: 12; top: 54px; left: 14px; display: flex; align-items: center; gap: 8px; max-width: calc(100% - 90px); padding: 7px; }
 .map-pick-toolbar select, .map-pick-toolbar button { height: 36px; border: 1px solid #d6e3f2; border-radius: 10px; background: #fff; color: #17304f; font-weight: 700; }
 .map-pick-toolbar > select { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }

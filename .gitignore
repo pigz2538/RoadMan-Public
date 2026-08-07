@@ -1,4 +1,9 @@
 .env
+# Provider credentials are local-only. Inject them through environment variables
+# (or a local untracked file) and never commit them.
+Skills/**/apikey.txt
+Skills/**/secretkey.txt
+Skills/**/apipkey.txt
 .venv/
 .omo/
 .codegraph/

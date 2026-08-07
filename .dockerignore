@@ -10,3 +10,7 @@
 backend/roadman.db
 backend/data
 frontend/playwright-report
+# Never send local provider credentials to a Docker build context.
+Skills/**/apikey.txt
+Skills/**/secretkey.txt
+Skills/**/apipkey.txt

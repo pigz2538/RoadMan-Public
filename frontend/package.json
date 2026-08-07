@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "vue-tsc -b && vite build",
-    "test": "vitest run",
+    "test": "vitest run --exclude tests/e2e/** --passWithNoTests",
     "test:e2e": "playwright test"
   },
   "dependencies": {

@@ -1,52 +1,41 @@
-# RoadMan 领域模型 v0.1
+# 领域模型
 
-本版本冻结第一批实现任务需要的领域契约。权威实现位于
-`backend/app/domain/models.py`，可分发契约位于 `shared/schemas/`。
-
-## 核心层级
+权威实现位于 `backend/app/domain/models.py`；跨进程/导出 Schema 位于 `shared/schemas/`。
 
 ```text
 Trip
-└─ DayPlan
-   ├─ MovementStage
-   │  └─ RouteSegment
-   └─ Activity
+├─ TripRequest / preferences / source_records
+├─ DayPlan[]
+│  ├─ MovementStage[]  （只表示移动）
+│  └─ Activity[]       （景点、餐饮、住宿、补能、休息等）
+├─ warnings[]
+└─ versions / PlanningState
 ```
 
-- `TripRequest` 保存原始自然语言、结构化需求以及可见默认值。
-- `MovementStage` 只表达移动，游览、住宿、休息和补能均使用 `Activity`。
-- `MovementStage` 同时保存计划起止时间、路况摘要、天气摘要、费用和耗能信息；跨城班次支持火车、飞机和轮船。
-- `MovementStage.risk_level/risk_tags` 保存可直接展示的路线风险；详细依据仍保留
-  在 `warnings`，估算风险必须带 `estimated=true`。
-- `WeatherSample` 包含阶段预计到达时刻的温度、降水概率、天气码、能见度和风速。
-- `VehicleProfile.safe_energy_reserve_percent` 控制补能安全余量，默认 15%。
-- 任意两个连续活动节点（景点、餐厅、酒店等）之间若发生位移，都必须插入
-  `MovementStage`；步行、骑行、公交、地铁和景区接驳与驾车段使用同一套卡片和接口契约。
-- `transit_type` 用于把公共交通进一步区分为 `bus`、`subway`、`shuttle` 或 `ferry`。
-- `DayPlan.items` 是时间轴引用；`stages` 和 `activities` 保存实体。
-- 所有外部数据通过 `SourceRecord` 追溯。
-- 所有估算数据必须带 `estimated=true`。
-- Agent 修改以 `PlanPatch(preview)` 表达，确认前不得改写正式 Trip。
+## 实体职责
 
-## ID 规则
+- **Trip**：一次完整行程，保存原始自然语言、结构化需求、状态、日期、同行人数和 canonical 日程。
+- **DayPlan**：一个自然日，含日期、阶段和活动时间轴；`items` 的顺序是展示顺序。
+- **MovementStage**：两个地点之间的真实移动，保存起终点、交通方式、路线 geometry、距离、时长、天气、费用、风险和来源。景点游览本身不放在 Stage 中。
+- **Activity**：景点、餐饮、酒店、充电、加油、停车、服务区、休息等非移动安排，带 `planned_start/end`、地点、来源和可选图片/详情链接。
+- **RouteSegment**：Stage 的路线细节，可保存 steps、transfers、`elevation_gain_m` 和 provider 原始摘要。
+- **PlanPatch**：编辑预览，包含原值、建议值、影响范围、时间/费用变化和是否需要重规划；确认前不写 Trip。
+- **SourceRecord**：所有外部事实的来源、provider、URL、抓取时间和是否估算。
+- **VehicleProfile**：车型、动力、续航、电量、座位、ETC/山路能力和安全余量。
 
-ID 使用带领域前缀的字符串，例如 `trip_`、`day_`、`stage_`、
-`activity_`、`patch_`。ID 是不透明标识，不编码业务含义。
+## 约束
 
-## 时间和金额
-
-- API 时间使用带时区的 ISO 8601。
-- 日期使用 `YYYY-MM-DD`。
-- 金额使用 `MoneyRange`，默认币种为 CNY。
-- Mock 中无法核实的路线、价格、耗能和开放时间均标为估算或待确认。
+1. 日期使用 `YYYY-MM-DD`，带时间使用带时区的 ISO 8601；金额使用 CNY 的 `MoneyRange`。
+2. 估算数据必须显式标记 `estimated=true`；没有路线 geometry 不得当作道路。
+3. 连续活动之间的位移必须有 MovementStage；驾车、公共交通、骑行、步行和接驳统一使用该模型。
+4. 每日复核必须检查时间冲突、可用时间窗、餐饮/住宿覆盖、天气/季节适配和闭环约束。
+5. 外部名称可做中文展示，但保留原文和来源，避免同名地点误合并。
 
 ## Schema 更新
 
-在项目根目录执行：
-
 ```powershell
-$env:PYTHONPATH='backend'
+$env:PYTHONPATH = 'backend'
 python backend/scripts/export_schemas.py
 ```
 
-Schema 变化必须同步更新示例并通过测试。
+模型变更必须同步示例、API 测试和前端类型；不要把 provider 原始响应直接暴露给客户端。

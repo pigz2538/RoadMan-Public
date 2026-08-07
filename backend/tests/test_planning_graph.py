@@ -13,6 +13,7 @@ from app.planning.graph import (
     _current_weather_sample,
     _movement_stage,
     _return_stage_start,
+    _return_deadline_issue,
     build_planning_graph,
 )
 from app.planning.deep_drive import _ensure_daily_meals
@@ -27,6 +28,28 @@ from app.repositories import TripRepository, VehicleRepository
 from app.services.sse import sse_manager
 from app.skills.base import SkillAdapter, SkillContext
 from app.skills.registry import SkillRegistry
+
+
+def test_return_deadline_allows_small_drift_and_half_day_grace():
+    deadline = datetime(2026, 8, 9, 19, 0, tzinfo=ZoneInfo("Asia/Shanghai"))
+
+    assert _return_deadline_issue(
+        deadline + timedelta(minutes=3), deadline
+    ) is None
+
+    warning = _return_deadline_issue(
+        deadline + timedelta(hours=3), deadline
+    )
+    assert warning is not None
+    assert warning["code"] == "RETURN_WINDOW_FLEXIBLE"
+    assert warning["severity"] == "warning"
+
+    blocker = _return_deadline_issue(
+        deadline + timedelta(hours=12, minutes=1), deadline
+    )
+    assert blocker is not None
+    assert blocker["code"] == "RETURN_DEADLINE_UNACHIEVABLE"
+    assert blocker["severity"] == "blocker"
 
 
 def test_offline_fallback_preserves_only_literal_calendar_constraints():
@@ -99,6 +122,18 @@ def test_structural_calendar_resolves_weekday_range_from_today():
         "start_date": "2026-08-03",
         "end_date": "2026-08-07",
     }
+
+
+def test_structural_constraints_preserve_explicit_cross_sea_and_zero_window():
+    extracted = extract_structural_constraints(
+        "2099-08-02从上海出发跨海去普陀山，下午3点出发到下午3点抵达",
+        date(2026, 8, 3),
+    )
+
+    assert extracted["cross_sea_required"] is True
+    assert extracted["departure_time"] == "15:00"
+    assert extracted["return_time"] == "15:00"
+    assert extracted["time_window_minutes"] == 0
 
 
 def test_explicit_location_fallback_reads_travel_grammar_without_place_keywords():

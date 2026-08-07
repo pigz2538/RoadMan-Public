@@ -2,6 +2,8 @@
 
 本仓库是一组遵循 **OpenClaw / Claude Agent Skills** 开放标准的技能集合。每个 Skill 是一个独立文件夹，包含必需的 `SKILL.md`（YAML frontmatter + Markdown 指令）与可选的 `references/`、`scripts/`、`assets/` 等子目录。
 
+> 凭据只通过环境变量注入（例如 `AMAP_WEBSERVICE_KEY`、`OPENTRIPMAP_API_KEY`、`FLYAI_API_KEY`）；本地 key 文件不纳入 Git 或 Docker 构建上下文。
+
 > 格式规范来源：《The Complete Guide to Building Skills for Claude》。每个 Skill 均遵循渐进式披露（Progressive Disclosure）三层结构：frontmatter 常驻 → SKILL.md 正文按需加载 → references/ 深度按需加载。
 
 ---
@@ -14,7 +16,7 @@
 | 2 | `amap-lbs` | 高德地图综合服务 | maps-services | 是 (`AMAP_WEBSERVICE_KEY`) | POI 搜索 / 路径规划 / 旅游规划 / 热力图 |
 | 3 | `flyai` | FlyAI 旅行搜索 | travel-search | 否（可选 `FLYAI_API_KEY`） | 航班 / 酒店 / 景点 / 火车 / 门票搜索预订 |
 | 4 | `openchargemap` | Open Charge Map | ev-charging | 是 (`OCM_API_KEY`) | 电动汽车充电桩查询 |
-| 5 | `opentripmap` | OpenTripMap | tourism-poi | 是 (`apikey`) | 全球旅游景点 POI 查询 |
+| 5 | `opentripmap` | OpenTripMap | tourism-poi | 是 (`OPENTRIPMAP_API_KEY`) | 全球旅游景点 POI 查询 |
 | 6 | `weather` | Open-Meteo 天气 | weather-travel | 否 | 旅游规划天气预报 |
 | 7 | `carinfo` | 汽车信息查询 | car-info | 否 | 汽车品牌 / 车系 / 车型 / 报价 / 颜色配置查询 |
 
@@ -123,7 +125,6 @@ amap-lbs/
 ├── gaode_skill.py            # Python 导航/搜索脚本
 ├── package.json
 ├── config.example.json
-├── apipkey.txt
 └── scripts/
     ├── poi-search.js         # POI 搜索脚本
     ├── route-planning.js     # 路径规划脚本
@@ -222,15 +223,14 @@ openchargemap/
 **触发场景**：景点信息、附近 POI、旅游景点、查景点、places of interest、things to do、attractions near me、坐标查询、地点搜索建议、POI 详情。
 
 **依赖**：
-- API Key：`apikey`（文件 `apikey.txt`）
+- 环境变量：`OPENTRIPMAP_API_KEY`
 - Base URL：`https://api.opentripmap.com/0.1`
 
 **目录结构**：
 ```
 opentripmap/
 ├── SKILL.md                  # 主指令文件
-├── openapi.en.json           # 完整 OpenAPI 3.0 规范
-└── apikey.txt                # API Key 文件
+└── openapi.en.json           # 完整 OpenAPI 3.0 规范
 ```
 
 **五个端点**：
@@ -362,4 +362,3 @@ carinfo/
 - **城市旅游**：opentripmap（景点）+ flyai（门票/酒店）+ weather（出行天气）+ amap-jsapi（地图展示）
 - **周边探索**：amap-lbs（周边搜索）+ opentripmap（景点详情）+ weather（当日天气）
 - **购车决策**：carinfo（品牌车系车型报价）+ openchargemap（电车充电配套）+ weather（出行天气参考）
-

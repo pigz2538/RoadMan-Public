@@ -2,13 +2,13 @@ services:
   postgres:
     image: postgres:17-alpine
     environment:
-      POSTGRES_DB: roadman
-      POSTGRES_USER: roadman
-      POSTGRES_PASSWORD: roadman_dev
+      POSTGRES_DB: ${POSTGRES_DB:-roadman}
+      POSTGRES_USER: ${POSTGRES_USER:-roadman}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-roadman_dev}
     volumes:
       - roadman_postgres:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U roadman -d roadman"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-roadman} -d ${POSTGRES_DB:-roadman}"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -30,7 +30,7 @@ services:
       dockerfile: backend/Dockerfile
     environment:
       APP_ENV: docker
-      DATABASE_URL: postgresql+asyncpg://roadman:roadman_dev@postgres:5432/roadman
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-roadman}:${POSTGRES_PASSWORD:-roadman_dev}@postgres:5432/${POSTGRES_DB:-roadman}
       REDIS_URL: redis://redis:6379/0
       AMAP_WEBSERVICE_KEY: ${AMAP_WEBSERVICE_KEY:-}
       OPENTRIPMAP_API_KEY: ${OPENTRIPMAP_API_KEY:-}
@@ -45,14 +45,16 @@ services:
       NO_PROXY: ${ROADMAN_NO_PROXY:-localhost,127.0.0.1,postgres,redis}
       NODE_USE_ENV_PROXY: "1"
       ENABLE_ROUTE_ELEVATION: "true"
-      LOAD_LOCAL_SKILL_CREDENTIALS: "true"
-      CORS_ORIGINS: http://localhost:8080
+      LOAD_LOCAL_SKILL_CREDENTIALS: "false"
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080}
       UPLOAD_DIR: /app/data/uploads
       FILE_RETENTION_DAYS: ${FILE_RETENTION_DAYS:-30}
+    ports:
+      # Expose the API on loopback for local tooling and Playwright. The
+      # frontend still reaches it internally through the Docker network.
+      - "127.0.0.1:8000:8000"
     volumes:
       - roadman_uploads:/app/data/uploads
-      - ./Skills/amap-lbs/apipkey.txt:/Skills/amap-lbs/apipkey.txt:ro
-      - ./Skills/opentripmap/apikey.txt:/Skills/opentripmap/apikey.txt:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -71,7 +73,7 @@ services:
     command: ["arq", "app.workers.main.WorkerSettings"]
     environment:
       APP_ENV: docker
-      DATABASE_URL: postgresql+asyncpg://roadman:roadman_dev@postgres:5432/roadman
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-roadman}:${POSTGRES_PASSWORD:-roadman_dev}@postgres:5432/${POSTGRES_DB:-roadman}
       REDIS_URL: redis://redis:6379/0
       AMAP_WEBSERVICE_KEY: ${AMAP_WEBSERVICE_KEY:-}
       OPENTRIPMAP_API_KEY: ${OPENTRIPMAP_API_KEY:-}
@@ -83,13 +85,11 @@ services:
       NO_PROXY: ${ROADMAN_NO_PROXY:-localhost,127.0.0.1,postgres,redis}
       NODE_USE_ENV_PROXY: "1"
       ENABLE_ROUTE_ELEVATION: "true"
-      LOAD_LOCAL_SKILL_CREDENTIALS: "true"
+      LOAD_LOCAL_SKILL_CREDENTIALS: "false"
       UPLOAD_DIR: /app/data/uploads
       FILE_RETENTION_DAYS: ${FILE_RETENTION_DAYS:-30}
     volumes:
       - roadman_uploads:/app/data/uploads
-      - ./Skills/amap-lbs/apipkey.txt:/Skills/amap-lbs/apipkey.txt:ro
-      - ./Skills/opentripmap/apikey.txt:/Skills/opentripmap/apikey.txt:ro
     depends_on:
       backend:
         condition: service_healthy
@@ -102,6 +102,13 @@ services:
     build:
       context: .
       dockerfile: frontend/Dockerfile
+      args:
+        VITE_AMAP_JSAPI_KEY: ${VITE_AMAP_JSAPI_KEY:-}
+        VITE_AMAP_SECURITY_JS_CODE: ${VITE_AMAP_SECURITY_JS_CODE:-}
+        VITE_AMAP_SERVICE_HOST: ${VITE_AMAP_SERVICE_HOST:-}
+        HTTP_PROXY: ${ROADMAN_HTTP_PROXY:-}
+        HTTPS_PROXY: ${ROADMAN_HTTP_PROXY:-}
+        NO_PROXY: ${ROADMAN_NO_PROXY:-localhost,127.0.0.1}
     ports:
       # Bind the unified web entrypoint on every host interface so other
       # devices on the same LAN can open http://<host-ip>:8080.

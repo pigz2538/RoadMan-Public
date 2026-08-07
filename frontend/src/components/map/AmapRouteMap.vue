@@ -1,8 +1,6 @@
 <script setup lang="ts">
 import AMapLoader from '@amap/amap-jsapi-loader'
 import { computed, nextTick, onBeforeUnmount, onMounted, shallowRef, watch } from 'vue'
-import localAmapKey from '../../../../Skills/amap-jsapi/apikey.txt?raw'
-import localSecurityCode from '../../../../Skills/amap-jsapi/secretkey.txt?raw'
 import type { DayPlan } from '../../types/trip'
 import MockRouteMap from './MockRouteMap.vue'
 
@@ -28,8 +26,10 @@ const loading = shallowRef(true)
 const routeLoading = shallowRef(false)
 const routeUnavailable = shallowRef(false)
 const failed = shallowRef(false)
-const amapKey = (import.meta.env.VITE_AMAP_JSAPI_KEY || localAmapKey).trim()
-const securityCode = (import.meta.env.VITE_AMAP_SECURITY_JS_CODE || localSecurityCode).trim()
+// Browser credentials must be supplied at build time. Never import local key
+// files here: Vite would embed their contents into the public JavaScript bundle.
+const amapKey = (import.meta.env.VITE_AMAP_JSAPI_KEY || '').trim()
+const securityCode = (import.meta.env.VITE_AMAP_SECURITY_JS_CODE || '').trim()
 const serviceHost = (import.meta.env.VITE_AMAP_SERVICE_HOST || '').trim()
 const hasCredentials = computed(() => Boolean(amapKey))
 

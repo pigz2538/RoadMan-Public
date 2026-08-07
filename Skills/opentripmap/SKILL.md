@@ -20,7 +20,7 @@ metadata:
 |---|---|
 | Base URL | `https://api.opentripmap.com/0.1` |
 | 认证方式 | URL 参数 `?apikey=<KEY>` |
-| API Key 文件 | `apikey.txt`（与本 SKILL.md 同目录） |
+| API Key | 环境变量 `OPENTRIPMAP_API_KEY` |
 | 支持语言 | `en`（英语）、`ru`（俄语），路径参数 `{lang}` |
 | 输出格式 | `json` / `geojson`（默认）/ `count`（仅返回数量） |
 | 类目层级 | https://dev.opentripmap.org/catalog |
@@ -200,7 +200,7 @@ metadata:
 ### curl
 
 ```bash
-APIKEY=$(cat apikey.txt)
+APIKEY="${OPENTRIPMAP_API_KEY:?set OPENTRIPMAP_API_KEY first}"
 
 # 1. 查询地名坐标
 curl "https://api.opentripmap.com/0.1/en/places/geoname?name=London&apikey=$APIKEY"
