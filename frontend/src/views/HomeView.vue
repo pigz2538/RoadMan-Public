@@ -20,7 +20,9 @@ import {
   listVehicles,
   updateVehicle,
   type Vehicle,
+  type VehicleCatalogItem,
   type VehicleInput,
+  searchVehicleCatalog,
 } from '../api/vehicles'
 import type { Trip } from '../types/trip'
 
@@ -43,6 +45,10 @@ const vehicleBusy = ref(false)
 const vehicleError = ref('')
 const vehicleFormOpen = ref(false)
 const vehicleEditingId = ref<string | null>(null)
+const vehicleCatalogQuery = ref('')
+const vehicleCatalogResults = ref<VehicleCatalogItem[]>([])
+const vehicleCatalogBusy = ref(false)
+const vehicleCatalogError = ref('')
 const VEHICLE_STORAGE_KEY = 'roadman:current-vehicle-id'
 const modelEnabled = ref(true)
 const modelLoaded = ref(false)
@@ -154,6 +160,7 @@ function beginAddVehicle() {
   vehicleEditingId.value = null
   vehicleDraft.value = newVehicleDraft()
   vehicleError.value = ''
+  resetVehicleCatalog()
   vehicleFormOpen.value = true
 }
 
@@ -165,13 +172,77 @@ function beginEditVehicle(vehicle: Vehicle) {
     ? { ...vehicle, id: undefined }
     : { ...vehicle }
   vehicleError.value = ''
+  resetVehicleCatalog()
   vehicleFormOpen.value = true
+}
+
+function resetVehicleCatalog() {
+  vehicleCatalogQuery.value = ''
+  vehicleCatalogResults.value = []
+  vehicleCatalogBusy.value = false
+  vehicleCatalogError.value = ''
 }
 
 function cancelVehicleForm() {
   vehicleFormOpen.value = false
   vehicleEditingId.value = null
   vehicleDraft.value = newVehicleDraft()
+  resetVehicleCatalog()
+}
+
+async function searchVehicleModels() {
+  const query = vehicleCatalogQuery.value.trim()
+  if (query.length < 2) {
+    vehicleCatalogError.value = '请输入至少两个字符，例如“特斯拉 Model 3”或“比亚迪”'
+    vehicleCatalogResults.value = []
+    return
+  }
+  if (vehicleCatalogBusy.value) return
+  vehicleCatalogBusy.value = true
+  vehicleCatalogError.value = ''
+  try {
+    const result = await searchVehicleCatalog(query)
+    vehicleCatalogResults.value = result.items
+    if (!result.items.length) vehicleCatalogError.value = '没有找到具体车型，请换一个品牌、车系或车型关键词'
+  } catch (error) {
+    vehicleCatalogResults.value = []
+    vehicleCatalogError.value = error instanceof Error ? error.message : '车型数据库暂不可用'
+  } finally {
+    vehicleCatalogBusy.value = false
+  }
+}
+
+function applyVehicleCatalogItem(item: VehicleCatalogItem) {
+  const existing = vehicleDraft.value
+  const editing = Boolean(vehicleEditingId.value)
+  vehicleDraft.value = {
+    ...existing,
+    brand: item.brand,
+    series: item.series,
+    model: item.model,
+    year: item.year ?? undefined,
+    power_type: item.power_type,
+    // The catalog does not promise trim-specific technical specs. Preserve
+    // verified values while editing; a new vehicle leaves them blank so the
+    // user cannot mistake a demo SUV's values for this model's values.
+    rated_range_km: item.rated_range_km ?? (editing ? existing.rated_range_km : undefined),
+    battery_kwh: item.battery_kwh ?? (editing ? existing.battery_kwh : undefined),
+    consumption_per_100km: item.consumption_per_100km ?? (editing ? existing.consumption_per_100km : undefined),
+    max_charge_kw: item.max_charge_kw ?? (editing ? existing.max_charge_kw : undefined),
+    height_m: item.height_m ?? (editing ? existing.height_m : undefined),
+    width_m: item.width_m ?? (editing ? existing.width_m : undefined),
+    seats: item.seats ?? existing.seats ?? 5,
+    current_energy_percent: item.current_energy_percent ?? existing.current_energy_percent ?? 80,
+  }
+  vehicleCatalogError.value = item.specs_missing?.length
+    ? `已填入 ${item.brand} ${item.model}。${item.specs_missing.join('、')}需按具体配置确认。`
+    : `已填入 ${item.brand} ${item.model}，请确认车辆参数后保存。`
+}
+
+async function addVehicleFromCatalog(item: VehicleCatalogItem) {
+  if (vehicleBusy.value) return
+  applyVehicleCatalogItem(item)
+  await saveVehicle()
 }
 
 async function saveVehicle() {
@@ -791,6 +862,44 @@ function activate(label: string) {
           </template>
           <form v-if="vehicleFormOpen" class="vehicle-form" @submit.prevent="saveVehicle">
             <strong>{{ vehicleEditingId ? '编辑车型' : '添加车型' }}</strong>
+            <section class="vehicle-catalog" aria-label="车型数据库搜索">
+              <div class="vehicle-catalog-head">
+                <strong>一键搜索具体车型</strong>
+                <small>CarInfo Skill · 汽车品牌/车系/年款数据库</small>
+              </div>
+              <div class="vehicle-catalog-search-row">
+                <input
+                  v-model="vehicleCatalogQuery"
+                  type="search"
+                  placeholder="搜索品牌、车系或具体车型，例如 特斯拉 Model 3"
+                  aria-label="搜索具体车型"
+                  @keydown.enter.prevent="searchVehicleModels"
+                >
+                <button type="button" :disabled="vehicleCatalogBusy" @click="searchVehicleModels">
+                  {{ vehicleCatalogBusy ? '查询中…' : '搜索' }}
+                </button>
+              </div>
+              <small class="vehicle-catalog-note">选择结果会自动填入品牌、车系、动力和年款；续航、能耗等配置以你的具体版本为准。</small>
+              <div v-if="vehicleCatalogResults.length" class="vehicle-catalog-results">
+                <div
+                  v-for="item in vehicleCatalogResults"
+                  :key="item.id"
+                  class="vehicle-catalog-result"
+                >
+                  <button type="button" class="vehicle-catalog-result-main" @click="applyVehicleCatalogItem(item)">
+                    <span>
+                    <strong>{{ item.brand }} · {{ item.series }}</strong>
+                    <small>{{ item.model }} · {{ item.year || '年款待核实' }} · {{ item.state_label || '状态待核实' }}</small>
+                    </span>
+                    <em>填入</em>
+                  </button>
+                  <button type="button" class="vehicle-catalog-result-add" :disabled="vehicleBusy" @click="addVehicleFromCatalog(item)">
+                    {{ vehicleEditingId ? '更新' : '直接添加' }}
+                  </button>
+                </div>
+              </div>
+              <small v-if="vehicleCatalogError" class="vehicle-catalog-error">{{ vehicleCatalogError }}</small>
+            </section>
             <div class="vehicle-form-grid">
               <input v-model="vehicleDraft.brand" required placeholder="品牌" aria-label="品牌">
               <input v-model="vehicleDraft.series" required placeholder="车系" aria-label="车系">

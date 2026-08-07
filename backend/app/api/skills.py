@@ -87,7 +87,11 @@ async def carinfo_search(
     context: SkillContext = Depends(context_from_request),
     registry: SkillRegistry = Depends(get_registry),
 ):
-    return await registry.execute("carinfo.demo", payload, context)
+    # Keep the deterministic demo response for legacy planning calls that
+    # filter only by power type. A user-entered query opts into the real
+    # carinfo Skill catalog, which returns concrete brand/series/model records.
+    adapter = "carinfo.catalog" if str(payload.get("query") or "").strip() else "carinfo.demo"
+    return await registry.execute(adapter, payload, context)
 
 
 @router.post("/flyai/poi")

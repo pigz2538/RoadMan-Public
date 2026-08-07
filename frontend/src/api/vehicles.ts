@@ -27,6 +27,37 @@ export interface Vehicle {
 export type VehicleInput = Omit<Vehicle, 'id'> & { id?: string }
 export type VehicleUpdate = Partial<Omit<Vehicle, 'id'>>
 
+/** A concrete brand/series/model record returned by the carinfo Skill. */
+export interface VehicleCatalogItem {
+  id: string
+  source_id: string
+  brand: string
+  series: string
+  model: string
+  year?: number | null
+  power_type: VehiclePowerType
+  rated_range_km?: number | null
+  battery_kwh?: number | null
+  consumption_per_100km?: number | null
+  max_charge_kw?: number | null
+  height_m?: number | null
+  width_m?: number | null
+  seats?: number | null
+  current_energy_percent?: number | null
+  price_min_cny?: number | null
+  price_max_cny?: number | null
+  state?: string
+  state_label?: string
+  source_url?: string
+  specs_missing?: string[]
+}
+
+export interface VehicleCatalogSearch {
+  query: string
+  count: number
+  items: VehicleCatalogItem[]
+}
+
 async function json<T>(response: Response): Promise<T> {
   if (!response.ok) {
     const payload = await response.json().catch(() => null)
@@ -61,4 +92,26 @@ export async function deleteVehicle(vehicleId: string): Promise<void> {
     method: 'DELETE',
     cache: 'no-store',
   }))
+}
+
+interface CarInfoSkillResponse {
+  success: boolean
+  data?: VehicleCatalogSearch | null
+  warnings?: string[]
+}
+
+export async function searchVehicleCatalog(
+  query: string,
+  limit = 12,
+): Promise<VehicleCatalogSearch> {
+  const response = await fetch(`${API_BASE}/api/v1/skills/carinfo/search`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query, limit }),
+  })
+  const payload = await json<CarInfoSkillResponse>(response)
+  if (!payload.success || !payload.data) {
+    throw new Error(payload.warnings?.[0] || '车型数据库暂不可用，请稍后重试')
+  }
+  return payload.data
 }
