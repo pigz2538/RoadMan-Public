@@ -696,11 +696,40 @@ def _ensure_meals(
             occupied=occupied,
             minimum_minutes=30,
         )
+        in_transit = False
         if not slot:
-            # A full-day transfer may leave no mathematically free slot. Do
-            # not fabricate an overlapping restaurant; the verifier will
-            # surface the constrained day for adjustment.
-            continue
+            # A long train/flight/ferry or service-stop stage can legitimately
+            # contain lunch/dinner. Keep that meal visible as an onboard or
+            # waypoint block instead of failing the whole day merely because
+            # the movement stage occupies the clock window. The verifier
+            # treats this explicit marker as part of the movement, not as an
+            # overlapping second route.
+            transit_stage = next(
+                (
+                    stage
+                    for stage in stages
+                    if stage.get("planned_start")
+                    and stage.get("planned_end")
+                    and datetime.fromisoformat(stage["planned_start"]) <= datetime.combine(
+                        day_date,
+                        preferred_time,
+                        tzinfo=SHANGHAI,
+                    ) < datetime.fromisoformat(stage["planned_end"])
+                    and stage.get("mode") in {"driving", "train", "flight", "ferry", "transit"}
+                ),
+                None,
+            )
+            if transit_stage is None:
+                # A full-day local schedule may still leave no safe gap. Keep
+                # the blocker visible rather than inventing an impossible
+                # time outside the user's day.
+                continue
+            transit_start = datetime.fromisoformat(transit_stage["planned_start"])
+            transit_end = datetime.fromisoformat(transit_stage["planned_end"])
+            preferred_at = datetime.combine(day_date, preferred_time, tzinfo=SHANGHAI)
+            transit_at = max(transit_start, min(preferred_at, transit_end - timedelta(minutes=45)))
+            slot = (transit_at, 45)
+            in_transit = True
         start_at, duration = slot
         activity = _activity(
             day=day,
@@ -714,13 +743,17 @@ def _ensure_meals(
             opening_text="营业时间与排队情况以当天为准",
             ticket_or_price=candidate.get("ticket_or_price") if candidate else None,
             user_note=(
-                f"{label}；{candidate.get('user_note') or '出发前确认餐厅营业状态'}"
-                if candidate
-                else f"{label}；未返回可靠餐饮候选，可在附近灵活选择"
+                (
+                    f"{label}；{candidate.get('user_note') or '出发前确认餐厅营业状态'}"
+                    if candidate
+                    else f"{label}；未返回可靠餐饮候选，可在附近灵活选择"
+                )
+                + ("；途中用餐（不新增路线）" if in_transit else "")
             ),
             description=candidate.get("description") if candidate else None,
             image_url=candidate.get("image_url") if candidate else None,
             detail_url=candidate.get("detail_url") if candidate else None,
+            in_transit=in_transit,
         )
         activities.append(activity)
         occupied.append((start_at, start_at + timedelta(minutes=duration)))
@@ -1022,7 +1055,9 @@ def verify_tourism_plan(
                         ),
                     }
                 )
-            if activity.get("type") in {"meal", "attraction", "hotel"}:
+            if activity.get("type") in {"meal", "attraction", "hotel"} and not (
+                activity.get("type") == "meal" and activity.get("in_transit") is True
+            ):
                 ranges.append((start_at, end_at, activity["place"]["name"]))
         for index, (start_at, end_at, name) in enumerate(sorted(ranges)):
             for other_start, _, other_name in sorted(ranges)[index + 1 :]:
@@ -1055,6 +1090,7 @@ def _activity(
     description: str | None = None,
     image_url: str | None = None,
     detail_url: str | None = None,
+    in_transit: bool = False,
 ) -> dict[str, Any]:
     end_at = start_at + timedelta(minutes=duration_minutes)
     checks = activity_checks(
@@ -1089,5 +1125,6 @@ def _activity(
         "description": description,
         "image_url": image_url,
         "detail_url": detail_url,
+        "in_transit": in_transit,
         "warnings": [],
     }

@@ -17,7 +17,7 @@ Trip
 - **Trip**：一次完整行程，保存原始自然语言、结构化需求、状态、日期、同行人数和 canonical 日程。
 - **DayPlan**：一个自然日，含日期、阶段和活动时间轴；`items` 的顺序是展示顺序。
 - **MovementStage**：两个地点之间的真实移动，保存起终点、交通方式、路线 geometry、距离、时长、天气、费用、风险和来源。景点游览本身不放在 Stage 中。
-- **Activity**：景点、餐饮、酒店、充电、加油、停车、服务区、休息等非移动安排，带 `planned_start/end`、地点、来源和可选图片/详情链接。
+- **Activity**：景点、餐饮、酒店、充电、加油、停车、服务区、休息等非移动安排，带 `planned_start/end`、地点、来源和可选图片/详情链接；长途火车、飞机、轮渡或服务区阶段中的餐食可标记 `in_transit=true`，表示它属于途中用餐而不是第二条冲突路线。
 - **RouteSegment**：Stage 的路线细节，可保存 steps、transfers、`elevation_gain_m` 和 provider 原始摘要。
 - **PlanPatch**：编辑预览，包含原值、建议值、影响范围、时间/费用变化和是否需要重规划；确认前不写 Trip。
 - **SourceRecord**：所有外部事实的来源、provider、URL、抓取时间和是否估算。

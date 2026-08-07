@@ -445,6 +445,37 @@ def test_tourism_scheduler_fills_meals_without_routes_and_rotates_attractions():
     assert first_attractions.isdisjoint(second_attractions)
 
 
+def test_tourism_scheduler_keeps_meals_inside_long_transfer_stage():
+    days = [{
+        "id": "day_transfer",
+        "day_index": 1,
+        "date": "2026-08-02",
+        "title": "第 1 天",
+        "items": [],
+        "activities": [],
+        "stages": [{
+            "id": "stage_train",
+            "sequence": 0,
+            "title": "城市出发",
+            "mode": "train",
+            "origin": {"name": "武汉"},
+            "destination": {"name": "北京"},
+            "planned_start": "2026-08-02T08:00:00+08:00",
+            "planned_end": "2026-08-02T22:00:00+08:00",
+        }],
+    }]
+
+    scheduled = schedule_tourism_activities(
+        days,
+        {"attractions": [], "hotels": [], "meals": []},
+    )
+    meals = [item for item in scheduled[0]["activities"] if item["type"] == "meal"]
+
+    assert len(meals) == 3
+    assert sum(item["in_transit"] for item in meals) == 2
+    assert verify_tourism_plan(scheduled, {"attractions": [], "hotels": [], "meals": []}) == []
+
+
 def test_tourism_scheduler_removes_repeated_agent_attraction_activities():
     repeated = lambda day_id, date_value: {
         "id": day_id,

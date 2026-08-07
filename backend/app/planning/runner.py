@@ -51,6 +51,7 @@ async def run_planning(
                 ),
                 "clarification_round": saved.get("clarification_round", 0),
                 "clarification_answers": saved.get("clarification_answers", []),
+                "repair_attempts": 0,
                 "repair_attempted": False,
             }
             if trip.selected_vehicle_id:
@@ -79,7 +80,15 @@ async def run_planning(
                 progress_callback=_job_aware_progress(job_id),
             )
             result = dict(state)
-            async for update in graph.astream(state, stream_mode="updates"):
+            # A verification failure can trigger several internal review
+            # passes. Keep the graph recursion budget above the normal path
+            # so an automatic repair loop never surfaces as an execution
+            # failure merely because it needed another pass.
+            async for update in graph.astream(
+                state,
+                stream_mode="updates",
+                config={"recursion_limit": 80},
+            ):
                 if not isinstance(update, dict):
                     continue
                 updated_nodes: list[str] = []

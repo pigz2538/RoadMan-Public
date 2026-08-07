@@ -302,6 +302,10 @@ class Activity(BaseModel):
     description: str | None = None
     image_url: str | None = None
     detail_url: str | None = None
+    # Meal blocks may intentionally sit inside a train/flight/ferry or a
+    # service-stop movement stage. They are not a second conflicting route;
+    # they represent onboard/waypoint dining during that movement.
+    in_transit: bool = False
     ticket_or_price: MoneyRange | None = None
     opening_hours: OpeningHours | None = None
     reservation_status: Literal["required", "recommended", "not_required", "unknown"] = "unknown"

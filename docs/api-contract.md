@@ -62,6 +62,8 @@
 
 所有导出在 Trip 不是 `completed` 时返回 `409 PLANNING_NOT_COMPLETED`。SSE 事件只传递可展示的阶段、进度和状态，不包含模型私有推理或 provider key。
 
+最终验证发现可修复问题时，规划图会自动执行最多 4 轮“行程编排 → 每日复核 → 验证”闭环；SSE 会逐轮展示自动重排进度。`verification_result.auto_repair_exhausted=true` 仅表示自动修复轮次耗尽，前端此时才显示人工调整入口。
+
 ## 编辑、候选和版本
 
 | 方法 | 路径 | 用途 |

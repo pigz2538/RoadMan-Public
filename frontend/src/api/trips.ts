@@ -13,6 +13,8 @@ export interface PlanningSnapshot {
   verification_result?: {
     passed: boolean
     issues: Array<{ code: string; severity?: 'blocker' | 'warning' | string; description: string }>
+    auto_repair_attempts?: number
+    auto_repair_exhausted?: boolean
   }
   special_event_research?: SpecialEventResearch[]
   plan_markdown?: string

@@ -20,6 +20,9 @@ class RoadManState(TypedDict, total=False):
     day_plans: list[dict[str, Any]]
     warnings: list[dict[str, Any]]
     verification_result: dict[str, Any] | None
+    # Number of automatic review/repair passes already completed. The old
+    # boolean is kept for snapshots written by earlier versions.
+    repair_attempts: int
     repair_attempted: bool
     progress: dict[str, Any]
     sources: list[dict[str, Any]]

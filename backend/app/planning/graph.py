@@ -53,6 +53,7 @@ from .tourism import review_daily_schedule, schedule_tourism_activities, verify_
 
 ProgressCallback = Callable[[str, str, str, int, str, str | None], Awaitable[None]]
 SHANGHAI = ZoneInfo("Asia/Shanghai")
+MAX_AUTO_REPAIR_ATTEMPTS = 4
 # A return-time phrase is often a preference rather than a minute-precise
 # appointment. Keep a half-day planning window before treating the itinerary
 # as impossible; a few minutes of drift should not block completion.
@@ -2296,33 +2297,66 @@ def build_planning_graph(
         # constraint really blocks completion, the UI should explain that
         # constraint instead of showing the first warning as the failure.
         issues.sort(key=lambda item: 0 if item.get("severity") == "blocker" else 1)
+        repair_attempts = int(state.get("repair_attempts") or 0)
         return {
             "day_plans": normalized_days,
             "verification_result": {
                 "passed": not any(item["severity"] == "blocker" for item in issues),
                 "issues": issues,
+                "auto_repair_attempts": repair_attempts,
+                "auto_repair_exhausted": bool(issues)
+                and repair_attempts >= MAX_AUTO_REPAIR_ATTEMPTS,
             },
             "progress": {"node": "verify_plan", "value": 95},
         }
 
     async def repair_plan(state: RoadManState) -> dict[str, Any]:
+        previous_attempts = int(state.get("repair_attempts") or 0)
+        attempt = previous_attempts + 1
+        issue_codes = [
+            str(item.get("code"))
+            for item in (state.get("verification_result") or {}).get("issues", [])
+            if item.get("severity") == "blocker"
+        ]
         await emit(
             state,
             "repair_plan_refined",
-            "路线复核完成，正在把修复后的阶段重新送入校验",
-            95,
+            f"复核发现可修复问题，Agent 协作第 {attempt}/{MAX_AUTO_REPAIR_ATTEMPTS} 次自动重排",
+            min(95 + attempt, 99),
             event="progress",
         )
-        await emit(state, "repair_plan", "正在执行一次确定性自动修复", 96)
-        repaired_days = _repair_activity_stage_overlaps(state.get("day_plans", []))
+        await emit(
+            state,
+            "repair_plan",
+            "正在重排三餐、停留、接驳与驾驶休息，并重新复核",
+            min(96 + attempt, 99),
+        )
+        # Re-run the itinerary/review agents instead of sending the traveller
+        # a failure dialog for a defect the system can repair itself. The
+        # scheduling pass is idempotent and rebuilds meals/hotels/attractions
+        # from curated candidates; the overlap pass normalizes provider times.
+        repaired_days = schedule_tourism_activities(
+            state.get("day_plans", []),
+            state.get("tourism_candidates", {}),
+        )
+        repaired_days, review_notes = review_daily_schedule(
+            repaired_days,
+            state.get("tourism_candidates", {}),
+        )
+        repaired_days = _repair_activity_stage_overlaps(repaired_days)
         return {
             "day_plans": repaired_days,
+            "repair_attempts": attempt,
             "repair_attempted": True,
             "warnings": [
                 *state.get("warnings", []),
+                *review_notes,
                 {
                     "code": "AUTO_REPAIR_ATTEMPTED",
-                    "message": "已执行一次计划结构修复",
+                    "message": (
+                        f"已完成第 {attempt}/{MAX_AUTO_REPAIR_ATTEMPTS} 次自动复核"
+                        + (f"（问题：{'、'.join(issue_codes[:3])}）" if issue_codes else "")
+                    ),
                     "severity": "warning",
                 },
             ],
@@ -2410,7 +2444,8 @@ def build_planning_graph(
 
     def after_verification(state: RoadManState) -> Literal["repair", "render"]:
         has_blocker = not state.get("verification_result", {}).get("passed", False)
-        return "repair" if has_blocker and not state.get("repair_attempted") else "render"
+        attempts = int(state.get("repair_attempts") or 0)
+        return "repair" if has_blocker and attempts < MAX_AUTO_REPAIR_ATTEMPTS else "render"
 
     builder = StateGraph(RoadManState)
     builder.add_node("load_context", load_context)
@@ -3523,7 +3558,17 @@ def _repair_activity_stage_overlaps(day_plans: list[dict[str, Any]]) -> list[dic
         # a provider returns overlapping timestamps.  Durations are retained,
         # so meal/attraction/hotel blocks and movement stages remain usable.
         timeline = sorted(
-            [*stages, *activities],
+            [
+                *stages,
+                *[
+                    activity
+                    for activity in activities
+                    if not (
+                        activity.get("type") == "meal"
+                        and activity.get("in_transit") is True
+                    )
+                ],
+            ],
             key=lambda item: (item.get("planned_start", ""), item.get("sequence", 0)),
         )
         previous_end: datetime | None = None
