@@ -156,7 +156,7 @@ def test_noncritical_service_and_weather_failures_degrade_without_blocking():
     assert enriched[0]["stages"][0]["risk_level"] == "moderate"
     assert any(item["code"] == "WEATHER_DATA_DEGRADED" for item in enriched[0]["stages"][0]["warnings"])
     assert issues and all(item["severity"] == "warning" for item in issues)
-    assert any("天气数据暂缺，已继续规划" in item["description"] for item in issues)
+    assert any("当前天气数据暂不可用，已按基础风险继续规划" in item["description"] for item in issues)
 
 
 def test_long_drive_is_split_into_rest_segments_and_day_has_three_meals():

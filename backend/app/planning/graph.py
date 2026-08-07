@@ -1046,6 +1046,8 @@ def build_planning_graph(
                         },
                         "detail_url": item.get("detail_url"),
                         "image_url": item.get("image_url"),
+                        "ticket_name": item.get("ticket_name"),
+                        "ticket_date": item.get("ticket_date"),
                         "source_records": [
                             {
                                 "provider": "FlyAI / 飞猪",
@@ -1760,47 +1762,66 @@ def build_planning_graph(
             tool="open_meteo.forecast",
         )
         plans = state.get("day_plans", [])
-        weather_cache: dict[tuple[float, float], dict[str, Any] | None] = {}
+        weather_cache: dict[tuple[float, float, int], dict[str, Any] | None] = {}
         weather_sources: list[dict[str, Any]] = []
+        now = datetime.now(SHANGHAI)
         for day in plans:
             for stage in day.get("stages", []):
                 coordinates = stage["destination"].get("coordinates")
                 if not coordinates:
                     continue
-                key = (coordinates["longitude"], coordinates["latitude"])
+                planned = datetime.fromisoformat(stage["planned_end"])
+                hours_until = (planned - now).total_seconds() / 3600
+                # Open-Meteo's hourly forecast is only treated as actionable
+                # for the next 24 hours.  For a later departure we still show
+                # a useful, honest snapshot of today's weather instead of
+                # fabricating a future hourly value or asking the user to
+                # re-check an estimate.
+                current_day_reference = hours_until > 24
+                horizon = max(1, (planned.date() - now.date()).days + 1)
+                forecast_days = 1 if current_day_reference else min(16, horizon)
+                key = (coordinates["longitude"], coordinates["latitude"], forecast_days)
                 if key not in weather_cache:
-                    planned = datetime.fromisoformat(stage["planned_end"])
-                    horizon = (planned.date() - date.today()).days + 1
-                    if horizon < 1 or horizon > 16:
-                        weather_cache[key] = None
-                    else:
-                        result = await registry.execute(
-                            "open_meteo.forecast",
-                            {
-                                "latitude": coordinates["latitude"],
-                                "longitude": coordinates["longitude"],
-                                "forecast_days": max(1, horizon),
-                                "timezone": "Asia/Shanghai",
-                            },
-                            SkillContext(trip_id=state["trip_id"]),
-                        )
-                        weather_cache[key] = (
-                            result.data
-                            if result.success and isinstance(result.data, dict)
-                            else None
-                        )
-                        weather_sources.extend(
-                            item.model_dump(mode="json") for item in result.sources
-                        )
-                sample = _closest_weather_sample(
-                    weather_cache[key],
-                    datetime.fromisoformat(stage["planned_end"]),
-                )
+                    result = await registry.execute(
+                        "open_meteo.forecast",
+                        {
+                            "latitude": coordinates["latitude"],
+                            "longitude": coordinates["longitude"],
+                            "forecast_days": forecast_days,
+                            "timezone": "Asia/Shanghai",
+                        },
+                        SkillContext(trip_id=state["trip_id"]),
+                    )
+                    weather_cache[key] = (
+                        result.data
+                        if result.success and isinstance(result.data, dict)
+                        else None
+                    )
+                    weather_sources.extend(
+                        item.model_dump(mode="json") for item in result.sources
+                    )
+                sample = None
+                using_current_reference = False
+                if current_day_reference:
+                    sample = _current_weather_sample(weather_cache[key], now)
+                    using_current_reference = sample is not None
+                else:
+                    sample = _closest_weather_sample(weather_cache[key], planned)
+                    if sample is None:
+                        # A provider may return a partial hourly payload. Use
+                        # the current-day snapshot rather than displaying an
+                        # unusable “re-check later” placeholder.
+                        sample = _current_weather_sample(weather_cache[key], now)
+                        using_current_reference = sample is not None
                 if sample:
                     temperature = sample.get("temperature_c")
                     precipitation = sample.get("precipitation_probability")
+                    prefix = "当前天气参考" if using_current_reference else "预计抵达"
+                    precipitation_text = (
+                        f"{precipitation}%" if precipitation is not None else "暂无"
+                    )
                     stage["weather_summary"] = (
-                        f"预计抵达 {temperature}°C，降水概率 {precipitation}%"
+                        f"{prefix} {temperature}°C，降水概率 {precipitation_text}"
                     )
                     stage["weather_samples"] = [
                         {
@@ -1815,7 +1836,7 @@ def build_planning_graph(
                         }
                     ]
                 else:
-                    stage["weather_summary"] = "计划时间超出逐小时预报范围，请临近出发复核"
+                    stage["weather_summary"] = "当前天气数据暂不可用，已按基础风险继续规划"
         await emit(
             state,
             "sample_weather",
@@ -3575,3 +3596,58 @@ def _closest_weather_sample(
     if not best or best[0] > 2 * 60 * 60:
         return None
     return best[1]
+
+
+def _current_weather_sample(
+    weather: dict[str, Any] | None,
+    now: datetime,
+) -> dict[str, Any] | None:
+    """Return a current-day weather snapshot for plans more than 24h away.
+
+    The planner must not present a far-future hourly value as if it were a
+    reliable forecast. Open-Meteo still returns a ``current`` object and often
+    today's hourly precipitation/visibility, so combine the nearest same-day
+    hourly sample with the current fields. This keeps the itinerary useful
+    without presenting an outdated recheck message as a forecast.
+    """
+    if not weather:
+        return None
+    current = weather.get("current")
+    if not isinstance(current, dict):
+        current = {}
+    best: tuple[float, dict[str, Any]] | None = None
+    for sample in weather.get("hourly_samples", []):
+        if not isinstance(sample, dict):
+            continue
+        try:
+            sampled_at = datetime.fromisoformat(str(sample["sampled_at"]))
+            if sampled_at.tzinfo is None:
+                sampled_at = sampled_at.replace(tzinfo=SHANGHAI)
+        except (KeyError, TypeError, ValueError):
+            continue
+        if sampled_at.astimezone(SHANGHAI).date() != now.astimezone(SHANGHAI).date():
+            continue
+        delta = abs((sampled_at - now).total_seconds())
+        if best is None or delta < best[0]:
+            best = (delta, sample)
+    sample = dict(best[1]) if best else {}
+    sampled_at = sample.get("sampled_at") or current.get("time")
+    temperature = sample.get("temperature_c")
+    if temperature is None:
+        temperature = current.get("temperature_2m")
+    weather_code = sample.get("weather_code")
+    if weather_code is None:
+        weather_code = current.get("weather_code")
+    wind = sample.get("wind_speed_kmh")
+    if wind is None:
+        wind = current.get("wind_speed_10m")
+    if sampled_at is None and temperature is None and weather_code is None:
+        return None
+    return {
+        "sampled_at": sampled_at or now.isoformat(),
+        "temperature_c": temperature,
+        "precipitation_probability": sample.get("precipitation_probability"),
+        "weather_code": weather_code,
+        "visibility_m": sample.get("visibility_m"),
+        "wind_speed_kmh": wind,
+    }

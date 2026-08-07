@@ -245,7 +245,7 @@ def verify_deep_drive_plan(
                     _issue(
                         "WEATHER_DEGRADED",
                         "warning",
-                        f"{stage['title']} 天气数据暂缺，已继续规划，出发前复核",
+                        f"{stage['title']} 当前天气数据暂不可用，已按基础风险继续规划",
                     )
                 )
             start = datetime.fromisoformat(stage["planned_start"])
@@ -326,8 +326,8 @@ def _apply_weather_risk(
 ) -> None:
     samples = stage.get("weather_samples", [])
     if not samples:
-        warnings.append(_warning("WEATHER_DATA_DEGRADED", "逐时天气不可用，临近出发需复核", "warning", True))
-        tags.append("天气待复核")
+        warnings.append(_warning("WEATHER_DATA_DEGRADED", "当前天气数据暂不可用，已按基础风险继续规划", "warning", True))
+        tags.append("天气数据不足")
         return
     sample = samples[0]
     precipitation = sample.get("precipitation_probability")

@@ -169,9 +169,8 @@ async function routeWithFallback(
 }
 
 function stagePath(stage: NonNullable<typeof props.day>['stages'][number]): Promise<PlannedRoute> {
-  const start = stage.origin.coordinates
-  const end = stage.destination.coordinates
-  if (!start || !end) return Promise.resolve({ path: [], mode: 'direct', fallback: true })
+  const start = stagePlaceWithFallback(stage, 'origin').coordinates
+  const end = stagePlaceWithFallback(stage, 'destination').coordinates
   const persistedPath = stage.route_segments.flatMap((segment) =>
     segment.coordinates.map((point) => [point.longitude, point.latitude]),
   )
@@ -187,6 +186,7 @@ function stagePath(stage: NonNullable<typeof props.day>['stages'][number]): Prom
       fallback: persistedPath.length === 2 && stage.route_segments.every((segment) => segment.estimated),
     })
   }
+  if (!start || !end) return Promise.resolve({ path: [], mode: 'direct', fallback: true })
   const sameCity = stage.origin.city && stage.origin.city === stage.destination.city
     ? stage.origin.city
     : undefined
@@ -202,8 +202,45 @@ function stagePath(stage: NonNullable<typeof props.day>['stages'][number]): Prom
   )
 }
 
+type MapPlace = {
+  name: string
+  city?: string
+  coordinates?: { longitude: number; latitude: number }
+}
+
+function stagePlaceWithFallback(
+  stage: NonNullable<typeof props.day>['stages'][number],
+  endpoint: 'origin' | 'destination',
+): MapPlace {
+  const place = stage[endpoint]
+  if (place.coordinates) return place
+  const segments = stage.route_segments ?? []
+  const segment = endpoint === 'origin' ? segments[0] : segments.at(-1)
+  const points = segment?.coordinates ?? []
+  const point = endpoint === 'origin' ? points[0] : points.at(-1)
+  return point ? { ...place, coordinates: point } : place
+}
+
+function activityPlaceWithFallback(
+  activity: NonNullable<typeof props.day>['activities'][number],
+  coordinatesByName: Map<string, { longitude: number; latitude: number }>,
+): MapPlace {
+  if (activity.place.coordinates) return activity.place
+  const fallback = coordinatesByName.get(activity.place.name.trim().toLocaleLowerCase())
+  return fallback ? { ...activity.place, coordinates: fallback } : activity.place
+}
+
 function itineraryConnectors() {
   if (!props.day) return []
+  const coordinatesByName = new Map<string, { longitude: number; latitude: number }>()
+  for (const stage of props.day.stages) {
+    for (const endpoint of ['origin', 'destination'] as const) {
+      const place = stagePlaceWithFallback(stage, endpoint)
+      if (place.coordinates) {
+        coordinatesByName.set(place.name.trim().toLocaleLowerCase(), place.coordinates)
+      }
+    }
+  }
   type TimelinePoint = {
     kind: 'stage' | 'activity'
     id: string
@@ -218,7 +255,7 @@ function itineraryConnectors() {
       id: stage.id,
       name: stage.destination.name,
       city: stage.destination.city,
-      coordinates: stage.destination.coordinates,
+      coordinates: stagePlaceWithFallback(stage, 'destination').coordinates,
       plannedStart: stage.planned_start,
     })),
     ...props.day.activities.map((activity) => ({
@@ -226,7 +263,7 @@ function itineraryConnectors() {
       id: activity.id,
       name: activity.place.name,
       city: activity.place.city,
-      coordinates: activity.place.coordinates,
+      coordinates: activityPlaceWithFallback(activity, coordinatesByName).coordinates,
       plannedStart: activity.planned_start || '',
     })),
   ].sort((left, right) => {
@@ -239,6 +276,7 @@ function itineraryConnectors() {
     end: { longitude: number; latitude: number }
     city?: string
     distanceKm: number
+    preferredMode: TravelMode
   }> = []
   for (let index = 1; index < timeline.length; index += 1) {
     const previous = timeline[index - 1]
@@ -271,6 +309,12 @@ function itineraryConnectors() {
       end: current.coordinates,
       city: previous.city === current.city ? current.city : undefined,
       distanceKm,
+      // A connector around an activity is a local transfer. Prefer walking
+      // first; routeWithFallback still tries riding/transit/driving when the
+      // map provider cannot return a pedestrian path.
+      preferredMode: previous.kind === 'activity' || current.kind === 'activity'
+        ? 'walking'
+        : 'driving',
     })
   }
   return pairs
@@ -292,6 +336,8 @@ async function renderRoutes() {
         connector.start,
         connector.end,
         connector.city,
+        [],
+        connector.preferredMode,
       ),
     })),
   )
@@ -318,8 +364,8 @@ async function renderRoutes() {
   for (const { stage, route } of plannedPaths) {
     const unavailable = route.mode === 'direct'
     if (unavailable && stage.distance_km > 35) continue
-    const start = stage.origin.coordinates
-    const end = stage.destination.coordinates
+    const start = stagePlaceWithFallback(stage, 'origin').coordinates
+    const end = stagePlaceWithFallback(stage, 'destination').coordinates
     const displayPath = unavailable && start && end && route.path.length < 2
       ? [[start.longitude, start.latitude], [end.longitude, end.latitude]]
       : route.path
@@ -364,32 +410,49 @@ async function renderRoutes() {
     routeOverlays.value.push({ stageId: connector.id, polyline })
   }
 
+  const coordinatesByName = new Map<string, { longitude: number; latitude: number }>()
+  for (const stage of props.day.stages) {
+    for (const endpoint of ['origin', 'destination'] as const) {
+      const place = stagePlaceWithFallback(stage, endpoint)
+      if (place.coordinates) {
+        coordinatesByName.set(place.name.trim().toLocaleLowerCase(), place.coordinates)
+      }
+    }
+  }
   const places = new Map<string, {
-    place: NonNullable<typeof props.day>['stages'][number]['origin']
+    place: MapPlace
     kind: MarkerKind
     activityId?: string
   }>()
   const firstStage = props.day.stages[0]
   const lastStage = props.day.stages.at(-1)
-  if (firstStage?.origin.coordinates) {
-    places.set(firstStage.origin.name, { place: firstStage.origin, kind: 'start' })
+  for (const stage of props.day.stages) {
+    const origin = stagePlaceWithFallback(stage, 'origin')
+    if (origin.coordinates) {
+      places.set(
+        `stage:${stage.id}:origin`,
+        { place: origin, kind: stage === firstStage ? 'start' : 'service' },
+      )
+    }
   }
-  for (const stage of props.day.stages.slice(0, -1)) {
-    if (stage.destination.coordinates && !places.has(stage.destination.name)) {
-      places.set(stage.destination.name, { place: stage.destination, kind: 'attraction' })
+  for (const stage of props.day.stages) {
+    const destination = stagePlaceWithFallback(stage, 'destination')
+    if (destination.coordinates) {
+      places.set(
+        `stage:${stage.id}:destination`,
+        { place: destination, kind: stage === lastStage ? 'end' : 'attraction' },
+      )
     }
   }
   for (const activity of props.day.activities) {
-    if (activity.place.coordinates) {
-      places.set(activity.place.name, {
-        place: activity.place,
+    const place = activityPlaceWithFallback(activity, coordinatesByName)
+    if (place.coordinates) {
+      places.set(`activity:${activity.id}`, {
+        place,
         kind: activityMarkerKind(activity.type),
         activityId: activity.id,
       })
     }
-  }
-  if (lastStage?.destination.coordinates) {
-    places.set(lastStage.destination.name, { place: lastStage.destination, kind: 'end' })
   }
   for (const [index, { place, kind, activityId }] of [...places.values()].entries()) {
     if (!place.coordinates) continue
@@ -398,7 +461,13 @@ async function renderRoutes() {
       position: [place.coordinates.longitude, place.coordinates.latitude],
       title: place.name,
       content: `<div class="${terminal ? 'amap-terminal-marker' : 'amap-poi-marker'} amap-marker-${kind}"><b>${markerIcon(kind)}</b><span>${escapeHtml(place.name)}</span></div>`,
-      offset: new AMap.value.Pixel(-16, -38),
+      // Several activities can intentionally share a hotel/restaurant
+      // coordinate. Stagger their labels so the map still exposes every
+      // planned item instead of letting the last marker hide the rest.
+      offset: new AMap.value.Pixel(
+        -16 + ((index % 3) - 1) * 14,
+        -38 - Math.floor(index / 3) * 10,
+      ),
       zIndex: 1000 + index,
     })
     if (activityId) marker.on('click', () => emit('selectActivity', activityId))
@@ -513,6 +582,36 @@ watch(
   () => [props.day?.id, props.activeStageId],
   () => void renderRoutes(),
 )
+const mapDataSignature = computed(() => {
+  const day = props.day
+  if (!day) return ''
+  const placeSignature = (place: MapPlace) => {
+    const coordinates = place.coordinates
+    return `${place.name}:${coordinates?.longitude ?? ''},${coordinates?.latitude ?? ''}`
+  }
+  return [
+    day.id,
+    ...day.stages.map((stage) => [
+      stage.id,
+      stage.mode,
+      stage.planned_start,
+      stage.planned_end,
+      placeSignature(stage.origin),
+      placeSignature(stage.destination),
+      stage.route_segments.map((segment) => segment.coordinates.length).join(','),
+      stage.route_segments.map((segment) => segment.coordinates.map((point) =>
+        `${point.longitude},${point.latitude}`).join(';')).join('|'),
+    ].join('|')),
+    ...day.activities.map((activity) => [
+      activity.id,
+      activity.type,
+      activity.planned_start,
+      activity.planned_end,
+      placeSignature(activity.place),
+    ].join('|')),
+  ].join('::')
+})
+watch(mapDataSignature, () => void renderRoutes())
 watch(() => props.pickEnabled, (enabled) => {
   if (!enabled && pickedMarker.value && map.value) {
     map.value.remove(pickedMarker.value)

@@ -121,6 +121,9 @@ def activity_checks(
     if not item.get("source_records"):
         risk_tags.append("来源不足")
         risk_note = risk_note or "没有可追溯的公开来源，建议出发前再次核验"
+    if activity_type == "attraction" and reservation == "unknown":
+        risk_tags.append("预约规则待核查")
+        risk_note = risk_note or "请查看景区官方预约、实名和分时入园规则"
     opening = item.get("opening_hours")
     if not isinstance(opening, dict) or opening.get("confirmed") is not True:
         risk_tags.append("营业/开放时间待确认")

@@ -10,6 +10,7 @@ from app.db import SessionLocal, create_tables
 from app.domain.models import SkillResult, TripCreate, TripRequest, VehicleProfile
 from app.planning.graph import (
     _ensure_coordinates,
+    _current_weather_sample,
     _movement_stage,
     _return_stage_start,
     build_planning_graph,
@@ -580,6 +581,38 @@ def fake_registry(*, with_flyai: bool = False) -> SkillRegistry:
     return registry
 
 
+def test_current_weather_snapshot_uses_today_for_far_future_plans():
+    now = datetime(2026, 8, 7, 10, 0, tzinfo=ZoneInfo("Asia/Shanghai"))
+    sample = _current_weather_sample(
+        {
+            "current": {
+                "time": "2026-08-07T10:00",
+                "temperature_2m": 31,
+                "weather_code": 2,
+                "wind_speed_10m": 8,
+            },
+            "hourly_samples": [
+                {
+                    "sampled_at": "2026-08-07T10:00",
+                    "temperature_c": 30,
+                    "precipitation_probability": 20,
+                    "visibility_m": 12000,
+                }
+            ],
+        },
+        now,
+    )
+
+    assert sample == {
+        "sampled_at": "2026-08-07T10:00",
+        "temperature_c": 30,
+        "precipitation_probability": 20,
+        "weather_code": 2,
+        "visibility_m": 12000,
+        "wind_speed_kmh": 8,
+    }
+
+
 @pytest.mark.asyncio
 async def test_graph_builds_two_day_markdown_plan():
     graph = build_planning_graph(
@@ -610,7 +643,10 @@ async def test_graph_builds_two_day_markdown_plan():
     stages = [stage for day in result["day_plans"] for stage in day["stages"]]
     assert len(stages) >= 7
     assert {stage["mode"] for stage in stages} >= {"driving", "transit", "walking"}
-    assert all(stage["weather_summary"].startswith("预计抵达") for stage in stages)
+    assert all(
+        stage["weather_summary"].startswith(("预计抵达", "当前天气参考"))
+        for stage in stages
+    )
     driving = [stage for stage in stages if stage["mode"] == "driving"]
     assert all(stage["energy_estimate"]["estimated"] for stage in driving)
     assert result["vehicle_profile"]["power_type"] == "electric"
