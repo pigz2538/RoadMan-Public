@@ -1,12 +1,12 @@
 # API 契约
 
-开发地址：`http://localhost:8000`；Docker 统一入口：`http://localhost:8080`；交互式 OpenAPI：`/docs`。
+后端 ASGI 入口为 `http://localhost:8000`（本地 uvicorn），Docker 统一 Web 入口为 `http://localhost:8080`，交互式 OpenAPI 文档在 `/docs`。前端在运行时仅与同一宿主下的 API 通信，生产走 Nginx 反代。
 
 ## 通用约定
 
-- JSON 字段使用 `snake_case`；日期为 `YYYY-MM-DD`，带时间的值使用 ISO 8601 和时区。
-- 所有响应带 `X-Request-ID` 和 `X-Trace-ID`；客户端可传入同名请求头。
-- 错误统一为：
+- JSON 字段使用 `snake_case`；日期为 `YYYY-MM-DD`，带时间的值使用 ISO 8601 并保留时区。
+- 每个请求都会携带 `X-Request-ID` 和 `X-Trace-ID` 响应头；客户端可在请求头中传入同名值以复用追踪 ID，未传时由中间件生成。
+- 错误统一形如：
 
 ```json
 {
@@ -19,17 +19,22 @@
 }
 ```
 
-- provider 未配置或暂时不可用返回结构化 `SkillResult`，不要把空结果伪装成实时数据。
+  `code` 为机器可读的错误码，`details` 携带上下文，`request_id` 关联日志。请求参数校验失败返回 `REQUEST_VALIDATION_ERROR`（422），未处理异常返回 `INTERNAL_SERVER_ERROR`（500）。
+
+- 开启 `ENABLE_RATE_LIMIT` 时按客户端 IP 限流（默认 600 次/分钟），超限返回 `429 RATE_LIMITED` 并带 `Retry-After: 60`；`/health` 不计入限流。
+- provider 未配置或暂时不可用时，Skill 端点返回结构化 `SkillResult`，不要把它包装成实时数据。`SkillResult` 结构见 [domain-model.md](domain-model.md)。
 
 ## 行程与预检
 
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
-| `POST` | `/api/v1/trips` | 创建已确认的 Trip |
-| `GET` | `/api/v1/trips` | 历史行程列表 |
-| `GET/PATCH/DELETE` | `/api/v1/trips/{trip_id}` | 读取、更新、删除行程 |
-| `POST` | `/api/v1/trips/preflight` | 需求语义提取、日期/地点校验、追问和确认 |
-| `GET` | `/api/v1/trips/mock/wuhan-lushan` | 离线前端验收样例 |
+| `POST` | `/api/v1/trips` | 创建行程，返回 `201` 与 `Trip` |
+| `GET` | `/api/v1/trips` | 行程列表 |
+| `POST` | `/api/v1/trips/preflight` | 需求语义提取、日期/地点校验、追问与确认 |
+| `GET` | `/api/v1/trips/mock/wuhan-lushan` | 离线前端验收样例行程 |
+| `GET` | `/api/v1/trips/{trip_id}` | 读取单个行程 |
+| `PATCH` | `/api/v1/trips/{trip_id}` | 更新标题、状态或所选车辆 |
+| `DELETE` | `/api/v1/trips/{trip_id}` | 删除行程，返回 `204` |
 
 `preflight` 请求核心字段：
 
@@ -38,74 +43,104 @@
   "raw_text": "周五下午从武汉出发，周日晚上返回，情侣出游",
   "answers": {},
   "previous_extracted": {},
+  "semantic_checked": false,
   "confirmed": false
 }
 ```
 
-响应会给出 `ready`、`confirmation_required`、`issues`、`extracted`、`summary`、`defaults_applied` 和特殊活动研究结果。确认前不创建 Trip、不投递规划任务。
+响应给出 `ready`、`confirmation_required`、`semantic_checked`、`issues`、`extracted`、`summary` 和 `special_event_research`。确认前不创建 Trip、不投递规划任务。
 
-日期与返程时间校验遵循同一套结构化规则：出发时刻必须早于抵达时刻；返程目标时间允许 `15` 分钟以内的静默误差，超过后但不超过半天返回可调整的 `RETURN_WINDOW_FLEXIBLE` 警告，超过半天才返回阻断问题 `RETURN_DEADLINE_UNACHIEVABLE`。警告不会阻止用户确认，阻断问题需要修改日期、时间窗口或交通方式。
+日期与返程时间校验遵循同一套规则：出发必须早于返回；返程目标时间允许 15 分钟以内的静默误差，超出但不超过半天时返回可调整的 `RETURN_WINDOW_FLEXIBLE` 警告，超过半天返回阻断问题 `RETURN_DEADLINE_UNACHIEVABLE`。警告不阻止确认，阻断问题需要修改日期、时间窗口或交通方式。
 
 ## 规划、SSE 与导出
 
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
-| `POST` | `/api/v1/trips/{trip_id}/planning/start` | 创建 ARQ 规划任务，返回 `202` |
+| `POST` | `/api/v1/trips/{trip_id}/planning/start` | 投递规划任务，返回 `202` |
 | `GET` | `/api/v1/trips/{trip_id}/planning` | 读取状态、进度、追问、校验和 Markdown 快照 |
 | `POST` | `/api/v1/trips/{trip_id}/planning/clarifications` | 回答规划中的追问并重新排队 |
-| `GET` | `/api/v1/trips/{trip_id}/planning/events` | SSE 进度流；支持 `Last-Event-ID`/`after` |
-| `GET` | `/api/v1/trips/{trip_id}/roadbook` | Markdown（仅 completed） |
+| `GET` | `/api/v1/trips/{trip_id}/planning/events` | SSE 进度流，支持 `Last-Event-ID` 与 `after` |
+| `GET` | `/api/v1/trips/{trip_id}/roadbook` | Markdown，仅 completed |
 | `GET` | `/api/v1/trips/{trip_id}/roadbook.html` | HTML 报告 |
 | `GET` | `/api/v1/trips/{trip_id}/roadbook.pdf` | PDF 报告 |
 | `GET` | `/api/v1/trips/{trip_id}/roadbook.pptx` | PPTX 报告 |
 | `GET` | `/api/v1/trips/{trip_id}/roadbook.png` | 长图 PNG |
 
-所有导出在 Trip 不是 `completed` 时返回 `409 PLANNING_NOT_COMPLETED`。SSE 事件只传递可展示的阶段、进度和状态，不包含模型私有推理或 provider key。
+所有导出只在行程状态为 `completed` 时开放，否则返回 `409 PLANNING_NOT_COMPLETED`；快照尚未生成时返回 `409 ROADBOOK_NOT_READY`。
 
-最终验证发现可修复问题时，规划图会自动执行最多 4 轮“行程编排 → 每日复核 → 验证”闭环；SSE 会逐轮展示自动重排进度。`verification_result.auto_repair_exhausted=true` 仅表示自动修复轮次耗尽，前端此时才显示人工调整入口。
+规划图在最终校验发现可修复问题时，会自动执行最多 4 轮 `verify_plan ⇄ repair_plan` 闭环并逐轮通过 SSE 展示重排进度。`verification_result.auto_repair_exhausted=true` 表示自动修复轮次耗尽，此时才向用户展示人工调整入口。
 
-## 编辑、候选和版本
+### SSE 事件协议
+
+SSE 通道在 `/api/v1/trips/{trip_id}/planning/events`，`media_type=text/event-stream`。帧形如：
+
+```
+id: 42
+event: node_started
+data: {"event":"node_started","trip_id":"trip_x","node":"build_stages","tool":null,"label":"正在拆分天和阶段","progress":84,"timestamp":"..."}
+```
+
+`SSEEvent` 的 `event` 字段取值：
+
+`planning_started`、`node_started`、`tool_started`、`tool_completed`、`node_completed`、`clarification_required`、`progress`、`warning`、`plan_updated`、`patch_preview_ready`、`planning_paused`、`planning_resumed`、`planning_completed`、`planning_failed`。
+
+通道只传递可展示的阶段名 `node`、工具名 `tool`、文案 `label` 和进度 `progress`（0-100），不包含模型私有推理或 provider key。以 `planning_completed`、`planning_failed`、`planning_paused`、`clarification_required` 结尾时流终止。重连时可用 `Last-Event-ID` 或 `after` 事件序号续读；没有新事件时每 0.45 秒发送一行 `: keep-alive`。
+
+## 编辑、候选与版本
 
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
-| `GET` | `/api/v1/trips/{trip_id}/recommendations` | 当前阶段景点/住宿/餐饮候选 |
-| `POST` | `/api/v1/trips/{trip_id}/editing/interpret` | Editing Agent 将自然语言转成候选操作 |
+| `GET` | `/api/v1/trips/{trip_id}/recommendations?category=attractions\|hotels\|meals` | 当前阶段景点/住宿/餐饮候选 |
+| `POST` | `/api/v1/trips/{trip_id}/editing/interpret` | 编辑 Agent 将自然语言转成候选操作 |
+| `POST` | `/api/v1/trips/{trip_id}/editing/confirm-replan` | 确认需要全量重排的会话编辑 |
 | `POST` | `/api/v1/trips/{trip_id}/patches/preview` | 加入/替换候选，生成 PlanPatch |
 | `POST` | `/api/v1/trips/{trip_id}/patches/preview-map-point` | 地图点选生成候选补丁 |
 | `POST` | `/api/v1/trips/{trip_id}/patches/preview-delete` | 预览删除活动 |
 | `GET` | `/api/v1/trips/{trip_id}/patches/{patch_id}` | 查看补丁 |
-| `POST` | `/api/v1/trips/{trip_id}/patches/{patch_id}/apply` | 确认应用并重算受影响阶段 |
+| `POST` | `/api/v1/trips/{trip_id}/patches/{patch_id}/apply` | 应用并重算受影响阶段 |
 | `POST` | `/api/v1/trips/{trip_id}/patches/{patch_id}/reject` | 放弃补丁 |
 | `POST` | `/api/v1/trips/{trip_id}/patches/{patch_id}/rollback` | 回滚已应用补丁 |
-| `POST/GET` | `/api/v1/trips/{trip_id}/versions` | 保存/列出版本 |
+| `POST` | `/api/v1/trips/{trip_id}/versions` | 保存版本 |
+| `GET` | `/api/v1/trips/{trip_id}/versions` | 列出版本 |
 | `POST` | `/api/v1/trips/{trip_id}/versions/{version_id}/restore` | 恢复版本 |
+| `GET` | `/api/v1/trips/{trip_id}/risks` | 风险汇总（高风险/中风险阶段与警告） |
+| `GET` | `/api/v1/trips/{trip_id}/services` | 沿途服务 POI 与已选停留 |
 
-`preview` 不修改 canonical Trip；`apply` 失败时事务回滚。前端应用后应重新 hydrate Trip，避免恢复旧活动。
+`preview` 不修改 canonical Trip；`apply` 时才写回并触发受影响阶段的重算，`rollback` 通过补丁前备份恢复整段行程。应用或回滚后前端应重新加载 Trip，避免沿用旧的活动快照。
 
-## Skill、任务、车辆和附件
+## Skill、任务、车辆与附件
 
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
-| `GET` | `/api/v1/skills/health` | Registry 与缓存健康 |
-| `GET` | `/api/v1/skills/calls` | Skill 调用审计 |
-| `GET` | `/api/v1/skills/metrics` | Skill 成功率/缓存/延迟 |
+| `GET` | `/api/v1/skills/health` | Skill Registry 与缓存健康 |
+| `GET` | `/api/v1/skills/calls?limit=N` | Skill 调用审计 |
+| `GET` | `/api/v1/skills/metrics` | Skill 成功率/缓存/延迟汇总 |
 | `POST` | `/api/v1/skills/amap/geocode` | 高德地理编码 |
+| `POST` | `/api/v1/skills/amap/driving` | 高德驾车路线 |
 | `POST` | `/api/v1/skills/amap/route` | 驾车/骑行/步行/公共交通统一路线 |
 | `POST` | `/api/v1/skills/amap/poi` | 高德 POI |
 | `POST` | `/api/v1/skills/weather/forecast` | Open-Meteo 天气 |
-| `POST` | `/api/v1/skills/flyai/{poi,hotel,keyword-search,ai-search}` | FlyAI 旅游搜索 |
+| `POST` | `/api/v1/skills/carinfo/search` | 车型目录搜索；有 `query` 时走 `carinfo.catalog` |
+| `POST` | `/api/v1/skills/flyai/poi` | FlyAI POI |
+| `POST` | `/api/v1/skills/flyai/hotel` | FlyAI 酒店 |
+| `POST` | `/api/v1/skills/flyai/keyword-search` | FlyAI 关键词搜索 |
+| `POST` | `/api/v1/skills/flyai/ai-search` | FlyAI 语义搜索 |
 | `POST` | `/api/v1/skills/opentripmap/nearby` | OpenTripMap 周边景点 |
-| `POST` | `/api/v1/skills/carinfo/search` | 车型目录搜索；有 `query` 时使用 `carinfo.catalog` |
-| `POST/GET` | `/api/v1/vehicles` | 车型 CRUD |
-| `GET/PATCH/DELETE` | `/api/v1/vehicles/{vehicle_id}` | 单车型 CRUD |
-| `POST` | `/api/v1/files` | 上传并校验附件 |
-| `GET` | `/api/v1/files/{file_id}[ /content]` | 元数据/内容 |
-| `POST` | `/api/v1/files/{file_id}/extract` | 提取待确认需求 |
-| `POST` | `/api/v1/files/{file_id}/confirm` | 确认写入需求 |
-| `POST/GET` | `/api/v1/jobs`、`/api/v1/jobs/{job_id}` | 异步任务创建/查询 |
+| `POST` | `/api/v1/vehicles` | 创建车型，返回 `201` |
+| `GET` | `/api/v1/vehicles` | 车型列表 |
+| `GET/PATCH/DELETE` | `/api/v1/vehicles/{vehicle_id}` | 单车型读/改/删 |
+| `POST` | `/api/v1/files` | 上传并校验附件（图片/PDF/DOCX/Markdown/XLSX） |
+| `GET` | `/api/v1/files/{file_id}` | 附件元数据 |
+| `GET` | `/api/v1/files/{file_id}/content` | 附件内容下载 |
+| `POST` | `/api/v1/files/{file_id}/extract` | 提取附件中的待确认需求 |
+| `POST` | `/api/v1/files/{file_id}/confirm` | 确认提取结果并写入需求 |
+| `POST` | `/api/v1/jobs` | 创建异步任务，返回 `202` |
+| `GET` | `/api/v1/jobs/{job_id}` | 查询任务 |
 | `POST` | `/api/v1/jobs/{job_id}/cancel` | 取消任务 |
-| `GET` | `/api/v1/ops/metrics` | 服务请求指标 |
+| `GET` | `/api/v1/ops/metrics` | 服务请求指标与 Skill 汇总 |
+
+车型目录的搜索与表单接入见 [carinfo-catalog.md](carinfo-catalog.md)。
 
 ## 路线响应最低要求
 
-`amap.route` 的 `data` 至少包含 `requested_mode`、`selected_mode`、`fallback_used`、`distance_km`、`duration_minutes`、`geometry`、`steps`、`transfers` 和来源信息。没有真实 geometry 时 `success=false`、`error_code=ROUTE_UNAVAILABLE`，前端只能绘制灰色提示线。
+`amap.route` 的 `data` 至少包含 `requested_mode`、`selected_mode`、`fallback_used`、`distance_km`、`duration_minutes`、`geometry`、`steps`、`transfers` 和来源信息；降级时还带 `fallback_reason` 与 `attempted_modes`。没有真实 geometry 时 `success=false`、`error_code=ROUTE_UNAVAILABLE`，前端只能绘制灰色虚线提示，不做导航计算。完整规则见 [routing-fallback-design.md](routing-fallback-design.md)。

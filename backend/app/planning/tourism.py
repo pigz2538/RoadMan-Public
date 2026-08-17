@@ -20,7 +20,7 @@ def _comfortable_hotel(candidate: dict[str, Any]) -> bool:
     return not _INCOMFORTABLE_LODGING_RE.search(text)
 
 
-def _candidate_quality(candidate: dict[str, Any]) -> tuple[float, float, str]:
+def _candidate_quality(candidate: dict[str, Any]) -> tuple[float, float, float, str]:
     try:
         score = float(candidate.get("score") or 0)
     except (TypeError, ValueError):
@@ -29,7 +29,12 @@ def _candidate_quality(candidate: dict[str, Any]) -> tuple[float, float, str]:
         rating = float(candidate.get("rating") or 0)
     except (TypeError, ValueError):
         rating = 0.0
-    return (-score, -rating, str((candidate.get("place") or {}).get("name") or ""))
+    return (
+        0.0 if candidate.get("user_confirmed") else 1.0,
+        -score,
+        -rating,
+        str((candidate.get("place") or {}).get("name") or ""),
+    )
 
 
 def _attraction_priority(candidate: dict[str, Any]) -> float:
@@ -193,9 +198,13 @@ def _hotel_for_day(
         close = _place_distance_km(selected_place, anchor)
         if same_city or (close is not None and close <= 20):
             return selected
-    def distance_key(item: dict[str, Any]) -> tuple[float, tuple[float, float, str]]:
+    def distance_key(item: dict[str, Any]) -> tuple[float, float, tuple[float, float, float, str]]:
         distance = _place_distance_km(item.get("place"), anchor)
-        return (distance if distance is not None else 9999, _candidate_quality(item))
+        return (
+            0.0 if item.get("user_confirmed") else 1.0,
+            distance if distance is not None else 9999,
+            _candidate_quality(item),
+        )
 
     return min(pool, key=distance_key)
 
@@ -203,6 +212,7 @@ def _hotel_for_day(
 def schedule_tourism_activities(
     day_plans: list[dict[str, Any]],
     candidates: dict[str, list[dict[str, Any]]],
+    confirmed_additions: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Attach executable attraction and overnight hotel activities to day plans."""
     hotels = [item for item in candidates.get("hotels", []) if _comfortable_hotel(item)]
@@ -605,7 +615,92 @@ def schedule_tourism_activities(
             *[{"type": "stage", "id": stage["id"]} for stage in stages],
             *[{"type": "activity", "id": item["id"]} for item in activities],
         ]
+    # A user-confirmed add/replace is stronger than a fresh provider ranking.
+    # Keep the chosen item visible even when the agent had already produced a
+    # generic meal/hotel slot before the candidate search completed.
+    if confirmed_additions:
+        _apply_confirmed_additions(day_plans, candidates, confirmed_additions)
     return day_plans
+
+
+def _apply_confirmed_additions(
+    day_plans: list[dict[str, Any]],
+    candidates: dict[str, list[dict[str, Any]]],
+    confirmed_additions: list[dict[str, Any]],
+) -> None:
+    """Make accepted edit candidates durable across a full replan.
+
+    The normal schedule pass intentionally preserves existing meal slots.  A
+    map-selected restaurant could therefore be present in the candidate pool
+    but never replace the generic breakfast/lunch/dinner activity.  For an
+    explicit user decision, replacing that slot is the least surprising and
+    keeps the original time window and overlap guarantees intact.
+    """
+    category_to_type = {
+        "attractions": "attraction",
+        "meals": "meal",
+        "hotels": "hotel",
+    }
+    for record in confirmed_additions:
+        if not isinstance(record, dict):
+            continue
+        category = str(record.get("category") or "").strip()
+        activity_type = category_to_type.get(category)
+        candidate = record.get("candidate")
+        if not activity_type or not isinstance(candidate, dict):
+            continue
+        place = candidate.get("place") or {}
+        name = str(place.get("name") or "").strip()
+        if not name:
+            continue
+        # Prefer the day selected in the edit preview.  If an older state does
+        # not carry day_id, an already visible match is still marked as fixed.
+        requested_day_id = str(record.get("day_id") or "").strip()
+        target_days = [
+            day for day in day_plans
+            if not requested_day_id or str(day.get("id") or "") == requested_day_id
+        ] or day_plans
+        existing = next(
+            (
+                activity
+                for day in day_plans
+                for activity in day.get("activities", [])
+                if activity.get("type") == activity_type
+                and str((activity.get("place") or {}).get("name") or "").strip() == name
+            ),
+            None,
+        )
+        if existing is not None:
+            existing["user_confirmed"] = True
+            continue
+        if activity_type != "meal":
+            # Attractions and hotels are inserted by their route-aware passes;
+            # do not invent a disconnected activity here.
+            continue
+        target_day = target_days[0] if target_days else None
+        if target_day is None:
+            continue
+        meal = next(
+            (
+                activity for activity in target_day.get("activities", [])
+                if activity.get("type") == "meal" and not activity.get("locked")
+            ),
+            None,
+        )
+        if meal is None:
+            continue
+        # Retain the schedule slot and replace only the place/evidence fields.
+        meal["place"] = dict(place)
+        meal["user_confirmed"] = True
+        meal["source_records"] = list(candidate.get("source_records") or [])
+        for key in (
+            "description", "image_url", "detail_url", "ticket_or_price",
+            "parking_or_price", "parking_note", "opening_hours",
+            "reservation_status", "reservation_note",
+        ):
+            if candidate.get(key) is not None:
+                meal[key] = candidate[key]
+        meal["user_note"] = candidate.get("user_note") or "用户已确认的餐饮安排"
 
 
 def _ensure_meals(
@@ -762,6 +857,7 @@ def _ensure_meals(
 def review_daily_schedule(
     day_plans: list[dict[str, Any]],
     candidates: dict[str, list[dict[str, Any]]],
+    confirmed_additions: list[dict[str, Any]] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Run a second pass over every day and phase after the first schedule.
 
@@ -772,7 +868,11 @@ def review_daily_schedule(
     window, so the UI can explain that the window is intentional instead of
     looking like an unfinished itinerary.
     """
-    reviewed = schedule_tourism_activities(day_plans, candidates)
+    reviewed = schedule_tourism_activities(
+        day_plans,
+        candidates,
+        confirmed_additions,
+    )
     notes: list[dict[str, Any]] = []
     for day in reviewed:
         stages = day.get("stages", [])

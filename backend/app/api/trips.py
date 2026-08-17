@@ -14,6 +14,7 @@ from ..domain.models import (
     JobCreate,
     PlanningSnapshot,
     PlanPatch,
+    PlaceRef,
     PreflightIssue,
     PreflightRequest,
     PreflightResponse,
@@ -46,6 +47,12 @@ from ..planning.editing import (
     rollback_patch,
 )
 from ..planning.poi_enrichment import enrich_tourism_candidates
+from ..planning.exclusions import (
+    clear_exclusion_for_candidate,
+    clear_exclusions_for_names,
+    filter_excluded_candidates,
+    remember_named_exclusions,
+)
 from ..repositories import JobRepository, TripRepository
 from ..services.job_queue import enqueue_job
 from ..services.exports import ReportAgent
@@ -76,6 +83,9 @@ def get_skill_registry() -> SkillRegistry:
 
 def _edit_agent_context(trip: Trip, state: dict[str, object], payload: EditIntentRequest) -> dict[str, object]:
     return {
+        "request": trip.request.model_dump(mode="json"),
+        "trip_title": trip.title,
+        "trip_status": trip.status.value if hasattr(trip.status, "value") else str(trip.status),
         "days": [
             {
                 "day_index": day.day_index,
@@ -105,6 +115,15 @@ def _edit_agent_context(trip: Trip, state: dict[str, object], payload: EditInten
         ],
         "selected_day_id": payload.current_day_id,
         "selected_target_id": payload.current_target_id,
+        "excluded_places": [
+            {
+                "name": item.get("name"),
+                "category": item.get("category"),
+                "reason": item.get("reason"),
+            }
+            for item in state.get("excluded_places", [])
+            if isinstance(item, dict)
+        ],
         "candidates": {
             category: [
                 {
@@ -114,7 +133,10 @@ def _edit_agent_context(trip: Trip, state: dict[str, object], payload: EditInten
                 }
                 for item in items[:24]
             ]
-            for category, items in state.get("tourism_candidates", {}).items()
+            for category, items in filter_excluded_candidates(
+                state.get("tourism_candidates", {}),
+                state.get("excluded_places"),
+            ).items()
             if isinstance(items, list)
         },
     }
@@ -459,7 +481,10 @@ async def get_trip_recommendations(
     if not trip:
         raise AppError("TRIP_NOT_FOUND", "行程不存在", 404, {"trip_id": trip_id})
     state = await repo.load_planning_state(trip_id) or {}
-    candidates = state.get("tourism_candidates", {})
+    candidates = filter_excluded_candidates(
+        state.get("tourism_candidates", {}) or {},
+        state.get("excluded_places"),
+    )
     return {
         "trip_id": trip_id,
         "category": category,
@@ -537,13 +562,107 @@ async def interpret_trip_edit(
         payload,
         agent_intent=agent_intent,
     )
-    if patch:
-        await repo.save_planning_result(trip, state, markdown)
+    if global_replan_required:
+        pending = state.get("pending_replan") if isinstance(state.get("pending_replan"), dict) else {}
+        previous_instruction = str(pending.get("instruction") or "").strip()
+        instruction_parts = [item for item in (previous_instruction, payload.message.strip()) if item]
+        previous_intent = pending.get("agent_intent") if isinstance(pending.get("agent_intent"), dict) else {}
+        merged_intent = {**previous_intent, **(agent_intent or {})}
+        for key in ("must_visit_names", "exclude_names", "restore_names"):
+            old = previous_intent.get(key) if isinstance(previous_intent.get(key), list) else []
+            new = (agent_intent or {}).get(key) if isinstance((agent_intent or {}).get(key), list) else []
+            merged_intent[key] = list(dict.fromkeys([str(item).strip() for item in [*old, *new] if str(item).strip()]))
+        if previous_intent.get("stay_only_at_destination"):
+            merged_intent["stay_only_at_destination"] = True
+        state.setdefault("messages", []).extend([
+            {"role": "user", "type": "replan_request", "content": payload.message.strip()},
+            {"role": "assistant", "type": "replan_proposal", "content": message},
+        ])
+        state["pending_replan"] = {
+            "instruction": "\n".join(dict.fromkeys(instruction_parts)),
+            "agent_intent": merged_intent,
+            "baseline_request": trip.request.model_dump(mode="json"),
+            "assistant_message": message,
+        }
+        # Do not mutate the trip or enqueue a job until the user confirms.
+        global_replan_required = False
+    await repo.save_planning_result(trip, state, markdown)
     return {
         "message": message,
         "patch": patch,
         "global_replan_required": global_replan_required,
+        "requires_confirmation": bool(state.get("pending_replan")),
+        "confirmation_message": "确认后才会重新搜索并计算路线、时间和每日安排。" if state.get("pending_replan") else None,
     }
+
+
+@router.post("/{trip_id}/editing/confirm-replan")
+async def confirm_trip_replan(
+    trip_id: str,
+    repo: TripRepository = Depends(get_repo),
+) -> dict[str, object]:
+    """Commit a conversational edit only after the user confirms it."""
+    trip = await repo.get(trip_id)
+    if not trip:
+        raise AppError("TRIP_NOT_FOUND", "行程不存在", 404, {"trip_id": trip_id})
+    state, _ = await repo.get_planning_snapshot(trip_id)
+    state = state or {}
+    pending = state.get("pending_replan")
+    if not isinstance(pending, dict):
+        raise AppError("REPLAN_CONFIRMATION_REQUIRED", "当前没有等待确认的整体修改", 409)
+    request_data = dict(pending.get("baseline_request") or trip.request.model_dump(mode="json"))
+    intent = pending.get("agent_intent") if isinstance(pending.get("agent_intent"), dict) else {}
+    for field in ("origin_name", "destination_name"):
+        value = str(intent.get(field) or "").strip()
+        if value:
+            request_data["origin" if field == "origin_name" else "destination"] = {"name": value}
+    restore_names = [
+        str(item).strip()
+        for item in intent.get("restore_names", [])
+        if str(item).strip()
+    ]
+    names = [
+        str(item).strip()
+        for item in [*intent.get("must_visit_names", []), *restore_names]
+        if str(item).strip()
+    ]
+    if names:
+        request_data["must_visit"] = [{"name": name} for name in dict.fromkeys(names)]
+    # A confirmed natural-language restore is the explicit escape hatch from
+    # a previous delete marker.  Merely discovering the same POI again never
+    # clears the exclusion.
+    if restore_names:
+        clear_exclusions_for_names(state, restore_names)
+    exclude_names = [
+        str(item).strip()
+        for item in intent.get("exclude_names", [])
+        if str(item).strip()
+    ]
+    if exclude_names:
+        remember_named_exclusions(state, trip, exclude_names)
+    if intent.get("stay_only_at_destination"):
+        request_data["stay_only_at_destination"] = True
+        request_data["include_surrounding"] = False
+    for field in ("start_date", "end_date"):
+        value = str(intent.get(field) or "").strip()
+        if value:
+            request_data[field] = value
+    request_data["raw_text"] = "\n".join([
+        str(request_data.get("raw_text") or trip.request.raw_text).strip(),
+        "在保留未被修改条件的基础上，按以下已确认修改重新规划：",
+        str(pending.get("instruction") or "").strip(),
+    ]).strip()
+    trip.request = type(trip.request).model_validate(request_data)
+    trip.days = []
+    trip.warnings = []
+    trip.sources = []
+    trip.status = TripStatus.ready_to_plan
+    state["trip_request"] = trip.request.model_dump(mode="json")
+    state["raw_input"] = trip.request.raw_text
+    state.pop("pending_replan", None)
+    state.pop("plan_markdown", None)
+    await repo.save_planning_result(trip, state, None)
+    return {"message": "已确认修改，接下来重新搜索并规划完整行程。", "trip": trip, "global_replan_required": True}
 
 
 @router.post("/{trip_id}/patches/preview-delete", response_model=PlanPatch)
@@ -591,14 +710,85 @@ async def apply_candidate_patch(
     state = state or {}
     backup = trip.model_dump(mode="json")
     patch, trip = decide_candidate_patch(trip, state, patch_id, apply=True)
-    await recompute_and_verify_patch(trip, state, patch, registry)
+    route_replan_required = bool(patch.requires_replan)
+    if route_replan_required:
+        # Explicit additions and replacements must survive the next full
+        # planning pass; otherwise fresh provider ranking could discard a
+        # user-confirmed choice while recomputing routes.
+        candidate_payload = patch.proposed_value.get("candidate") or {}
+        candidate_place = candidate_payload.get("place") or {}
+        candidate_name = str(candidate_place.get("name") or "").strip()
+        if candidate_name and patch.operation in {"add", "replace"}:
+            existing = {
+                str(item.name).strip()
+                for item in trip.request.must_visit
+                if str(item.name).strip()
+            }
+            if candidate_name not in existing:
+                # Preserve coordinates/address/source as well as the name;
+                # an exact map-selected point cannot be reliably recovered
+                # from a later city-wide provider search.
+                trip.request.must_visit.append(PlaceRef.model_validate(candidate_place))
+            additions = state.setdefault("confirmed_additions", [])
+            if not isinstance(additions, list):
+                additions = []
+                state["confirmed_additions"] = additions
+            additions[:] = [
+                item
+                for item in additions
+                if not (
+                    isinstance(item, dict)
+                    and str(item.get("category") or "") == str(patch.proposed_value.get("category") or "")
+                    and str(((item.get("candidate") or {}).get("place") or {}).get("name") or "").strip()
+                    == candidate_name
+                )
+            ]
+            additions.append({
+                "category": str(patch.proposed_value.get("category") or ""),
+                "day_id": str(patch.proposed_value.get("day_id") or ""),
+                "candidate": candidate_payload,
+            })
+            state["trip_request"] = trip.request.model_dump(mode="json")
+        elif patch.operation == "delete":
+            deleted_name = str(
+                (patch.original_value.get("place") or {}).get("name") or ""
+            ).strip()
+            deleted_category = str(
+                {"attraction": "attractions", "hotel": "hotels", "meal": "meals"}.get(
+                    str(patch.original_value.get("type") or ""),
+                    patch.proposed_value.get("category") or "",
+                )
+            )
+            additions = state.get("confirmed_additions")
+            if isinstance(additions, list) and deleted_name:
+                state["confirmed_additions"] = [
+                    item
+                    for item in additions
+                    if not (
+                        isinstance(item, dict)
+                        and str(item.get("category") or "") == deleted_category
+                        and str(((item.get("candidate") or {}).get("place") or {}).get("name") or "").strip()
+                        == deleted_name
+                    )
+                ]
+        state["route_replan_required"] = True
+        state["last_applied_patch_id"] = patch.id
+    # Persist the user decision before route recomputation.  A route provider
+    # can fail or be temporarily unavailable; that must not erase an explicit
+    # deletion marker (otherwise the next replan can discover the place again).
     state.setdefault("patch_backups", {})[patch.id] = backup
+    await repo.save_planning_result(trip, state, markdown)
+    await recompute_and_verify_patch(trip, state, patch, registry)
     await repo.save_planning_result(trip, state, markdown)
     # Return the canonical row after the commit. This prevents a follow-up
     # recommendation request from hydrating an older in-memory snapshot when
     # users delete one POI and immediately add another one.
     persisted = await repo.get(trip_id)
-    return {"patch": patch, "trip": persisted or trip}
+    return {
+        "patch": patch,
+        "trip": persisted or trip,
+        "route_replan_required": route_replan_required,
+    }
 
 
 @router.post("/{trip_id}/patches/{patch_id}/reject", response_model=PlanPatch)
@@ -629,6 +819,39 @@ async def rollback_candidate_patch(
     state, markdown = await repo.get_planning_snapshot(trip_id)
     state = state or {}
     patch, restored = rollback_patch(trip, state, patch_id)
+    # Rollback restores the trip snapshot, but the planning state also carries
+    # durable edit metadata.  Keep both stores in sync so a later replan does
+    # not resurrect a temporary addition or keep a rolled-back deletion
+    # hidden from provider results.
+    state["trip_request"] = restored.request.model_dump(mode="json")
+    if patch.operation in {"add", "replace"}:
+        candidate_name = str(
+            ((patch.proposed_value.get("candidate") or {}).get("place") or {}).get("name")
+            or ""
+        ).strip()
+        category = str(patch.proposed_value.get("category") or "")
+        additions = state.get("confirmed_additions")
+        if isinstance(additions, list) and candidate_name:
+            state["confirmed_additions"] = [
+                item
+                for item in additions
+                if not (
+                    isinstance(item, dict)
+                    and str(item.get("category") or "") == category
+                    and str(((item.get("candidate") or {}).get("place") or {}).get("name") or "").strip()
+                    == candidate_name
+                )
+            ]
+    elif patch.operation == "delete":
+        place = patch.original_value.get("place") or {}
+        category = {"attraction": "attractions", "hotel": "hotels", "meal": "meals"}.get(
+            str(patch.original_value.get("type") or ""),
+            "",
+        )
+        if place and category:
+            clear_exclusion_for_candidate(state, {"place": place}, category=category)
+    state["route_replan_required"] = False
+    state.pop("last_applied_patch_id", None)
     await repo.save_planning_result(restored, state, markdown)
     return {"patch": patch, "trip": restored}
 
@@ -665,6 +888,9 @@ async def start_planning(
     trip = await repo.get(trip_id)
     if not trip:
         raise AppError("TRIP_NOT_FOUND", "行程不存在", 404, {"trip_id": trip_id})
+    pending_state = await repo.load_planning_state(trip_id) or {}
+    if isinstance(pending_state.get("pending_replan"), dict):
+        raise AppError("REPLAN_CONFIRMATION_REQUIRED", "请先确认修改，再开始重新规划", 409)
     trip.status = TripStatus.planning
     await repo.save(trip)
     job = await JobRepository(session).create(
@@ -677,6 +903,7 @@ async def start_planning(
         status=trip.status,
         progress={"node": "queued", "value": 0},
         job_id=job.id,
+        planning_batch_id=job.id,
     )
 
 
@@ -701,6 +928,14 @@ async def get_planning_snapshot(
         verification_result=state.get("verification_result"),
         special_event_research=state.get("special_event_research", []),
         plan_markdown=markdown,
+        edit_confirmation_pending=isinstance(state.get("pending_replan"), dict),
+        route_replan_required=bool(state.get("route_replan_required")),
+        planning_batch_id=state.get("planning_batch_id") or state.get("job_id"),
+        excluded_places=[
+            item
+            for item in state.get("excluded_places", [])
+            if isinstance(item, dict)
+        ],
     )
 
 
@@ -736,6 +971,7 @@ async def answer_clarification(
         status=trip.status,
         progress={"node": "queued", "value": 0},
         job_id=job.id,
+        planning_batch_id=job.id,
     )
 
 

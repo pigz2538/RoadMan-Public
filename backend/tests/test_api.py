@@ -170,7 +170,7 @@ async def test_map_point_endpoint_creates_preview_only(client):
 
 
 @pytest.mark.asyncio
-async def test_candidate_patch_requires_preview_before_apply(client):
+async def test_candidate_patch_requires_preview_before_apply(client, monkeypatch):
     created = await client.post(
         "/api/v1/trips",
         json={
@@ -257,6 +257,21 @@ async def test_candidate_patch_requires_preview_before_apply(client):
         for item in rolled_back.json()["trip"]["days"][0]["activities"]
     ] == ["原餐厅"]
 
+    async def fake_edit_interpret(self, message, trip_context):
+        return {
+            "intent": "delete",
+            "day_id": "day_patch",
+            "target_activity_id": "activity_meal",
+            "reply": "已生成删除预览。",
+        }
+
+    # Keep this API test deterministic and credential-free.  Live semantic
+    # interpretation is covered by the Ollama contract tests; this endpoint
+    # test only verifies preview/apply/rollback orchestration.
+    monkeypatch.setattr(
+        "app.api.trips.OllamaTripEditAgent.interpret",
+        fake_edit_interpret,
+    )
     delete_intent = await client.post(
         f"/api/v1/trips/{trip.id}/editing/interpret",
         json={
@@ -525,7 +540,21 @@ async def test_file_upload_metadata_and_download(client):
 
 
 @pytest.mark.asyncio
-async def test_attachment_requires_preview_and_confirmation_before_trip_update(client):
+async def test_attachment_requires_preview_and_confirmation_before_trip_update(client, monkeypatch):
+    async def fake_attachment_extract(path, mime_type, text, settings):
+        return {
+            "hotels": ["测试酒店"],
+            "places": [],
+            "dates": [],
+            "order_numbers": [],
+            "summary": "附件中的酒店候选",
+        }
+
+    monkeypatch.setattr(
+        "app.services.attachments._extract_with_ollama",
+        fake_attachment_extract,
+    )
+    monkeypatch.setattr("app.api.files.settings.ollama_api_key", "test-key")
     created = await client.post(
         "/api/v1/trips",
         json={"title": "附件测试", "request": {"raw_text": "武汉出发"}},

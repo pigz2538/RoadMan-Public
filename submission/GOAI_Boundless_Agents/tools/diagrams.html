@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>RoadMan 参赛架构图</title>
+  <style>
+    :root { --navy:#102a56; --blue:#246bfd; --cyan:#21b7d9; --violet:#7257ef; --mint:#19a974; --amber:#f59e0b; --red:#e25555; --ink:#14294b; --muted:#637795; --line:#cfe0f5; --paper:#f8fbff; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:#dfeaf7; font-family:"Microsoft YaHei UI","Microsoft YaHei",sans-serif; color:var(--ink); }
+    .diagram { position:relative; width:1600px; height:900px; overflow:hidden; background:linear-gradient(145deg,#fbfdff 0%,#edf5ff 100%); padding:62px 72px; }
+    .diagram::before { content:""; position:absolute; inset:auto -140px -230px auto; width:680px; height:680px; border-radius:50%; background:radial-gradient(circle,rgba(36,107,253,.11),rgba(36,107,253,0) 68%); }
+    .eyebrow { font-size:20px; letter-spacing:4px; color:var(--blue); font-weight:800; }
+    h1 { font-size:45px; margin:10px 0 8px; color:var(--navy); line-height:1.2; }
+    .subtitle { font-size:21px; color:var(--muted); margin-bottom:34px; }
+    .row { display:flex; align-items:stretch; gap:22px; }
+    .col { display:flex; flex-direction:column; gap:16px; flex:1; }
+    .card { background:rgba(255,255,255,.95); border:2px solid var(--line); border-radius:22px; box-shadow:0 14px 40px rgba(23,65,120,.09); padding:22px 24px; }
+    .card h2 { margin:0 0 10px; font-size:25px; color:var(--navy); }
+    .card h3 { margin:0 0 8px; font-size:21px; color:var(--navy); }
+    .card p { margin:4px 0; font-size:17px; line-height:1.55; color:#536987; }
+    .tag { display:inline-block; padding:7px 12px; border-radius:999px; background:#e9f2ff; color:var(--blue); font-size:16px; font-weight:700; margin:4px 5px 0 0; }
+    .tag.green { background:#e3f8ef; color:#11865d; } .tag.violet { background:#eeeaff; color:#6244dc; } .tag.amber { background:#fff3da; color:#a96500; }
+    .arrow { align-self:center; flex:0 0 54px; height:4px; background:linear-gradient(90deg,var(--cyan),var(--blue)); position:relative; border-radius:2px; }
+    .arrow::after { content:""; position:absolute; right:-2px; top:-7px; border-left:14px solid var(--blue); border-top:9px solid transparent; border-bottom:9px solid transparent; }
+    .layer { height:160px; display:grid; grid-template-columns:235px 1fr; gap:18px; align-items:stretch; }
+    .layer-title { border-radius:20px; padding:28px; color:white; display:flex; flex-direction:column; justify-content:center; background:linear-gradient(135deg,var(--navy),var(--blue)); }
+    .layer-title b { font-size:28px; } .layer-title span { font-size:16px; opacity:.82; margin-top:8px; }
+    .layer-items { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; }
+    .item { border:2px solid var(--line); border-radius:18px; background:white; padding:18px; display:flex; flex-direction:column; justify-content:center; }
+    .item b { font-size:21px; color:var(--navy); } .item span { font-size:15px; color:var(--muted); margin-top:6px; line-height:1.4; }
+    .connector { height:26px; margin-left:112px; border-left:3px dashed #7caae8; }
+    .steps { display:grid; grid-template-columns:repeat(7,1fr); gap:14px; margin-top:44px; align-items:center; }
+    .step { position:relative; min-height:215px; padding:24px 18px; background:white; border:2px solid var(--line); border-radius:22px; box-shadow:0 12px 28px rgba(23,65,120,.08); }
+    .step::after { content:""; position:absolute; width:17px; height:17px; right:-18px; top:96px; border-top:4px solid var(--blue); border-right:4px solid var(--blue); transform:rotate(45deg); }
+    .step:last-child::after { display:none; }
+    .num { width:42px; height:42px; border-radius:14px; display:flex; align-items:center; justify-content:center; color:white; background:linear-gradient(135deg,var(--cyan),var(--blue)); font-size:21px; font-weight:800; margin-bottom:20px; }
+    .step h3 { font-size:21px; margin:0 0 9px; color:var(--navy); } .step p { font-size:15px; line-height:1.55; color:var(--muted); margin:0; }
+    .loop { position:absolute; left:464px; top:665px; width:670px; height:84px; border:3px dashed var(--violet); border-top:0; border-radius:0 0 44px 44px; }
+    .loop-label { position:absolute; left:665px; top:723px; color:var(--violet); background:#f4f0ff; border-radius:999px; padding:8px 18px; font-weight:800; }
+    .agents { position:relative; width:1180px; height:600px; margin:0 auto; }
+    .hub { position:absolute; left:475px; top:210px; width:230px; height:180px; border-radius:50%; display:flex; align-items:center; justify-content:center; text-align:center; color:white; font-size:28px; font-weight:900; background:radial-gradient(circle at 35% 30%,#38c9e8,var(--blue) 52%,var(--navy)); box-shadow:0 22px 60px rgba(36,107,253,.28); z-index:3; }
+    .agent { position:absolute; width:245px; min-height:136px; padding:20px; background:white; border:2px solid var(--line); border-radius:22px; box-shadow:0 12px 32px rgba(23,65,120,.09); z-index:2; }
+    .agent b { display:block; color:var(--navy); font-size:21px; margin-bottom:8px; } .agent span { color:var(--muted); font-size:15px; line-height:1.45; }
+    .a1{left:35px;top:35px}.a2{left:467px;top:5px}.a3{right:35px;top:35px}.a4{right:35px;bottom:30px}.a5{left:467px;bottom:0}.a6{left:35px;bottom:30px}
+    .ring { position:absolute; left:300px; top:73px; width:580px; height:480px; border:5px solid rgba(36,107,253,.22); border-radius:50%; }
+    .ring::after { content:""; position:absolute; right:50px; top:5px; border-left:18px solid var(--blue); border-top:12px solid transparent; border-bottom:12px solid transparent; transform:rotate(24deg); }
+    .audit { position:absolute; left:418px; top:392px; width:345px; padding:12px 18px; border-radius:999px; text-align:center; background:#f1edff; color:var(--violet); font-weight:800; z-index:4; }
+    .flow-grid { display:grid; grid-template-columns:1.05fr .9fr 1.05fr; gap:26px; margin-top:28px; }
+    .stack { display:flex; flex-direction:column; gap:15px; }
+    .flow-box { background:white; border:2px solid var(--line); border-radius:20px; padding:18px 20px; min-height:92px; }
+    .flow-box strong { display:block; font-size:20px; color:var(--navy); margin-bottom:5px; } .flow-box span { font-size:15px; color:var(--muted); line-height:1.45; }
+    .flow-core { height:100%; display:flex; flex-direction:column; justify-content:center; gap:18px; }
+    .core-box { color:white; border-radius:24px; padding:27px; background:linear-gradient(135deg,var(--navy),var(--blue)); box-shadow:0 18px 45px rgba(36,107,253,.22); }
+    .core-box strong { font-size:25px; display:block; margin-bottom:10px; }.core-box span{font-size:16px;line-height:1.55;opacity:.9}
+    .trace { display:grid; grid-template-columns:repeat(4,1fr); gap:20px; margin-top:35px; }
+    .trace .card { min-height:430px; }
+    .trace ul { margin:16px 0 0; padding-left:21px; color:var(--muted); font-size:16px; line-height:1.75; }
+    .rail { height:5px; background:linear-gradient(90deg,var(--cyan),var(--blue),var(--violet)); margin:24px 70px 0; position:relative; }
+    .rail::before,.rail::after { content:""; position:absolute; top:-8px; width:20px; height:20px; border-radius:50%; background:white; border:5px solid var(--blue); }.rail::before{left:-5px}.rail::after{right:-5px}
+    .safety { display:grid; grid-template-columns:1fr 95px 1fr; gap:18px; align-items:center; margin-top:35px; }
+    .shield { width:95px; height:110px; display:flex; align-items:center; justify-content:center; color:white; font-size:42px; font-weight:900; background:linear-gradient(155deg,var(--cyan),var(--blue)); clip-path:polygon(50% 0,95% 18%,88% 72%,50% 100%,12% 72%,5% 18%); }
+    .rule { margin:12px 0; border-left:5px solid var(--blue); padding:12px 15px; background:#f1f6ff; border-radius:0 14px 14px 0; font-size:17px; color:#405779; }
+    .deploy { display:grid; grid-template-columns:1fr 1fr 1fr; gap:22px; margin-top:26px; }
+    .zone { border:3px solid #cbdcf3; border-radius:26px; padding:22px; background:rgba(255,255,255,.75); min-height:515px; }
+    .zone h2 { margin:0 0 18px; font-size:25px; color:var(--navy); }
+    .svc { background:white; border:2px solid var(--line); border-radius:18px; margin:12px 0; padding:17px; }
+    .svc b { display:block; font-size:19px; color:var(--navy); }.svc span{font-size:14px;color:var(--muted);line-height:1.45}
+    .footer-note { position:absolute; left:72px; right:72px; bottom:28px; display:flex; justify-content:space-between; color:#7990ad; font-size:14px; }
+  </style>
+</head>
+<body>
+  <section id="architecture" class="diagram">
+    <div class="eyebrow">ROADMAN SYSTEM ARCHITECTURE</div><h1>从自然语言到可交付行程的分层系统</h1><div class="subtitle">交互、编排、外部能力与持久化分层解耦；长任务异步执行，结果渐进可见。</div>
+    <div class="layer"><div class="layer-title"><b>产品体验层</b><span>Web 工作台 / 人工确认</span></div><div class="layer-items"><div class="item"><b>需求核对</b><span>多轮澄清、最终确认</span></div><div class="item"><b>渐进详情</b><span>地图、阶段、活动、进度</span></div><div class="item"><b>行程编辑</b><span>聊天、选点、补丁预览</span></div><div class="item"><b>统一交付</b><span>HTML / PDF / PPTX / 长图</span></div></div></div>
+    <div class="connector"></div>
+    <div class="layer"><div class="layer-title" style="background:linear-gradient(135deg,#4338ca,#7c55ef)"><b>智能编排层</b><span>LangGraph + 规则校验</span></div><div class="layer-items"><div class="item"><b>语义智能体</b><span>理解、研究、策展、编辑</span></div><div class="item"><b>规划智能体</b><span>路线、日程、车辆、服务</span></div><div class="item"><b>复核智能体</b><span>逐日完整性与适配判断</span></div><div class="item"><b>修复闭环</b><span>请求 → 修复 → 重审 → 验证</span></div></div></div>
+    <div class="connector"></div>
+    <div class="layer"><div class="layer-title" style="background:linear-gradient(135deg,#078a70,#20b7a4)"><b>能力与数据层</b><span>真实工具 / 可追溯状态</span></div><div class="layer-items"><div class="item"><b>地图与路线</b><span>地理编码、POI、多方式轨迹</span></div><div class="item"><b>旅行与天气</b><span>景点、餐饮、住宿、预报</span></div><div class="item"><b>任务基础设施</b><span>FastAPI、Redis、ARQ、SSE</span></div><div class="item"><b>持久与审计</b><span>PostgreSQL、版本、调用记录</span></div></div></div>
+    <div class="footer-note"><span>图 1｜RoadMan 总体架构</span><span>智能判断与确定性校验协同</span></div>
+  </section>
+
+  <section id="agents" class="diagram">
+    <div class="eyebrow">COLLABORATIVE AGENTS</div><h1>多智能体不是流水线，而是可回退的协作回路</h1><div class="subtitle">每个角色共享结构化状态；复核发现的问题会退回责任智能体，修复后必须重新审阅。</div>
+    <div class="agents"><div class="ring"></div><div class="hub">统一行程状态<br/>RoadManState</div>
+      <div class="agent a1"><b>需求理解智能体</b><span>目标、时间、同行人、偏好、交通与特殊事件</span></div>
+      <div class="agent a2"><b>目的地研究智能体</b><span>代表性地点、片区、必吃与旅行节奏</span></div>
+      <div class="agent a3"><b>地点策展智能体</b><span>多源去重、中文名称、可信来源与优先级</span></div>
+      <div class="agent a4"><b>路线与日程智能体</b><span>跨城、本地接驳、三餐、住宿、补能与休息</span></div>
+      <div class="agent a5"><b>每日复核智能体</b><span>逐日检查上午、下午、晚间与完整时间线</span></div>
+      <div class="agent a6"><b>编辑与交付智能体</b><span>语义修改、补丁确认、重排、冻结快照与导出</span></div>
+      <div class="audit">revision_request → revision_response → approval</div>
+    </div>
+    <div class="footer-note"><span>图 2｜智能体协作协议</span><span>不记录模型私有思维链，只记录可审计交接</span></div>
+  </section>
+
+  <section id="journey" class="diagram">
+    <div class="eyebrow">END-TO-END TASK LOOP</div><h1>一条可演示、可修改、可追溯的完整任务闭环</h1><div class="subtitle">从一句话出行需求开始，到真实工具调用、自动复核、用户修改和多格式交付结束。</div>
+    <div class="steps">
+      <div class="step"><div class="num">1</div><h3>自然语言输入</h3><p>地点、日期、同行人、偏好与交通方式；支持附件上下文。</p></div>
+      <div class="step"><div class="num">2</div><h3>预检与确认</h3><p>抽取结构化约束，只追问真正影响执行的信息。</p></div>
+      <div class="step"><div class="num">3</div><h3>检索与研究</h3><p>地图、路线、天气、景点、餐饮、住宿和特殊事件。</p></div>
+      <div class="step"><div class="num">4</div><h3>生成行程</h3><p>拆分跨城与本地阶段，安排三餐、住宿、补能和休息。</p></div>
+      <div class="step"><div class="num">5</div><h3>复核与修复</h3><p>逐日审核、闭环校验；可修复问题自动回退重排。</p></div>
+      <div class="step"><div class="num">6</div><h3>人工编辑</h3><p>聊天或地图选点，预览补丁，确认后统一重算。</p></div>
+      <div class="step"><div class="num">7</div><h3>冻结与交付</h3><p>校验通过后生成地图、报告、演示和运行证据。</p></div>
+    </div>
+    <div class="loop"></div><div class="loop-label">编辑后的新版本重新进入路线、日程和复核闭环</div>
+    <div class="footer-note"><span>图 3｜任务闭环</span><span>失败不写入正式行程；导出只读取通过校验的冻结快照</span></div>
+  </section>
+
+  <section id="state" class="diagram">
+    <div class="eyebrow">STATE & EVENT FLOW</div><h1>长任务的状态所有权与渐进交付</h1><div class="subtitle">前端动画与后台速度解耦；历史行程恢复直接读取完成状态，不重播生成过程。</div>
+    <div class="flow-grid">
+      <div class="stack"><div class="flow-box"><strong>用户可见 Trip</strong><span>正式行程、阶段、活动、来源、风险、验证结论</span></div><div class="flow-box"><strong>PlanPatch</strong><span>修改预览、确认、拒绝、回滚与待重排标记</span></div><div class="flow-box"><strong>TripVersion</strong><span>每次应用前保存快照，支持审计与恢复</span></div></div>
+      <div class="flow-core"><div class="core-box"><strong>RoadManState</strong><span>需求、候选、工具结果、规划进度、每日复核、智能体交接、修复轮次</span></div><div class="core-box" style="background:linear-gradient(135deg,#4b36c8,#7c55ef)"><strong>ARQ Job + Redis</strong><span>异步运行、取消、超时、重试与后台进度</span></div></div>
+      <div class="stack"><div class="flow-box"><strong>SSE 事件流</strong><span>只输出用户可理解的阶段、进度和状态</span></div><div class="flow-box"><strong>PostgreSQL</strong><span>Trip、Job、版本、调用审计和来源记录</span></div><div class="flow-box"><strong>冻结交付快照</strong><span>所有导出格式共享同一事实来源，避免内容漂移</span></div></div>
+    </div>
+    <div class="rail"></div>
+    <div class="footer-note"><span>图 4｜状态与事件流</span><span>模型密钥、内部提示词和私有思维链不进入 SSE</span></div>
+  </section>
+
+  <section id="traceability" class="diagram">
+    <div class="eyebrow">TOOLS & TRACEABILITY</div><h1>外部能力如何转化为可追溯的行程依据</h1><div class="subtitle">不同来源先进入统一适配层，再经清洗、去重、智能体取舍和确定性校验进入正式行程。</div>
+    <div class="trace">
+      <div class="card"><h2>1. 外部来源</h2><span class="tag">在线地图</span><span class="tag">旅行搜索</span><span class="tag">开放地点</span><span class="tag">天气</span><span class="tag">车型目录</span><ul><li>凭据通过环境变量注入</li><li>记录服务、时间与调用结果</li><li>失败不伪造实时数据</li></ul></div>
+      <div class="card"><h2>2. 能力适配器</h2><span class="tag violet">Skill Registry</span><span class="tag violet">统一错误</span><span class="tag violet">超时/重试</span><ul><li>归一化坐标、路线和地点字段</li><li>保留原始来源链接与降级状态</li><li>调用健康、延迟和失败可审计</li></ul></div>
+      <div class="card"><h2>3. 智能策展</h2><span class="tag green">语义去重</span><span class="tag green">中文展示</span><span class="tag green">个性适配</span><ul><li>同点合并，多源证据相互补充</li><li>结合季节、天气、海拔和偏好</li><li>研究“必去/必吃”而非只看酒店周边</li></ul></div>
+      <div class="card"><h2>4. 可验证入库</h2><span class="tag amber">SourceRecord</span><span class="tag amber">SkillCall</span><span class="tag amber">Verification</span><ul><li>路线、时间、闭环由确定性规则校验</li><li>不确定结果标注提示和人工确认边界</li><li>导出引用冻结快照与来源说明</li></ul></div>
+    </div>
+    <div class="footer-note"><span>图 5｜工具调用与来源追溯</span><span>商业接口可替换，领域 Schema 与任务闭环可复用</span></div>
+  </section>
+
+  <section id="safety" class="diagram">
+    <div class="eyebrow">SAFETY BY DESIGN</div><h1>模型负责理解与取舍，安全结论由可验证规则兜底</h1><div class="subtitle">RoadMan 是出行规划辅助系统，不接入车辆控制、不替代实时导航和驾驶员判断。</div>
+    <div class="safety">
+      <div class="card"><h2>智能体擅长</h2><div class="rule">理解模糊目标、上下文和自然语言修改</div><div class="rule">研究目的地、特殊事件和候选地点</div><div class="rule">在多目标之间取舍并解释规划依据</div><div class="rule">发现内容缺口并向责任智能体提出修订请求</div></div>
+      <div class="shield">✓</div>
+      <div class="card"><h2>确定性层强制</h2><div class="rule">坐标、真实道路点列、耗时与能耗计算</div><div class="rule">阶段连续、往返闭环、时间冲突与超长移动</div><div class="rule">连续驾驶、补能、三餐、住宿和返程窗口</div><div class="rule">失败不落库、编辑确认、版本回滚与导出门禁</div></div>
+    </div>
+    <div class="row" style="margin-top:22px"><div class="card" style="flex:1"><h3>人工确认节点</h3><p>需求最终确认、行程修改预览、地图选点、外部信息不确定和出发前复核。</p></div><div class="card" style="flex:1"><h3>明确使用边界</h3><p>路线、天气、开放时间、票务、班次、路况与价格随时变化，必须以运营方和实时导航为准。</p></div></div>
+    <div class="footer-note"><span>图 6｜安全边界</span><span>不让模型覆盖硬约束，也不把可自动修复的问题推给用户</span></div>
+  </section>
+
+  <section id="deployment" class="diagram">
+    <div class="eyebrow">DEPLOYMENT & OPERATIONS</div><h1>可本地复现、可局域网演示的容器化部署</h1><div class="subtitle">Docker Compose 一键启动；前后端、队列、数据库和外部服务都有清晰故障边界。</div>
+    <div class="deploy">
+      <div class="zone"><h2>访问与交互</h2><div class="svc"><b>Vue 3 前端</b><span>首页、需求核对、详情、地图、编辑、历史与车型</span></div><div class="svc"><b>Nginx</b><span>静态资源、反向代理、局域网入口 0.0.0.0:8080</span></div><div class="svc"><b>SSE 客户端</b><span>断线重连、渐进事件与用户可见状态</span></div></div>
+      <div class="zone"><h2>核心服务</h2><div class="svc"><b>FastAPI API</b><span>统一契约、错误码、OpenAPI、请求与追踪 ID</span></div><div class="svc"><b>ARQ Worker</b><span>执行 LangGraph 长任务、编辑重排和导出</span></div><div class="svc"><b>Redis + PostgreSQL</b><span>任务队列、正式状态、版本、调用与来源审计</span></div></div>
+      <div class="zone"><h2>外部能力与验证</h2><div class="svc"><b>模型与旅行工具</b><span>模型、地图、天气、旅行搜索、开放地点、车型目录</span></div><div class="svc"><b>自动化验收</b><span>后端测试、前端测试、API 冒烟、需求评测、完整旅程</span></div><div class="svc"><b>运行证据</b><span>健康检查、调用记录、脱敏日志、导出文件和演示录像</span></div></div>
+    </div>
+    <div class="footer-note"><span>图 7｜部署与验证架构</span><span>默认本地受控 Demo；公网写入时再启用完整身份与租户隔离</span></div>
+  </section>
+</body>
+</html>

@@ -1,20 +1,83 @@
 # RoadMan
 
-RoadMan 是一个面向自驾与中短途旅行的智能行程规划工作台。它把自然语言需求、地图/天气/旅游搜索、路线降级、日程校验、人工确认和导出整合在一个可追踪的规划流程中。
+RoadMan 是面向自驾与中短途旅行的多智能体行程工作台。用自然语言描述出发地、目的地、日期、同行人和偏好，系统会自动完成需求核对、目的地研究、真实路线查询、每日食宿行编排、车辆补能与驾驶休息安排、自动复核修复，并输出可导出的完整路书。
 
-## 快速开始
+- 规划在后台持续执行，地图、阶段、景点、餐饮、住宿和进度实时逐步呈现
+- 支持自然语言修改和地图选点，先预览影响、确认后重算，可回滚
+- 行程可导出为 HTML、PDF、PPTX、长图和 Markdown
 
-推荐使用 Docker Compose：
+## 部署（Docker，推荐）
+
+前置要求：安装 [Docker Desktop](https://www.docker.com/products/docker-desktop/) 并启动。
+
+**第一步：准备配置**
 
 ```powershell
 Copy-Item .env.example .env
-# 在 .env 中填写需要使用的 provider key
+```
+
+用编辑器打开 `.env`，至少填入两项（其余按需，完整说明见下方配置表）：
+
+```text
+OLLAMA_API_KEY=你的云端模型 Key
+AMAP_WEBSERVICE_KEY=你的高德 WebService Key
+```
+
+如需浏览器内显示真实地图，再填入 `VITE_AMAP_JSAPI_KEY` 和 `VITE_AMAP_SECURITY_JS_CODE`。
+
+**第二步：启动**
+
+```powershell
 docker compose up -d --build
 ```
 
-打开 <http://localhost:8080>；后端 OpenAPI 在 <http://localhost:8000/docs>，健康检查在 <http://localhost:8080/health>。
+首次启动会构建镜像并初始化数据库，耗时几分钟。
 
-本地 Conda 开发：
+**第三步：验证**
+
+```powershell
+python deploy/api_smoke.py
+```
+
+冒烟脚本通过即表示后端、数据库、队列和各外部能力工作正常。
+
+**第四步：使用**
+
+- Web 工作台：<http://localhost:8080>
+- 局域网内其他设备：`http://本机局域网IP:8080`
+- 后端接口文档：<http://localhost:8000/docs>
+
+**常用运维命令**
+
+```powershell
+docker compose ps                 # 查看服务状态
+docker compose logs -f backend    # 跟踪后端日志
+docker compose down               # 停止全部服务
+docker compose up -d --build      # 更新代码后重新构建
+```
+
+数据库备份与恢复、HTTPS、局域网与排障详见 [docs/operations.md](docs/operations.md)。
+
+## 配置项
+
+所有配置写入根目录 `.env` 文件，完整模板与注释见 [.env.example](.env.example)。
+
+| 变量 | 用途 | 是否必需 |
+| --- | --- | --- |
+| `OLLAMA_API_KEY` | 需求理解、目的地研究、语义编辑等云端智能体 | 是 |
+| `AMAP_WEBSERVICE_KEY` | 地理编码、POI、真实路线查询 | 是 |
+| `VITE_AMAP_JSAPI_KEY` | 浏览器端真实地图（构建时注入，改动后需重新构建） | 推荐 |
+| `VITE_AMAP_SECURITY_JS_CODE` | 浏览器地图安全密钥 | 推荐 |
+| `FLYAI_API_KEY` | 旅行搜索、住宿、餐饮补充 | 推荐 |
+| `OPENTRIPMAP_API_KEY` | 国际/开放景点数据补充 | 可选 |
+| `OLLAMA_MODEL` | 云端模型，默认 `deepseek-v4-flash:0731-cloud` | 可选 |
+| `ROADMAN_HTTP_PROXY` | 容器访问外网所需的宿主机代理，如 `http://host.docker.internal:7890` | 可选 |
+
+缺少非必需 Key 时对应能力自动降级（例如无浏览器地图 Key 时使用简化地图视图），不影响主流程。
+
+## 本地开发（Conda）
+
+后端：
 
 ```powershell
 conda env create -f environment.yml
@@ -25,7 +88,7 @@ alembic -c backend/alembic.ini upgrade head
 uvicorn app.main:app --reload --port 8000
 ```
 
-另开终端启动前端：
+前端（另开终端）：
 
 ```powershell
 cd frontend
@@ -33,35 +96,49 @@ npm install
 npm run dev
 ```
 
-## 重要配置
+本地开发默认使用 SQLite。异步规划依赖 Redis 与 worker，建议用 Compose 跑 PostgreSQL、Redis 和 worker，只在宿主机启动需要调试的服务：
 
-- 后端 key：`AMAP_WEBSERVICE_KEY`、`OPENTRIPMAP_API_KEY`、`FLYAI_API_KEY`、`OLLAMA_API_KEY`。
-- Agent 模型默认是 `deepseek-v4-flash:0731-cloud`，可用 `OLLAMA_MODEL` 覆盖。
-- 浏览器高德 JSAPI 只能通过 `VITE_AMAP_JSAPI_KEY`、`VITE_AMAP_SECURITY_JS_CODE` 在构建时注入。
-- `Skills/**/apikey.txt`、`secretkey.txt`、`apipkey.txt` 只允许作为本地凭据，已加入忽略规则，不要提交。
+```powershell
+docker compose up -d postgres redis worker
+```
 
-完整变量模板见 [.env.example](.env.example)。
-
-## 常用验证
+## 测试与验收
 
 ```powershell
 $env:PYTHONPATH = 'backend'
-pytest backend/tests -q
+pytest backend/tests -q                  # 后端测试
+
 cd frontend
-npm run build
-npm run test:e2e
+npm run test                             # 前端单元测试
+npm run build                            # 前端生产构建
+npm run test:e2e                         # 前端 E2E（Playwright）
+
+python deploy/api_smoke.py               # 运行中容器 API 冒烟
+python deploy/full_journey_acceptance.py # 完整旅程验收（建行程→规划→修改→导出）
+python evaluation/run_evals.py           # 需求理解评测（12 条场景）
 ```
 
-Docker 运维、局域网访问和 provider 验证见 [docs/operations.md](docs/operations.md)。
+## 项目结构
 
-## 文档入口
+```text
+backend/     FastAPI + LangGraph 后端、ARQ worker、数据库迁移、测试
+frontend/    Vue 3 + Vite 前端、E2E 测试
+shared/      前后端共享的 JSON Schema 契约与示例行程
+Skills/      外部能力技能包（高德、天气、旅行搜索、车型、景点）
+deploy/      冒烟与验收脚本、Nginx 配置、备份恢复
+evaluation/  需求理解评测场景与打分脚本
+docs/        接口契约、领域模型、部署运维等文档
+submission/  参赛方案书与生成审计工具
+```
 
-- [project.md](project.md)：当前实现、边界、接口和维护状态。
-- [docs/README.md](docs/README.md)：精简后的文档索引。
-- [docs/api-contract.md](docs/api-contract.md)：HTTP/SSE 接口契约。
-- [docs/domain-model.md](docs/domain-model.md)：Trip、阶段、活动和补丁模型。
-- [RoadMan_分阶段实施总规划.md](RoadMan_分阶段实施总规划.md)：原始总规划（只读基线）。
+## 文档
 
-## 安全提醒
+- [project.md](project.md)：系统架构、规划工作流、接口与数据边界
+- [docs/README.md](docs/README.md)：全部维护文档索引
+- [docs/api-contract.md](docs/api-contract.md)：HTTP/SSE 接口契约
+- [docs/operations.md](docs/operations.md)：部署运维、备份恢复与排障
+- [submission/GOAI_Boundless_Agents/RoadMan_赛道二参赛方案书.md](submission/GOAI_Boundless_Agents/RoadMan_赛道二参赛方案书.md)：参赛方案书
 
-历史版本曾把 provider key 文件纳入 Git。当前版本已停止跟踪并从构建流程移除，但旧提交仍可能包含这些凭据；部署前请在各 provider 控制台轮换曾使用过的 key，并检查远端仓库的访问权限。
+## 使用边界
+
+路线、天气、开放时间、票务、班次、路况与价格可能变化。RoadMan 会记录来源、时间和降级状态，但导出结果不能替代景区、交通运营方、道路管理部门或车辆厂商的实时信息。出发前请再次核对预约、封路、恶劣天气、补能可用性及交通班次。

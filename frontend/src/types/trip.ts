@@ -112,4 +112,5 @@ export interface PlanningEvent {
   progress: number
   node?: string
   tool?: string
+  batch_id?: string
 }

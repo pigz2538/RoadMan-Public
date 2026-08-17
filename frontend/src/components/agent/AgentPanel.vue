@@ -5,6 +5,7 @@ import {
   applyPlanPatch,
   fetchRecommendations,
   fetchTrip,
+  confirmTripReplan,
   interpretTripEdit,
   previewCandidatePatch,
   rejectPlanPatch,
@@ -21,6 +22,9 @@ const recommendationOpen = ref(false)
 const recommendationLoading = ref(false)
 const recommendationError = ref('')
 const recommendations = ref<RecommendationCandidate[]>([])
+const pendingGlobalReplan = ref<{ message: string; confirmation?: string | null } | null>(null)
+const confirmingGlobalReplan = ref(false)
+const editSubmitting = ref(false)
 
 const categoryMap = {
   景点: 'attractions',
@@ -105,6 +109,7 @@ async function decidePatch(apply: boolean) {
     if (apply) {
       const patchName = displayPatchName(store.pendingPatch)
       const result = await applyPlanPatch(store.trip.id, store.pendingPatch.id)
+      store.setRouteReplanRequired(Boolean(result.route_replan_required))
       // Hydrate once more after the commit so deletion -> add/replacement
       // sequences cannot resurrect a stale activity list from the preview.
       try {
@@ -154,7 +159,8 @@ async function undoLastPatch() {
 
 async function send() {
   const text = message.value.trim()
-  if (!text || !store.trip) return
+  if (!text || !store.trip || editSubmitting.value) return
+  editSubmitting.value = true
   messages.value.push({ side: 'user', text })
   message.value = ''
   recommendationError.value = ''
@@ -166,6 +172,12 @@ async function send() {
     })
     messages.value.push({ side: 'ai', text: result.message })
     if (result.patch) store.pendingPatch = result.patch
+    if (result.requires_confirmation) {
+      pendingGlobalReplan.value = {
+        message: result.message,
+        confirmation: result.confirmation_message,
+      }
+    }
     if (result.global_replan_required) {
       // A global edit (for example “换成两天行程”) is not a patch preview:
       // it must restart the planning graph so every day, route and meal is
@@ -177,7 +189,32 @@ async function send() {
       side: 'ai',
       text: error instanceof Error ? error.message : '暂时无法理解这条修改要求',
     })
+  } finally {
+    editSubmitting.value = false
   }
+}
+
+async function confirmGlobalReplan() {
+  if (!store.trip || confirmingGlobalReplan.value) return
+  confirmingGlobalReplan.value = true
+  try {
+    const result = await confirmTripReplan(store.trip.id)
+    store.trip = result.trip
+    store.setRouteReplanRequired(false)
+    pendingGlobalReplan.value = null
+    messages.value.push({ side: 'ai', text: result.message })
+    emit('replan-requested')
+  } catch (error) {
+    recommendationError.value = error instanceof Error ? error.message : '确认修改失败'
+  } finally {
+    confirmingGlobalReplan.value = false
+  }
+}
+
+function requestRouteReplan() {
+  store.setRouteReplanRequired(false)
+  messages.value.push({ side: 'ai', text: '收到，正在重新计算路线、接驳和每日时间安排。' })
+  emit('replan-requested')
 }
 
 watch(() => store.category, () => {
@@ -194,6 +231,23 @@ watch(() => store.pendingPatch?.id, (patchId) => {
   <aside class="agent-panel glass-card">
     <header><Bot /><strong>Agent 行程助理</strong><span class="online-dot" /></header>
     <div class="context-chip">{{ contextText }}</div>
+
+    <section v-if="store.routeReplanRequired" class="route-replan-notice glass-card">
+      <strong>每日行程已经改变</strong>
+      <p>已确认的增删改会影响路线和时间。全部编辑完成后，再重新规划一次即可统一更新地图与行程。</p>
+      <button class="primary-button" type="button" @click="requestRouteReplan">
+        重新规划路线与时间
+      </button>
+    </section>
+
+    <section v-if="pendingGlobalReplan" class="global-replan-confirm glass-card">
+      <strong>修改方案已准备</strong>
+      <p>{{ pendingGlobalReplan.message }}</p>
+      <small>{{ pendingGlobalReplan.confirmation || '确认后才会重新搜索并计算路线、时间和每日安排。' }}</small>
+      <button class="primary-button" :disabled="confirmingGlobalReplan" @click="confirmGlobalReplan">
+        {{ confirmingGlobalReplan ? '正在确认…' : '确认修改并重新规划' }}
+      </button>
+    </section>
 
     <div v-if="recommendationOpen" class="recommendation-panel">
       <header>

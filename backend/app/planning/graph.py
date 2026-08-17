@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import time as monotonic_time
 from collections.abc import Awaitable, Callable
+from copy import deepcopy
 from datetime import date, datetime, time, timedelta
 from typing import Any, Literal
 from urllib.parse import quote
@@ -46,7 +47,8 @@ from .recommendations import (
     plan_attraction_coverage,
     rank_tourism_candidates,
 )
-from .poi_enrichment import enrich_tourism_candidates
+from .exclusions import filter_excluded_candidates
+from .poi_enrichment import enrich_scheduled_activities, enrich_tourism_candidates
 from .seasonality import apply_seasonal_guard, parse_trip_date
 from .state import RoadManState
 from .tourism import review_daily_schedule, schedule_tourism_activities, verify_tourism_plan
@@ -196,6 +198,20 @@ def build_planning_graph(
                     # remove that stale marker so the UI and audit trail do
                     # not claim the value was still a default.
                     defaults.discard("travelers=1")
+        if extracted.get("stay_only_at_destination") is True:
+            current["stay_only_at_destination"] = True
+        extracted_must_visit = extracted.get("must_visit_names") or []
+        if isinstance(extracted_must_visit, list):
+            existing_names = {
+                str(item.get("name") or "").strip()
+                for item in current.get("must_visit", [])
+                if isinstance(item, dict)
+            }
+            for name in extracted_must_visit:
+                normalized = str(name or "").strip()
+                if normalized and normalized not in existing_names:
+                    current.setdefault("must_visit", []).append({"name": normalized})
+                    existing_names.add(normalized)
         current["defaults_applied"] = list(dict.fromkeys(defaults))
         current["raw_text"] = state["raw_input"]
         current["preferences"] = list(
@@ -623,7 +639,16 @@ def build_planning_graph(
         }
 
     async def discover_tourism(state: RoadManState) -> dict[str, Any]:
-        destination = state["trip_request"]["destination"]
+        trip_request = state["trip_request"]
+        destination = trip_request["destination"]
+        # A normal destination request must stay city/destination-wide.  A
+        # local-only scope is opt-in and is set by the requirement Agent only
+        # after the user explicitly asks to stay around one destination (for
+        # example, “这几天都在九宫山，不去其他地方”).  Do not turn the
+        # default discovery query into a hidden radius filter.
+        stay_only_at_destination = bool(
+            trip_request.get("stay_only_at_destination")
+        )
         await emit(
             state,
             "destination_research",
@@ -863,19 +888,26 @@ def build_planning_graph(
         for category, (keywords, page_size) in categories.items():
             if category == "hotels" and candidates["hotels"]:
                 continue
+            poi_payload: dict[str, Any] = {
+                "keywords": keywords,
+                "city": destination.get("city") or destination.get("name"),
+                "page_size": page_size,
+            }
+            # Only an explicit local-only request gets a coordinate radius.
+            # For ordinary trips AMap searches the whole destination city so
+            # landmarks outside an arbitrary 25 km circle remain eligible.
+            if stay_only_at_destination and coordinates:
+                poi_payload.update(
+                    {
+                        "location": (
+                            f"{coordinates['longitude']},{coordinates['latitude']}"
+                        ),
+                        "radius": 35000,
+                    }
+                )
             result = await registry.execute(
                 "amap.poi",
-                {
-                    "keywords": keywords,
-                    "city": destination.get("city"),
-                    "location": (
-                        f"{coordinates['longitude']},{coordinates['latitude']}"
-                        if coordinates
-                        else None
-                    ),
-                    "radius": 25000,
-                    "page_size": page_size,
-                },
+                poi_payload,
                 SkillContext(trip_id=state["trip_id"]),
             )
             if not result.success or not isinstance(result.data, dict):
@@ -924,7 +956,11 @@ def build_planning_graph(
                 {
                     "longitude": coordinates["longitude"],
                     "latitude": coordinates["latitude"],
-                    "radius_m": 25000,
+                    # OpenTripMap requires a radius.  Keep the broad default
+                    # as a provider query boundary, not an itinerary filter;
+                    # the explicit local-only request uses a tighter search
+                    # area and the planner applies the same semantic scope.
+                    "radius_m": 35000 if stay_only_at_destination else 100000,
                     "limit": 30,
                     "language": "en",
                 },
@@ -1215,6 +1251,45 @@ def build_planning_graph(
                     tool="amap.poi",
                 )
 
+        # A confirmed map/candidate edit is a durable user decision.  The
+        # provider search above is intentionally fresh on every replan, but
+        # it must not erase a place the user explicitly added.  Re-inject the
+        # exact candidate (including its chosen coordinates and category)
+        # before ranking and scheduling so the route builder can connect it.
+        confirmed_additions = state.get("confirmed_additions", []) or []
+        if isinstance(confirmed_additions, list):
+            for record in confirmed_additions:
+                if not isinstance(record, dict):
+                    continue
+                category = str(record.get("category") or "").strip()
+                candidate = record.get("candidate")
+                if category not in candidates or not isinstance(candidate, dict):
+                    continue
+                place = candidate.get("place") or {}
+                name = str(place.get("name") or "").strip()
+                if not name or not place.get("coordinates"):
+                    continue
+                normalized = _normalize_poi_name(name)
+                existing = next(
+                    (
+                        item
+                        for item in candidates[category]
+                        if _normalize_poi_name((item.get("place") or {}).get("name")) == normalized
+                    ),
+                    None,
+                )
+                if existing is not None:
+                    # Keep the user-selected coordinates and metadata even
+                    # when a provider returned the same name at a nearby POI.
+                    existing.update(deepcopy(candidate))
+                    existing["user_confirmed"] = True
+                    existing["provider"] = existing.get("provider") or "用户已确认"
+                else:
+                    injected = deepcopy(candidate)
+                    injected["user_confirmed"] = True
+                    injected["provider"] = injected.get("provider") or "用户已确认"
+                    candidates[category].insert(0, injected)
+
         candidates = rank_tourism_candidates(
             candidates,
             destination,
@@ -1269,6 +1344,13 @@ def build_planning_graph(
                 event="tool_completed",
                 tool="ollama.poi_ranker",
             )
+        # A deleted activity is a durable user constraint.  Apply it after all
+        # provider and Agent ranking passes so a second provider cannot put the
+        # same place back into the replan candidate pool.
+        candidates = filter_excluded_candidates(
+            candidates,
+            state.get("excluded_places"),
+        )
         destination_research["attraction_coverage"] = plan_attraction_coverage(
             candidates.get("attractions", []),
             len(state.get("day_plans", [])),
@@ -1315,6 +1397,42 @@ def build_planning_graph(
         attraction_candidates = state.get("tourism_candidates", {}).get(
             "attractions", []
         )
+        # A semantic request such as “三天都在九宫山，不去其他地方” must not
+        # reuse stale candidates from the origin city or a previous plan. Keep
+        # explicitly required places, and otherwise stay within a generous
+        # destination radius so nearby towns remain available without turning
+        # the itinerary into another intercity trip.
+        if request.get("stay_only_at_destination"):
+            destination_city = str(destination.get("city") or destination.get("name") or "").strip()
+            destination_point = destination.get("coordinates")
+            required_names = {
+                str(item.get("name") or "").strip()
+                for item in request.get("must_visit", [])
+                if isinstance(item, dict) and str(item.get("name") or "").strip()
+            }
+            filtered_candidates: list[dict[str, Any]] = []
+            for candidate in attraction_candidates:
+                place = candidate.get("place") or {}
+                name = str(place.get("name") or "").strip()
+                if name in required_names:
+                    filtered_candidates.append(candidate)
+                    continue
+                candidate_city = str(place.get("city") or "").strip()
+                point = place.get("coordinates")
+                same_city = bool(destination_city and candidate_city and (
+                    destination_city in candidate_city or candidate_city in destination_city
+                ))
+                nearby = False
+                if destination_point and point:
+                    try:
+                        origin_point = destination_point if isinstance(destination_point, RoutePoint) else RoutePoint(**destination_point)
+                        candidate_point = point if isinstance(point, RoutePoint) else RoutePoint(**point)
+                        nearby = _haversine_km(origin_point, candidate_point) <= 35
+                    except (TypeError, ValueError):
+                        nearby = False
+                if same_city or nearby or not destination_city:
+                    filtered_candidates.append(candidate)
+            attraction_candidates = filtered_candidates
         if not attraction_candidates:
             return {
                 "local_routes": [],
@@ -1390,6 +1508,26 @@ def build_planning_graph(
                 return_candidates=True,
             )
             if not day_targets:
+                # A provider outage or a sparse destination must not leave a
+                # calendar day without a route node. Keep the day connected
+                # with an explicit zero-distance local placeholder; the UI
+                # can render it as free time while the user can still edit
+                # the day later.
+                local_routes.append(
+                    {
+                        "day_index": day_index,
+                        "sequence": 0,
+                        "origin": destination,
+                        "destination": destination,
+                        "route": _fallback_local_route(
+                            destination,
+                            destination,
+                            "transit",
+                        ),
+                        "return_to_base": True,
+                        "free_time": True,
+                    }
+                )
                 continue
             anchor = destination
             # Sequence numbers describe the *successful* route chain, not
@@ -1415,6 +1553,13 @@ def build_planning_graph(
                 )
                 if candidate_route.get("success") and _local_route_reasonable(candidate_route.get("data", {})):
                     route = candidate_route
+                else:
+                    # Keep the selected place in the itinerary when the
+                    # routing provider returns no usable geometry. The
+                    # fallback is visibly marked as estimated and is still
+                    # rechecked by the planner before persistence.
+                    fallback_mode = _safe_fallback_local_mode(anchor, target, mode)
+                    route = _fallback_local_route(anchor, target, fallback_mode)
                 if route and target:
                     local_routes.append(
                         {
@@ -1747,6 +1892,49 @@ def build_planning_graph(
                     if not stages or connector_stage.planned_end <= return_cutoff:
                         stages.append(connector_stage)
                         local_start = connector_stage.planned_end + timedelta(minutes=15)
+            # Every calendar day must finish at the destination base before the
+            # next day starts.  If the evening cutoff stopped the sightseeing
+            # chain early, the old code simply dropped the generated
+            # return-to-base leg; the next day's first local stage then started
+            # in the city while the previous day still ended at a distant POI.
+            # Add that missing connector before persisting the day plan.
+            needs_day_base_connector = (
+                bool(stages)
+                and not _same_place(
+                    stages[-1].destination.model_dump(mode="json"),
+                    request["destination"],
+                )
+                and (index < len(day_defs) - 1 or not return_cutoff)
+            )
+            if needs_day_base_connector:
+                base_origin = stages[-1].destination.model_dump(mode="json")
+                local_mode = "driving" if "driving" in request.get("transport_modes", []) else "transit"
+                connector_route = await _route(
+                    registry,
+                    base_origin,
+                    request["destination"],
+                    state["trip_id"],
+                    preferred_mode=local_mode,
+                    fallback_modes=["transit", "riding", "walking", "driving"],
+                )
+                if not connector_route.get("success"):
+                    connector_route = _fallback_local_route(
+                        base_origin,
+                        request["destination"],
+                        local_mode,
+                    )
+                connector_route = await prepare_route(connector_route)
+                connector_stage = _movement_stage(
+                    day_id=f"day_{index + 1}",
+                    sequence=len(stages),
+                    title="返回住宿或目的地核心区",
+                    origin=base_origin,
+                    destination=request["destination"],
+                    route=connector_route,
+                    start_at=stages[-1].planned_end + timedelta(minutes=15),
+                )
+                stages.append(connector_stage)
+                local_start = connector_stage.planned_end + timedelta(minutes=15)
             if index == len(day_defs) - 1:
                 inbound = await prepare_route(inbound)
                 return_start = _return_stage_start(
@@ -2178,7 +2366,16 @@ def build_planning_graph(
         plans = schedule_tourism_activities(
             state.get("day_plans", []),
             state.get("tourism_candidates", {}),
+            state.get("confirmed_additions", []),
         )
+        if settings.enable_poi_web_enrichment:
+            plans, enriched_candidates = await enrich_scheduled_activities(
+                plans,
+                state.get("tourism_candidates", {}),
+                timeout_seconds=settings.poi_web_timeout_seconds,
+            )
+        else:
+            enriched_candidates = state.get("tourism_candidates", {})
         research = dict(state.get("destination_research", {}))
         coverage = dict(research.get("attraction_coverage", {}))
         scheduled_names = {
@@ -2202,6 +2399,7 @@ def build_planning_graph(
         research["attraction_coverage"] = coverage
         return {
             "day_plans": plans,
+            "tourism_candidates": enriched_candidates,
             "destination_research": research,
             "progress": {"node": "schedule_tourism", "value": 91},
         }
@@ -2216,6 +2414,7 @@ def build_planning_graph(
         plans, review_notes = review_daily_schedule(
             state.get("day_plans", []),
             state.get("tourism_candidates", {}),
+            state.get("confirmed_additions", []),
         )
         return {
             "day_plans": plans,
@@ -2246,6 +2445,15 @@ def build_planning_graph(
                     "description": "未生成可执行移动阶段",
                 }
             )
+        for day in state.get("day_plans", []):
+            if not day.get("stages"):
+                issues.append(
+                    {
+                        "code": "EMPTY_DAY_STAGES",
+                        "severity": "blocker",
+                        "description": f"第 {day.get('day_index', '?')} 天没有可执行的移动或本地活动节点",
+                    }
+                )
         issues.extend(
             verify_deep_drive_plan(
                 normalized_days,
@@ -2332,16 +2540,27 @@ def build_planning_graph(
             min(96 + attempt, 99),
         )
         # Re-run the itinerary/review agents instead of sending the traveller
-        # a failure dialog for a defect the system can repair itself. The
-        # scheduling pass is idempotent and rebuilds meals/hotels/attractions
-        # from curated candidates; the overlap pass normalizes provider times.
+        # a failure dialog for a defect the system can repair itself.  Route
+        # continuity blockers require rebuilding movement stages from the
+        # chained local routes; merely rescheduling activities cannot repair a
+        # disconnected stage pair.
+        rebuild_route = any(
+            code in {"ROUTE_DISCONTINUITY", "ROUTE_NOT_CLOSED", "EMPTY_DAY_STAGES"}
+            for code in issue_codes
+        )
+        repair_input_days = state.get("day_plans", [])
+        if rebuild_route:
+            rebuilt = await build_stages(state)
+            repair_input_days = rebuilt.get("day_plans", repair_input_days)
         repaired_days = schedule_tourism_activities(
-            state.get("day_plans", []),
+            repair_input_days,
             state.get("tourism_candidates", {}),
+            state.get("confirmed_additions", []),
         )
         repaired_days, review_notes = review_daily_schedule(
             repaired_days,
             state.get("tourism_candidates", {}),
+            state.get("confirmed_additions", []),
         )
         repaired_days = _repair_activity_stage_overlaps(repaired_days)
         return {
@@ -3243,10 +3462,32 @@ def _local_route_reasonable(data: dict[str, Any]) -> bool:
     duration = int(data.get("duration_minutes") or 0)
     distance = float(data.get("distance_km") or 0)
     if mode == "walking":
-        return 0.05 <= distance <= 8 and 1 <= duration <= 90
+        return 0.05 <= distance <= 4 and 1 <= duration <= 60
     if mode == "riding":
-        return 0.05 <= distance <= 20 and 1 <= duration <= 100
+        return 0.05 <= distance <= 18 and 1 <= duration <= 90
     return 0.05 <= distance <= 35 and 1 <= duration <= 120
+
+
+def _safe_fallback_local_mode(
+    origin: dict[str, Any],
+    destination: dict[str, Any],
+    requested_mode: str,
+) -> str:
+    """Downgrade an overlong walking/riding fallback to public transit."""
+    try:
+        first = origin.get("coordinates") or {}
+        second = destination.get("coordinates") or {}
+        distance = _haversine_km(
+            RoutePoint(longitude=float(first["longitude"]), latitude=float(first["latitude"])),
+            RoutePoint(longitude=float(second["longitude"]), latitude=float(second["latitude"])),
+        )
+    except (KeyError, TypeError, ValueError):
+        distance = 0.0
+    if requested_mode == "walking" and (distance > 4 or distance / 4.5 * 60 > 60):
+        return "riding" if distance <= 18 else "transit"
+    if requested_mode == "riding" and (distance > 18 or distance / 15 * 60 > 90):
+        return "transit"
+    return requested_mode
 
 
 def _select_itinerary_places(
@@ -3277,8 +3518,16 @@ def _select_itinerary_places(
         if point:
             seen_coordinates.append(point)
         remaining.append(candidate)
-    selected: list[dict[str, Any]] = []
+    # Explicit user additions are hard requirements for the next replan, not
+    # ordinary ranked suggestions.  Reserve capacity for them first; a
+    # provider's score/radius must never silently crowd out a map-selected
+    # place the user just confirmed.
+    confirmed = [item for item in remaining if item.get("user_confirmed")]
+    selected: list[dict[str, Any]] = confirmed[:limit]
+    remaining = [item for item in remaining if item not in selected]
     current = anchor
+    if selected:
+        current = selected[-1].get("place") or anchor
     while remaining and len(selected) < limit:
         current_coordinates = current.get("coordinates") or {}
 

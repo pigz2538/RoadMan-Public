@@ -110,6 +110,11 @@
           "default": null,
           "title": "Detail Url"
         },
+        "in_transit": {
+          "default": false,
+          "title": "In Transit",
+          "type": "boolean"
+        },
         "ticket_or_price": {
           "anyOf": [
             {
@@ -120,6 +125,41 @@
             }
           ],
           "default": null
+        },
+        "parking_or_price": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MoneyRange"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "parking_note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parking Note"
+        },
+        "information_summary": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Information Summary"
         },
         "opening_hours": {
           "anyOf": [
@@ -540,6 +580,66 @@
           ],
           "default": null,
           "title": "Traffic Summary"
+        },
+        "service_number": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Service Number"
+        },
+        "service_operator": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Service Operator"
+        },
+        "departure_terminal": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Departure Terminal"
+        },
+        "arrival_terminal": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Arrival Terminal"
+        },
+        "service_detail_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Service Detail Url"
         },
         "weather_summary": {
           "anyOf": [
@@ -1025,6 +1125,11 @@
           },
           "title": "Must Visit",
           "type": "array"
+        },
+        "stay_only_at_destination": {
+          "default": false,
+          "title": "Stay Only At Destination",
+          "type": "boolean"
         },
         "budget": {
           "anyOf": [

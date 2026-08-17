@@ -898,7 +898,35 @@ class _FlyAISearchAdapter(SkillAdapter):
                 warnings=["FlyAI 搜索未返回可解析 JSON", stderr.decode("utf-8", errors="replace")[:160]],
                 error_code="FLYAI_INVALID_RESPONSE",
             )
-        raw_items = (body.get("data") or {}).get("itemList", [])
+        raw_data = body.get("data")
+        # ``keyword-search`` returns a structured itemList, while the
+        # semantic command returns a provider-authored Markdown answer in the
+        # same ``data`` field.  Treat both as valid results instead of
+        # assuming ``data`` is always a mapping (the old assumption raised an
+        # AttributeError and surfaced as SKILL_EXECUTION_FAILED).
+        if isinstance(raw_data, str):
+            content = raw_data.strip()
+            if not content:
+                return SkillResult(
+                    success=False,
+                    provider="FlyAI / 飞猪",
+                    warnings=["FlyAI 语义搜索返回空内容"],
+                    error_code="FLYAI_NO_RESULTS",
+                )
+            return SkillResult(
+                success=True,
+                provider="FlyAI / 飞猪",
+                data={"query": request.query, "items": [], "content": content[:12000]},
+                sources=[
+                    SourceRecord(
+                        provider="FlyAI / 飞猪",
+                        title="目的地语义搜索结果",
+                        url="https://flyai.open.fliggy.com/",
+                    )
+                ],
+                latency_ms=int((time.perf_counter() - started) * 1000),
+            )
+        raw_items = (raw_data or {}).get("itemList", []) if isinstance(raw_data, dict) else []
         items: list[dict[str, Any]] = []
         for raw in raw_items if isinstance(raw_items, list) else []:
             item = raw.get("info") if isinstance(raw, dict) and isinstance(raw.get("info"), dict) else raw
@@ -961,7 +989,11 @@ class FlyAISemanticSearchAdapter(_FlyAISearchAdapter):
     version = "1.0.0"
     category = "travel_search"
     command_name = "ai-search"
-    timeout_seconds = 20
+    # Semantic search may compose several travel-index queries before the
+    # CLI returns its structured answer.  A 20-second ceiling caused valid
+    # requests to be cancelled while the provider was still working (the
+    # regular keyword/POI searches remain on their shorter budget).
+    timeout_seconds = 60
     max_retries = 0
     cache_ttl_seconds = 30 * 60
 

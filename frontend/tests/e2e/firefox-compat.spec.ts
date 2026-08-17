@@ -7,7 +7,7 @@ test('Firefox loads the low-risk white vehicle without WebGL failure', async ({ 
   await page.goto('/')
   const model = page.locator('model-viewer')
   await expect(model).toBeVisible()
-  await expect(model).toHaveAttribute('src', '/models/car-concept-white.glb')
+  await expect(model).toHaveAttribute('src', '/models/mclaren.glb')
   await expect(page.getByText('3D 模型已加载')).toBeAttached({ timeout: 30_000 })
   await expect(model).toHaveAttribute('camera-controls')
   await expect(model).not.toHaveAttribute('auto-rotate')

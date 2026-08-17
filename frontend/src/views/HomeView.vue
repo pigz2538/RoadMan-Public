@@ -53,6 +53,10 @@ const VEHICLE_STORAGE_KEY = 'roadman:current-vehicle-id'
 const modelEnabled = ref(true)
 const modelLoaded = ref(false)
 const modelError = ref(false)
+// Use the user-provided McLaren asset as the default hero model.  The white
+// concept car is kept in public/models only as a compatibility asset; it must
+// never silently replace the selected model in the normal home experience.
+const modelSource = ref('/models/mclaren.glb')
 const voiceReserved = ref(false)
 const planning = ref(false)
 const preflightChecking = ref(false)
@@ -616,7 +620,7 @@ function activate(label: string) {
           :is="'model-viewer'"
           class="vehicle-model"
           :class="{ loaded: modelLoaded }"
-          src="/models/car-concept-white.glb"
+           :src="modelSource"
           alt="可旋转的 RoadMan 3D 车辆模型"
           camera-controls
           v-bind="vehicleMotionAttributes"
@@ -638,8 +642,8 @@ function activate(label: string) {
           <span>正在加载车辆模型…</span>
         </div>
         <div v-else-if="modelError" class="vehicle-loading error" role="status">
-          <span>白模渲染失败，已暂停渲染以保护显卡</span>
-          <button type="button" class="secondary-button" @click="modelError = false; modelEnabled = true">重新加载白模</button>
+          <span>车辆模型渲染失败，已暂停渲染以保护显卡</span>
+          <button type="button" class="secondary-button" @click="modelError = false; modelLoaded = false; modelEnabled = true">重新加载车辆模型</button>
         </div>
         <span class="sr-only">{{ modelLoaded ? '3D 模型已加载' : modelError ? '3D 模型加载失败' : '正在加载 3D 模型' }}</span>
       </div>

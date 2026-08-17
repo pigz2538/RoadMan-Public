@@ -145,16 +145,21 @@ async def research_destination(
     )
     flyai_items: list[dict[str, Any]] = []
     flyai_sources: list[dict[str, Any]] = []
+    semantic_text: list[str] = []
     for result in (keyword_result, semantic_result):
         if result.success and isinstance(result.data, dict):
             flyai_items.extend(result.data.get("items", []))
             flyai_sources.extend(item.model_dump(mode="json") for item in result.sources)
+            content = str(result.data.get("content") or "").strip()
+            if content:
+                semantic_text.append(content[:12000])
     return {
         "destination": destination,
         "status": "researched" if web_sources or flyai_items else "needs_review",
         "queries": queries,
         "web_sources": web_sources,
         "flyai_items": flyai_items[:24],
+        "flyai_semantic_text": "\n\n".join(semantic_text),
         "sources": [*web_sources, *flyai_sources],
         "providers": {
             "web": bool(web_sources),

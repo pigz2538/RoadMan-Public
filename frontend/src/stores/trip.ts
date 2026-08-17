@@ -13,10 +13,12 @@ export const useTripStore = defineStore('trip', () => {
   const planningEvents = ref<PlanningEvent[]>([])
   const queuedPlanningEvents = ref<PlanningEvent[]>([])
   const planningAnimationActive = ref(false)
+  const agentDialogue = ref<unknown[]>([])
   let planningAnimationTimer: ReturnType<typeof setTimeout> | undefined
   const patchVisible = ref(false)
   const pendingPatch = ref<PlanPatch | null>(null)
   const lastAppliedPatchId = ref<string | null>(null)
+  const routeReplanRequired = ref(false)
 
   const currentDay = computed(() => trip.value?.days[currentDayIndex.value])
   const currentStage = computed(() =>
@@ -79,6 +81,11 @@ export const useTripStore = defineStore('trip', () => {
     planningEvents.value = []
     queuedPlanningEvents.value = []
     planningAnimationActive.value = false
+    agentDialogue.value = []
+  }
+
+  function setRouteReplanRequired(value: boolean) {
+    routeReplanRequired.value = value
   }
 
   return {
@@ -92,15 +99,18 @@ export const useTripStore = defineStore('trip', () => {
     planningEvent,
     planningEvents,
     planningAnimationActive,
+    agentDialogue,
     planningPresentationIdle: computed(() => !planningAnimationActive.value && !queuedPlanningEvents.value.length),
     patchVisible,
     pendingPatch,
     lastAppliedPatchId,
+    routeReplanRequired,
     setDay,
     setStage,
     selectActivity,
     removeActivity,
     addPlanningEvent,
     resetPlanningEvents,
+    setRouteReplanRequired,
   }
 })

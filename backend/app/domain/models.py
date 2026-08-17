@@ -188,6 +188,9 @@ class TripRequest(BaseModel):
     special_events: list[str] = Field(default_factory=list)
     max_days: int | None = Field(default=None, ge=1, le=30)
     must_visit: list[PlaceRef] = Field(default_factory=list)
+    # Keep a semantic edit such as “三天只在九宫山” from reusing stale
+    # candidates from another city or nearby region.
+    stay_only_at_destination: bool = False
     budget: MoneyRange | None = None
     max_continuous_drive_minutes: int = Field(default=120, ge=30)
     defaults_applied: list[str] = Field(default_factory=list)
@@ -267,6 +270,11 @@ class MovementStage(BaseModel):
     duration_minutes: int = Field(ge=0)
     elevation_gain_m: float | None = Field(default=None, ge=0)
     traffic_summary: str | None = None
+    service_number: str | None = None
+    service_operator: str | None = None
+    departure_terminal: str | None = None
+    arrival_terminal: str | None = None
+    service_detail_url: str | None = None
     weather_summary: str | None = None
     toll_fee: MoneyRange | None = None
     energy_estimate: EnergyEstimate | None = None
@@ -307,6 +315,9 @@ class Activity(BaseModel):
     # they represent onboard/waypoint dining during that movement.
     in_transit: bool = False
     ticket_or_price: MoneyRange | None = None
+    parking_or_price: MoneyRange | None = None
+    parking_note: str | None = None
+    information_summary: str | None = None
     opening_hours: OpeningHours | None = None
     reservation_status: Literal["required", "recommended", "not_required", "unknown"] = "unknown"
     reservation_note: str | None = None
@@ -384,6 +395,10 @@ class PlanningSnapshot(BaseModel):
     special_event_research: list[dict[str, Any]] = Field(default_factory=list)
     plan_markdown: str | None = None
     job_id: str | None = None
+    planning_batch_id: str | None = None
+    edit_confirmation_pending: bool = False
+    route_replan_required: bool = False
+    excluded_places: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class PlanPatch(BaseModel):
@@ -465,4 +480,5 @@ class SSEEvent(BaseModel):
     tool: str | None = None
     label: str
     progress: int = Field(ge=0, le=100)
+    batch_id: str | None = None
     timestamp: datetime = Field(default_factory=utc_now)

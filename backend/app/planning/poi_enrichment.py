@@ -10,10 +10,64 @@ from __future__ import annotations
 
 import asyncio
 from html.parser import HTMLParser
+import re
 from typing import Any
 from urllib.parse import quote
 
 import httpx
+
+
+_PROVIDER_BOILERPLATE = (
+    "在线地图官方网站，提供全国地图浏览，地点搜索，公交驾车查询服务。可同时查看商家团购、优惠信息。在线地图，您的出行、生活好帮手。",
+    "飞猪AI开放平台（旅行信息服务）是飞猪旅行的AI能力开放平台，为开发者提供酒店预订、机票搜索、门票API、度假套餐等全品类旅行AI服务，支持OpenClaw协议实时接入飞猪官方商品库。",
+)
+
+
+def _clean_public_description(value: str | None) -> str:
+    text = str(value or "").strip()
+    for boilerplate in _PROVIDER_BOILERPLATE:
+        text = text.replace(boilerplate, "")
+    # A few pages append provider attribution after punctuation/line breaks.
+    text = re.sub(r"(?:在线地图|飞猪AI开放平台|OpenClaw协议)[^。！？]*[。！？]?", "", text)
+    return re.sub(r"\s{2,}", " ", text).strip(" \t\r\n，,；;")
+
+
+def _extract_public_facts(description: str | None) -> dict[str, Any]:
+    text = _clean_public_description(description)
+    facts: dict[str, Any] = {}
+    if not text:
+        return facts
+    hours = re.search(r"((?:每日|周一至周日|周[一二三四五六日天])[^。；;]{0,50}(?:\d{1,2}:\d{2}|开放|营业)[^。；;]*)", text)
+    if hours:
+        facts["opening_hours"] = {"text": hours.group(1)[:180], "confirmed": False}
+    reservation = re.search(r"(预约|预订|实名|门票|购票)[^。；;]{0,80}", text)
+    if reservation:
+        facts["reservation_status"] = "recommended" if re.search(r"预约|预订|实名", text) else "unknown"
+        facts["reservation_note"] = f"公开页面信息：{reservation.group(1)[:140]}，请以官方公告为准。"
+    parking = re.search(r"(停车|停车场|停车费|收费)[^。；;]{0,80}", text)
+    if parking:
+        facts["parking_note"] = f"公开页面停车信息：{parking.group(1)[:140]}"
+    def money_range(amount: float) -> dict[str, Any]:
+        return {
+            "minimum": amount,
+            "maximum": amount,
+            "currency": "CNY",
+            "estimated": True,
+        }
+
+    ticket = re.search(r"门票[^。；;]{0,30}?(\d+(?:\.\d+)?)\s*元", text)
+    if ticket:
+        try:
+            facts["ticket_or_price"] = money_range(float(ticket.group(1)))
+        except ValueError:
+            pass
+    parking_price = re.search(r"停车(?:费|场)?[^。；;]{0,30}?(\d+(?:\.\d+)?)\s*元", text)
+    if parking_price:
+        try:
+            facts["parking_or_price"] = money_range(float(parking_price.group(1)))
+        except ValueError:
+            pass
+    return facts
 
 
 class _MetaParser(HTMLParser):
@@ -105,7 +159,11 @@ async def enrich_tourism_candidates(
         # original provider links remain available in source_records.
         candidate["detail_url"] = result["url"]
         if meta.get("description"):
-            candidate["description"] = meta["description"][:320]
+            cleaned = _clean_public_description(meta["description"])
+            if cleaned:
+                candidate["description"] = cleaned[:320]
+                candidate["information_summary"] = cleaned[:240]
+                candidate.update(_extract_public_facts(cleaned))
         if meta.get("image_url") and not candidate.get("image_url"):
             candidate["image_url"] = meta["image_url"]
         records = candidate.setdefault("source_records", [])
@@ -116,3 +174,46 @@ async def enrich_tourism_candidates(
                 "url": result["url"],
             })
     return candidates
+
+
+async def enrich_scheduled_activities(
+    day_plans: list[dict[str, Any]],
+    candidates: dict[str, list[dict[str, Any]]],
+    *,
+    timeout_seconds: float = 1.8,
+) -> tuple[list[dict[str, Any]], dict[str, list[dict[str, Any]]]]:
+    """Search every scheduled POI, including items absent from the pool.
+
+    The planner may create a required or user-added place directly.  Matching
+    only the recommendation pool used to leave those cards without a public
+    description, image, ticket or parking hint.  Synthetic candidates let the
+    same research agent enrich them without changing the itinerary choice.
+    """
+    category_by_type = {"attraction": "attractions", "meal": "meals", "hotel": "hotels"}
+    synthetic: dict[str, list[dict[str, Any]]] = {"attractions": [], "meals": [], "hotels": []}
+    matches: list[tuple[dict[str, Any], dict[str, Any]]] = []
+    for day in day_plans:
+        for activity in day.get("activities", []):
+            category = category_by_type.get(str(activity.get("type") or ""))
+            if not category:
+                continue
+            place = activity.get("place") or {}
+            name = str(place.get("name") or "").strip()
+            if not name:
+                continue
+            candidate = next((item for item in candidates.get(category, []) if str((item.get("place") or {}).get("name") or "").strip() == name), None)
+            if candidate is None:
+                candidate = {"candidate_id": f"scheduled:{category}:{name}", "place": place}
+                synthetic[category].append(candidate)
+            matches.append((activity, candidate))
+    if any(synthetic.values()):
+        await enrich_tourism_candidates(synthetic, max_attractions=None, max_other=None, timeout_seconds=timeout_seconds)
+        for category, items in synthetic.items():
+            candidates.setdefault(category, []).extend(item for item in items if item.get("detail_url"))
+    for activity, candidate in matches:
+        for key in ("description", "information_summary", "image_url", "detail_url", "ticket_or_price", "parking_or_price", "parking_note", "opening_hours", "reservation_status", "reservation_note"):
+            if candidate.get(key):
+                activity[key] = candidate[key]
+        if candidate.get("source_records"):
+            activity["source_records"] = candidate["source_records"]
+    return day_plans, candidates

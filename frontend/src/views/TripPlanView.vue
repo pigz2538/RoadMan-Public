@@ -47,6 +47,7 @@ const mapPickMode = ref(false)
 const mapPickCategory = ref<'attractions' | 'hotels' | 'meals'>('attractions')
 const mapPickMessage = ref('')
 const planningRestarting = ref(false)
+const activePlanningBatchId = ref<string | null>(null)
 const historyView = computed(() => route.query.history === '1')
 let pollingTimer: number | undefined
 let refreshInFlight = false
@@ -55,6 +56,7 @@ let lastRefreshStartedAt = 0
 const stageDrag = { active: false, moved: false, startX: 0, startScrollLeft: 0, pointerId: -1 }
 const categories = ['景点', '住宿', '餐饮', '服务'] as const
 const { connect } = useTripSSE((event) => {
+  if (activePlanningBatchId.value && event.batch_id && event.batch_id !== activePlanningBatchId.value) return
   store.addPlanningEvent(event)
   if (
     event.event === 'plan_updated'
@@ -172,6 +174,8 @@ async function load() {
       // to the old SSE backlog or replay the progressive planning animation.
       // A historical task that is genuinely still running remains live.
       planningSnapshot.value = await fetchPlanning(tripId)
+      store.setRouteReplanRequired(Boolean(planningSnapshot.value.route_replan_required))
+      activePlanningBatchId.value = planningSnapshot.value.planning_batch_id || null
       if (isActivePlanning) {
         connect(tripId, { live: historyView.value })
         await refreshPlanning()
@@ -206,6 +210,7 @@ async function refreshPlanning() {
   try {
     const snapshot = await fetchPlanning(tripId)
     planningSnapshot.value = snapshot
+    store.setRouteReplanRequired(Boolean(snapshot.route_replan_required))
     if (snapshot.status === 'completed') {
       await hydrateTripProgressively(await fetchTrip(tripId))
       ensureCurrentSelection()
@@ -540,9 +545,12 @@ function eventResearchDetails(item: SpecialEventResearch) {
 async function retryPlanning() {
   planningError.value = ''
   planningRestarting.value = true
+  store.setRouteReplanRequired(false)
   store.resetPlanningEvents()
   try {
+    store.resetPlanningEvents()
     planningSnapshot.value = await startPlanning(String(route.params.tripId))
+    activePlanningBatchId.value = planningSnapshot.value.planning_batch_id || null
     // The SSE stream closes after every terminal planning event. Reconnect so
     // a chat-triggered global replan receives a fresh progressive timeline.
     connect(String(route.params.tripId))

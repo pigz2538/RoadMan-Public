@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test'
 
 test('首页包含核心规划入口', async ({ page }) => {
-  await page.route('**/models/car-concept-white.glb', async (route) => {
+  await page.route('**/models/mclaren.glb', async (route) => {
     await new Promise((resolve) => setTimeout(resolve, 500))
     await route.continue()
   })

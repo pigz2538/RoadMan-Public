@@ -332,6 +332,11 @@
       "default": null,
       "title": "Detail Url"
     },
+    "in_transit": {
+      "default": false,
+      "title": "In Transit",
+      "type": "boolean"
+    },
     "ticket_or_price": {
       "anyOf": [
         {
@@ -342,6 +347,41 @@
         }
       ],
       "default": null
+    },
+    "parking_or_price": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/MoneyRange"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "parking_note": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Parking Note"
+    },
+    "information_summary": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Information Summary"
     },
     "opening_hours": {
       "anyOf": [

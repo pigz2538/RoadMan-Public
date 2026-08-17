@@ -1,0 +1,74 @@
+[
+  {
+    "id": "relative-weekday-zh",
+    "dimension": ["日期理解", "路线闭环"],
+    "input": "下周一早上从武汉出发去九宫山，周三晚上八点前回到武汉，两人自驾看自然风景",
+    "expect": {"origin_contains": "武汉", "destination_contains": "九宫山", "travelers": 2, "date_order_valid": true}
+  },
+  {
+    "id": "relative-date-en",
+    "dimension": ["日期理解", "多语言"],
+    "input": "Leave Shanghai next Friday morning for Suzhou and return Sunday evening, two travellers, comfortable pace",
+    "expect": {"origin_any": ["Shanghai", "上海"], "destination_any": ["Suzhou", "苏州"], "travelers": 2, "date_order_valid": true}
+  },
+  {
+    "id": "couple-party-size",
+    "dimension": ["情侣人数", "舒适偏好", "每日完整性"],
+    "input": "8月21日中午从湖州南浔站出发，在乌镇及其周边玩到8月23日晚，情侣出游舒适为主，每天要有三餐和住宿",
+    "expect": {"origin_contains": "南浔", "destination_contains": "乌镇", "travelers": 2, "date_order_valid": true}
+  },
+  {
+    "id": "same-name-beijing",
+    "dimension": ["同名地点", "跨城交通"],
+    "input": "周五下午从武汉出发去北京市，周日晚八点前回武汉，情侣舒适出游；可比较自驾、高铁、卧铺和飞机，不要把餐厅名里的北京当目的地",
+    "expect": {"origin_contains": "武汉", "destination_contains": "北京", "travelers": 2, "date_order_valid": true}
+  },
+  {
+    "id": "cross-city-multimodal",
+    "dimension": ["跨城交通", "火车", "飞机", "接驳"],
+    "input": "2026-09-18 15:00 从武汉去北京，2026-09-20 20:00 前回武汉，优先舒适，可坐高铁、过夜卧铺或飞机，市内用公共交通",
+    "expect": {"origin_contains": "武汉", "destination_contains": "北京", "transport_any": ["train", "flight", "transit"], "date_order_valid": true}
+  },
+  {
+    "id": "daily-meals-lodging",
+    "dimension": ["三餐住宿", "每日时段", "酒店复用"],
+    "input": "2026-10-02 从南京南站出发，在南京玩4天，住同一家舒适酒店，早中晚三餐都安排好，上午下午晚上都有合理活动，10月5日回南京南站",
+    "expect": {"origin_contains": "南京南站", "destination_contains": "南京", "date_order_valid": true}
+  },
+  {
+    "id": "ev-energy-rest",
+    "dimension": ["新能源补能", "驾驶休息", "路线闭环"],
+    "input": "2026-09-05 从武汉开纯电车去黄山，续航450公里，当前电量65%，每两小时休息，沿途规划可靠充电，9月8日晚返回武汉",
+    "expect": {"origin_contains": "武汉", "destination_contains": "黄山", "transport_any": ["driving"], "date_order_valid": true}
+  },
+  {
+    "id": "special-event-perseids",
+    "dimension": ["特殊事件", "联网研究", "情侣人数"],
+    "input": "在今年暑假英仙座流星雨极大值附近，从武汉自驾到九宫山看流星雨，最多三天，情侣出游；先查权威极大值时刻再定日期",
+    "expect": {"origin_contains": "武汉", "destination_contains": "九宫山", "travelers": 2, "special_event_any": ["英仙座流星雨", "流星雨"]}
+  },
+  {
+    "id": "route-closure",
+    "dimension": ["路线闭环", "返程约束"],
+    "input": "2026-09-11 08:00 从合肥出发，自驾游天柱山和周边，9月13日19:00前必须回到合肥，不要只规划单程",
+    "expect": {"origin_contains": "合肥", "destination_contains": "天柱山", "date_order_valid": true}
+  },
+  {
+    "id": "cross-sea-ferry",
+    "dimension": ["跨海", "轮渡", "澄清"],
+    "input": "2026-10-01 从海口带车去涠洲岛及北海周边玩，10月5日返回海口；需要过海时比较轮渡与其他可行交通并说明订票风险",
+    "expect": {"origin_contains": "海口", "destination_contains": "涠洲岛", "transport_any": ["ferry"], "date_order_valid": true}
+  },
+  {
+    "id": "famous-destination-coverage",
+    "dimension": ["目的地研究", "著名景点", "餐饮住宿"],
+    "input": "2026-10-03 到南京玩五天，两人舒适游，先研究南京代表性景点与必吃，再覆盖秦淮河、中山陵、明孝陵等核心片区，安排三餐和稳定住宿",
+    "expect": {"destination_contains": "南京", "travelers": 2, "date_order_valid": true}
+  },
+  {
+    "id": "season-weather-personalization",
+    "dimension": ["季节适配", "天气", "用户个性"],
+    "input": "2026-08-20 从武汉去神农架三天，带老人，怕热且不走高强度路线；请结合季节、天气、海拔和开放情况逐个判断活动是否合适并返回武汉",
+    "expect": {"origin_contains": "武汉", "destination_contains": "神农架", "date_order_valid": true}
+  }
+]

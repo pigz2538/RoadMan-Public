@@ -102,6 +102,36 @@
       ],
       "default": null,
       "title": "Job Id"
+    },
+    "planning_batch_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Planning Batch Id"
+    },
+    "edit_confirmation_pending": {
+      "default": false,
+      "title": "Edit Confirmation Pending",
+      "type": "boolean"
+    },
+    "route_replan_required": {
+      "default": false,
+      "title": "Route Replan Required",
+      "type": "boolean"
+    },
+    "excluded_places": {
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "title": "Excluded Places",
+      "type": "array"
     }
   },
   "required": [

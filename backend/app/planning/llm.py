@@ -39,7 +39,7 @@ class OllamaRequirementExtractor:
             f"Today is {today.isoformat()}. Return ONLY one valid JSON object (no markdown, no explanation) "
             "with exactly these keys: origin_name, destination_name, start_date, end_date, "
             "departure_time, return_time, travelers, max_days, preferences, transport_modes, special_events, "
-            "cross_sea_required, cross_sea_mode, past_return_requested, time_window_minutes. "
+            "cross_sea_required, cross_sea_mode, past_return_requested, time_window_minutes, stay_only_at_destination, must_visit_names. "
             "Dates must be YYYY-MM-DD; unknown scalar fields must be null and preferences/special_events must be arrays. "
             "Only fill start_date/end_date when the user's text explicitly gives a calendar date, a relative date "
             "such as 今天/明天/后天/前天, or an unambiguous weekday. English relative dates and weekdays "
@@ -63,6 +63,7 @@ class OllamaRequirementExtractor:
             "cross_sea_mode may be ferry, flight, bridge or null. past_return_requested is true only when the user "
             "explicitly requests returning before the current date. time_window_minutes is the user's explicit "
             "departure-to-arrival window, or null when no such window is stated. "
+            "stay_only_at_destination is true only when the user explicitly says to stay all days in one destination or not visit other places; must_visit_names contains explicitly required named places. "
             "For text like 从A出发，在B及其周边旅游, use A as origin and B as destination. "
             "Separate the destination from the experience: in 到九宫山看流星雨, destination_name is 九宫山, "
             "special_events contains 流星雨. For astronomy, festivals, flowers or seasonal events, preserve the "
@@ -115,6 +116,11 @@ class OllamaRequirementExtractor:
                         str(merged["destination_name"])
                     )
                 merged["special_events"] = _normalize_special_events(merged.get("special_events"))
+                merged["must_visit_names"] = [
+                    str(item).strip() for item in (merged.get("must_visit_names") or [])
+                    if str(item).strip()
+                ][:40]
+                merged["stay_only_at_destination"] = bool(merged.get("stay_only_at_destination"))
                 for clock_field in ("departure_time", "return_time"):
                     normalized_clock = _normalize_clock(merged.get(clock_field))
                     if normalized_clock:
@@ -246,13 +252,20 @@ class OllamaTripEditAgent:
             '{"intent":"add|delete|replace|replan|adjust|question|unknown",'
             '"day_index":1,"day_id":"","category":"attractions|hotels|meals|null",'
             '"target_stage_id":"","target_activity_id":"","candidate_id":"",'
-            '"target_name":"","candidate_name":"","duration_minutes":null,'
-            '"duration_delta_minutes":0,'
-            '"reply":"给用户的简短中文说明"}。'
+              '"target_name":"","candidate_name":"","duration_minutes":null,'
+              '"duration_delta_minutes":0,'
+              '"origin_name":"","destination_name":"","start_date":"","end_date":"",'
+              '"must_visit_names":[],"exclude_names":[],"restore_names":[],"stay_only_at_destination":false,'
+              '"reply":"给用户的简短中文说明"}。'
             "如果用户要求增加或减少天数、重排整体路线、改变出发/返回日期，intent 用 replan。"
             "如果是加入/删除/替换一个已有候选，尽量填出对应第几天和名称；不确定时留空，"
             "优先返回上下文中的 day_id、阶段 ID、活动 ID、候选 ID；名称仅用于精确核对，禁止返回不存在的 ID。"
-            "不要把‘看流星雨’、‘赏花’、‘泡温泉’等体验目标误当成景点名称。"
+              "不要把‘看流星雨’、‘赏花’、‘泡温泉’等体验目标误当成景点名称。"
+              "如果用户说‘这几天都住/玩在某地、不去其他地方’，用 replan 并将 stay_only_at_destination=true；"
+              "用户明确点名的地点放入 must_visit_names，体验目标不要放入该数组。"
+              "上下文中的 excluded_places 是用户已经明确删除的安排；除非本次消息明确要求恢复/重新加入，"
+              "否则不要把其中的地点作为 add、replace 或 must_visit_names 返回。"
+              "只有用户明确要求恢复已删除地点时，才把地点写入 restore_names。"
             f"当前行程上下文：{json.dumps(trip_context, ensure_ascii=False)}；"
             f"用户修改请求：{message}"
         )
@@ -302,9 +315,17 @@ class OllamaTripEditAgent:
             "candidate_id": str(value.get("candidate_id") or "").strip()[:200],
             "target_name": str(value.get("target_name") or "").strip()[:120],
             "candidate_name": str(value.get("candidate_name") or "").strip()[:120],
-            "duration_minutes": duration,
-            "duration_delta_minutes": max(-240, min(240, delta)),
-            "reply": str(value.get("reply") or "").strip()[:500],
+              "duration_minutes": duration,
+              "duration_delta_minutes": max(-240, min(240, delta)),
+              "origin_name": str(value.get("origin_name") or "").strip()[:120],
+              "destination_name": str(value.get("destination_name") or "").strip()[:120],
+              "start_date": str(value.get("start_date") or "").strip()[:20],
+              "end_date": str(value.get("end_date") or "").strip()[:20],
+              "must_visit_names": [str(item).strip()[:120] for item in (value.get("must_visit_names") or []) if str(item).strip()][:40],
+              "exclude_names": [str(item).strip()[:120] for item in (value.get("exclude_names") or []) if str(item).strip()][:40],
+              "restore_names": [str(item).strip()[:120] for item in (value.get("restore_names") or []) if str(item).strip()][:40],
+              "stay_only_at_destination": bool(value.get("stay_only_at_destination")),
+              "reply": str(value.get("reply") or "").strip()[:500],
         }
 
 
@@ -417,6 +438,17 @@ class OllamaDestinationResearchAgent:
                 [*(research.get("web_sources") or []), *(research.get("flyai_items") or [])][:36]
             )
         ]
+        semantic_text = str(research.get("flyai_semantic_text") or "").strip()
+        if semantic_text:
+            evidence.append(
+                {
+                    "index": len(evidence),
+                    "title": "飞猪目的地语义搜索",
+                    "snippet": semantic_text[:6000],
+                    "url": "https://flyai.open.fliggy.com/",
+                    "category_hint": "attractions_and_meals",
+                }
+            )
         if not evidence:
             return []
         prompt = (
@@ -904,6 +936,8 @@ def _parse_json_object(text: str) -> dict[str, Any]:
         "cross_sea_mode",
         "past_return_requested",
         "time_window_minutes",
+        "stay_only_at_destination",
+        "must_visit_names",
     }
     return {key: value for key, value in value.items() if key in allowed}
 

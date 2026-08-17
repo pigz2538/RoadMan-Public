@@ -14,6 +14,15 @@ class RoadManState(TypedDict, total=False):
     route_candidates: list[dict[str, Any]]
     local_routes: list[dict[str, Any]]
     tourism_candidates: dict[str, list[dict[str, Any]]]
+    # Explicitly confirmed map/candidate additions.  Provider discovery is
+    # refreshed on every replan, so these user choices must travel with the
+    # planning state instead of disappearing when a new search returns.
+    confirmed_additions: list[dict[str, Any]]
+    # Applied user deletions; these constraints survive provider refreshes and
+    # are cleared only by an explicit restore/add action.
+    excluded_places: list[dict[str, Any]]
+    route_replan_required: bool
+    last_applied_patch_id: str | None
     selected_route: dict[str, Any] | None
     weather_results: list[dict[str, Any]]
     service_pois: dict[str, dict[str, list[dict[str, Any]]]]

@@ -19,6 +19,10 @@ export interface PlanningSnapshot {
   special_event_research?: SpecialEventResearch[]
   plan_markdown?: string
   job_id?: string
+  planning_batch_id?: string
+  edit_confirmation_pending?: boolean
+  route_replan_required?: boolean
+  excluded_places?: Array<{ name?: string; category?: string; reason?: string }>
 }
 
 export interface SpecialEventResearch {
@@ -282,7 +286,7 @@ export async function previewMapPointPatch(
 export async function applyPlanPatch(
   tripId: string,
   patchId: string,
-): Promise<{ patch: PlanPatch; trip: Trip }> {
+): Promise<{ patch: PlanPatch; trip: Trip; route_replan_required?: boolean }> {
   return json(await fetch(`${API_BASE}/api/v1/trips/${tripId}/patches/${patchId}/apply`, {
     method: 'POST',
   }))
@@ -325,11 +329,21 @@ export async function interpretTripEdit(
   message: string
   patch?: PlanPatch
   global_replan_required: boolean
+  requires_confirmation?: boolean
+  confirmation_message?: string | null
 }> {
   return json(await fetch(`${API_BASE}/api/v1/trips/${tripId}/editing/interpret`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
+  }))
+}
+
+export async function confirmTripReplan(
+  tripId: string,
+): Promise<{ message: string; trip: Trip; global_replan_required: boolean }> {
+  return json(await fetch(`${API_BASE}/api/v1/trips/${tripId}/editing/confirm-replan`, {
+    method: 'POST',
   }))
 }
 

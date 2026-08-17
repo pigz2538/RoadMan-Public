@@ -511,6 +511,15 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .stage-risk-tags.high span { color: #b33d2f; background: #ffe5df; }
 .stage-card.active { border: 2px solid #4187fa; color: #1d66e9; box-shadow: 0 0 0 5px rgba(70,134,249,.09), 0 8px 22px rgba(47,102,205,.13); }
 .agent-panel { display: flex; flex-direction: column; }
+.global-replan-confirm { margin: 12px; padding: 14px; border: 1px solid #bcd7ff; border-radius: 16px; background: linear-gradient(145deg, #f8fbff, #edf5ff); }
+.global-replan-confirm strong { display: block; color: #1559b6; font-size: 14px; }
+.global-replan-confirm p { margin: 8px 0 6px; line-height: 1.55; font-size: 13px; }
+.global-replan-confirm small { display: block; color: #6a7d98; line-height: 1.45; }
+.global-replan-confirm .primary-button { width: 100%; margin-top: 10px; }
+.route-replan-notice { margin: 12px; padding: 14px; border: 1px solid #9ac7ff; border-radius: 16px; background: linear-gradient(145deg, #f4f9ff, #e8f2ff); }
+.route-replan-notice strong { display: block; color: #1559b6; font-size: 14px; }
+.route-replan-notice p { margin: 8px 0 6px; color: #536b8a; line-height: 1.55; font-size: 13px; }
+.route-replan-notice .primary-button { width: 100%; margin-top: 10px; }
 .agent-panel > header { height: 66px; flex: 0 0 auto; display: flex; align-items: center; justify-content: center; gap: 10px; border-bottom: 1px solid #e5ebf3; font-size: 17px; }
 .agent-panel header svg { color: var(--blue); }.online-dot { width: 7px; height: 7px; border-radius: 50%; background: #22c69a; }
 .context-chip { margin: 12px 14px 0; padding: 8px 10px; border-radius: 10px; color: #52709b; background: #eef4fd; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

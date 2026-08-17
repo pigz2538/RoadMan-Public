@@ -9,6 +9,11 @@ from pydantic import BaseModel, Field
 from ..core.errors import AppError
 from ..domain.models import Activity, DayItemRef, MoneyRange, PlanPatch, Trip
 from ..skills.registry import SkillRegistry
+from .exclusions import (
+    clear_exclusion_for_candidate,
+    normalize_exclusion_name,
+    remember_exclusion,
+)
 from .tourism import activity_checks
 
 
@@ -16,6 +21,12 @@ CATEGORY_ACTIVITY_TYPE = {
     "attractions": "attraction",
     "hotels": "hotel",
     "meals": "meal",
+}
+
+ACTIVITY_CATEGORY = {
+    "attraction": "attractions",
+    "hotel": "hotels",
+    "meal": "meals",
 }
 
 
@@ -491,6 +502,17 @@ def decide_candidate_patch(
         )
         if not target:
             raise AppError("ACTIVITY_NOT_FOUND", "原安排已被修改，请重新预览", 409)
+        category = ACTIVITY_CATEGORY.get(target.type, target.type)
+        candidate = _candidate_for_activity(state, target, category)
+        # A deletion is a durable user constraint.  Provider searches may
+        # return this place again, but a replan must keep it out until the
+        # user explicitly adds it back.
+        remember_exclusion(
+            state,
+            target,
+            category=category,
+            candidate=candidate,
+        )
         day.activities = [item for item in day.activities if item.id != target.id]
         day.items = [item for item in day.items if item.id != target.id]
         _shift_following_activities(day, target.planned_end, target.duration_minutes)
@@ -518,7 +540,18 @@ def decide_candidate_patch(
         category = str(patch.proposed_value["category"])
         candidate = dict(patch.proposed_value["candidate"])
         duration = int(patch.proposed_value.get("duration_minutes") or _duration_for(category))
-        start, end = _find_available_slot(day, duration)
+        try:
+            start, end = _find_available_slot(day, duration)
+        except AppError as error:
+            if error.code != "NO_AVAILABLE_TIME_SLOT" or not patch.requires_replan:
+                raise
+            # An edit is a request for the planning agent to reflow the day,
+            # not a promise that the current snapshot already has room. Keep
+            # the accepted item in a temporary evening slot so the user can
+            # confirm the change; the queued replan will place it legally.
+            tzinfo = day.activities[0].planned_start.tzinfo if day.activities else None
+            start = datetime.combine(day.date, time(21, 0), tzinfo=tzinfo)
+            end = start + timedelta(minutes=duration)
         activity = _activity_from_candidate(
             candidate,
             category,
@@ -530,10 +563,29 @@ def decide_candidate_patch(
         day.activities.append(activity)
         day.items.append(DayItemRef(type="activity", id=activity.id))
 
+    if patch.operation in {"add", "replace"}:
+        # Explicitly adding/replacing a removed place restores it.  This is
+        # done only after the preview is applied, so rejecting a preview keeps
+        # the original exclusion intact.
+        clear_exclusion_for_candidate(state, candidate, category=category)
+
     _normalize_day(day)
     patch.status = "applied"
     state["plan_patches"][patch.id] = patch.model_dump(mode="json")
     return patch, trip
+
+
+def _candidate_for_activity(
+    state: dict[str, Any],
+    activity: Activity,
+    category: str,
+) -> dict[str, Any] | None:
+    target_name = normalize_exclusion_name(activity.place.name)
+    for candidate in (state.get("tourism_candidates", {}).get(category, []) or []):
+        place = candidate.get("place") or {}
+        if normalize_exclusion_name(place.get("name")) == target_name:
+            return candidate
+    return None
 
 
 async def recompute_and_verify_patch(
@@ -622,6 +674,20 @@ async def recompute_and_verify_patch(
     ]
     blockers = [item for item in issues if item.get("severity") == "blocker"]
     if blockers:
+        # The confirmed edit is already persisted, but its stage chain still
+        # needs a full planning pass.  Keep the edit visible and expose a
+        # replan marker instead of rejecting a valid user action because the
+        # old route is temporarily stale.
+        if patch.requires_replan:
+            state["route_replan_required"] = True
+            state["last_applied_patch_id"] = patch.id
+            state["verification_result"] = {
+                "passed": False,
+                "issues": blockers,
+                "scope": patch.impact_scope,
+                "recomputed_stage_ids": changed_stages,
+            }
+            return issues
         raise AppError(
             "PATCH_VERIFICATION_FAILED",
             "修改后的行程未通过校验，正式行程未保存",

@@ -272,6 +272,11 @@
       "title": "Must Visit",
       "type": "array"
     },
+    "stay_only_at_destination": {
+      "default": false,
+      "title": "Stay Only At Destination",
+      "type": "boolean"
+    },
     "budget": {
       "anyOf": [
         {

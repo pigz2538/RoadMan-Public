@@ -58,6 +58,18 @@
       "title": "Progress",
       "type": "integer"
     },
+    "batch_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Batch Id"
+    },
     "timestamp": {
       "format": "date-time",
       "title": "Timestamp",

@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from datetime import date
 from typing import Any
+from uuid import uuid4
 
 from ..core.config import get_settings
 from ..db import JobRow, SessionLocal
@@ -22,6 +23,7 @@ from .graph import build_planning_graph
 
 
 _progress_floor: dict[str, int] = {}
+_planning_batches: dict[str, str] = {}
 
 
 async def run_planning(
@@ -39,6 +41,8 @@ async def run_planning(
             trip = await repo.get(trip_id)
             if not trip:
                 return {"error": {"code": "TRIP_NOT_FOUND", "trip_id": trip_id}}
+            batch_id = job_id or f"batch_{uuid4().hex[:12]}"
+            _planning_batches[trip_id] = batch_id
             saved = await repo.load_planning_state(trip_id) or {}
             state: dict[str, Any] = {
                 **saved,
@@ -53,6 +57,7 @@ async def run_planning(
                 "clarification_answers": saved.get("clarification_answers", []),
                 "repair_attempts": 0,
                 "repair_attempted": False,
+                "planning_batch_id": batch_id,
             }
             if trip.selected_vehicle_id:
                 vehicle = await VehicleRepository(session).get(trip.selected_vehicle_id)
@@ -70,6 +75,7 @@ async def run_planning(
                     node="load_context",
                     label="规划任务已启动",
                     progress=1,
+                    batch_id=batch_id,
                 )
             )
             _progress_floor[trip_id] = 1
@@ -149,6 +155,11 @@ async def run_planning(
                 result.get("messages", []),
             )
             if trip.status == TripStatus.completed:
+                # A successful planning pass consumes any pending local edit
+                # marker.  Failed/clarification runs intentionally keep it so
+                # the user can retry without losing the requested change.
+                result.pop("route_replan_required", None)
+                result.pop("last_applied_patch_id", None)
                 result["progress"] = {
                     "node": "persist_trip",
                     "value": 100,
@@ -220,10 +231,12 @@ async def _publish_progress(
             tool=tool,
             label=label,
             progress=progress,
+            batch_id=_planning_batches.get(trip_id),
         )
     )
     if event in {"planning_completed", "planning_failed", "planning_paused"}:
         _progress_floor.pop(trip_id, None)
+        _planning_batches.pop(trip_id, None)
 
 
 def _job_aware_progress(job_id: str | None):
@@ -289,6 +302,7 @@ async def _mark_failed(trip_id: str, exc: Exception) -> None:
             trip.status = TripStatus.failed
             await repo.save(trip)
     _progress_floor.pop(trip_id, None)
+    batch_id = _planning_batches.pop(trip_id, None)
     await sse_manager.publish(
         SSEEvent(
             event="planning_failed",
@@ -296,6 +310,7 @@ async def _mark_failed(trip_id: str, exc: Exception) -> None:
             node=None,
             label="规划失败",
             progress=100,
+            batch_id=batch_id,
         )
     )
 
@@ -308,6 +323,7 @@ async def pause_planning(trip_id: str) -> None:
             trip.status = TripStatus.paused
             await repo.save(trip)
     _progress_floor.pop(trip_id, None)
+    batch_id = _planning_batches.pop(trip_id, None)
     await sse_manager.publish(
         SSEEvent(
             event="planning_paused",
@@ -315,6 +331,7 @@ async def pause_planning(trip_id: str) -> None:
             node=None,
             label="规划任务已取消并暂停",
             progress=100,
+            batch_id=batch_id,
         )
     )
 
