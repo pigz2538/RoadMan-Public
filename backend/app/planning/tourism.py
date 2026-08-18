@@ -20,7 +20,7 @@ _INCOMFORTABLE_LODGING_RE = re.compile(
 # every day.  Keep the rule data-driven: explicitly confirmed hotels still win,
 # and a transit hotel is used only when no ordinary lodging candidate exists.
 _TRANSIT_FOCUSED_LODGING_RE = re.compile(
-    r"(?:机场|航站楼|火车站|高铁站|动车站|铁路站|客运站|汽车站|长途站|地铁站)",
+    r"(?:机场|航站楼|火车站|高铁站|动车站|铁路站|客运站|汽车站|长途站)",
     re.IGNORECASE,
 )
 
