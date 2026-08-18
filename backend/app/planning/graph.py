@@ -1438,6 +1438,11 @@ def build_planning_graph(
             state.get("tourism_candidates", {}).get("hotels", []),
             destination,
             attraction_candidates,
+            required_names={
+                str(item.get("name") or "").strip()
+                for item in request.get("must_visit", [])
+                if isinstance(item, dict) and str(item.get("name") or "").strip()
+            },
         )
         local_base = (primary_hotel or {}).get("place") or destination
         # A semantic request such as “三天都在九宫山，不去其他地方” must not
@@ -1676,6 +1681,11 @@ def build_planning_graph(
             state.get("tourism_candidates", {}).get("hotels", []),
             request.get("destination"),
             state.get("tourism_candidates", {}).get("attractions", []),
+            required_names={
+                str(item.get("name") or "").strip()
+                for item in request.get("must_visit", [])
+                if isinstance(item, dict) and str(item.get("name") or "").strip()
+            },
         )
         hotel_place = (hotel_base or {}).get("place") or request["destination"]
 

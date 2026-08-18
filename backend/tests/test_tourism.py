@@ -3,7 +3,13 @@ import json
 import pytest
 
 from app.planning.recommendations import plan_attraction_coverage, rank_tourism_candidates
-from app.planning.tourism import activity_checks, review_daily_schedule, schedule_tourism_activities, verify_tourism_plan
+from app.planning.tourism import (
+    activity_checks,
+    review_daily_schedule,
+    schedule_tourism_activities,
+    select_primary_hotel,
+    verify_tourism_plan,
+)
 from app.skills.base import SkillContext
 from app.skills.flyai import (
     FlyAIFerryAdapter,
@@ -99,6 +105,68 @@ def test_tourism_scheduler_adds_attraction_and_overnight_hotel():
     assert hotel["planned_end"].startswith("2026-08-03")
     assert hotel["source_records"][0]["provider"] == "高德地图"
     assert verify_tourism_plan(scheduled, candidates) == []
+
+
+def test_primary_hotel_prefers_city_base_over_airport_or_station_property():
+    destination = {
+        "name": "成都",
+        "city": "成都市",
+        "coordinates": {"longitude": 104.0663, "latitude": 30.5730},
+    }
+    hotels = [
+        {
+            "place": {
+                "name": "如家旗下-成都双流国际机场酒店",
+                "coordinates": {"longitude": 103.9819, "latitude": 30.5793},
+            },
+            "score": 99,
+        },
+        {
+            "place": {
+                "name": "维也纳国际酒店（宽窄巷子店）",
+                "coordinates": {"longitude": 104.0547, "latitude": 30.6690},
+            },
+            "score": 80,
+        },
+    ]
+    attractions = [
+        {
+            "place": {
+                "name": "成都武侯祠",
+                "coordinates": {"longitude": 104.0480, "latitude": 30.6461},
+            },
+            "destination_research_priority": 95,
+        },
+        {
+            "place": {
+                "name": "成都大熊猫繁育研究基地",
+                "coordinates": {"longitude": 104.1379, "latitude": 30.7409},
+            },
+            "destination_research_priority": 100,
+        },
+        {
+            "place": {
+                "name": "麓湖CPI",
+                "coordinates": {"longitude": 104.0422, "latitude": 30.4617},
+            },
+            "destination_research_priority": 100,
+        },
+        # A single out-of-town recommendation must not pull the base hotel
+        # away from the city highlights.
+        {
+            "place": {
+                "name": "都江堰景区",
+                "coordinates": {"longitude": 103.6105, "latitude": 31.0034},
+            },
+            "destination_research_priority": 100,
+        },
+    ]
+
+    selected = select_primary_hotel(hotels, destination, attractions, {"麓湖CPI"})
+
+    assert selected is not None
+    assert "机场" not in selected["place"]["name"]
+    assert selected["place"]["name"] == "维也纳国际酒店（宽窄巷子店）"
 
 
 def test_tourism_scheduler_never_places_destination_attraction_before_late_intercity_arrival():

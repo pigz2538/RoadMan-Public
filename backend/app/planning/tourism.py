@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, time, timedelta
 import re
+from statistics import median
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -12,12 +13,45 @@ _INCOMFORTABLE_LODGING_RE = re.compile(
     re.IGNORECASE,
 )
 
+# An airport/railway hotel is a useful fallback for a very early departure,
+# but it is a poor default base for a multi-day city itinerary.  Previously a
+# provider could return a property whose name contained ``双流国际机场`` or
+# ``离堆公园高铁站`` and the distance scorer would happily make it the base for
+# every day.  Keep the rule data-driven: explicitly confirmed hotels still win,
+# and a transit hotel is used only when no ordinary lodging candidate exists.
+_TRANSIT_FOCUSED_LODGING_RE = re.compile(
+    r"(?:机场|航站楼|火车站|高铁站|动车站|铁路站|客运站|汽车站|长途站|地铁站)",
+    re.IGNORECASE,
+)
 
-def _comfortable_hotel(candidate: dict[str, Any]) -> bool:
-    """Exclude hostels from the default comfortable overnight plan."""
+
+def _hotel_text(candidate: dict[str, Any]) -> str:
     place = candidate.get("place") or {}
-    text = " ".join(str(place.get(key) or "") for key in ("name", "address"))
-    return not _INCOMFORTABLE_LODGING_RE.search(text)
+    return " ".join(str(place.get(key) or "") for key in ("name", "address"))
+
+
+def _comfortable_hotel(
+    candidate: dict[str, Any],
+    *,
+    allow_transit: bool = False,
+) -> bool:
+    """Return whether a lodging candidate is suitable as a trip base.
+
+    Hostels are never selected by the comfort default.  Properties named after
+    an airport/station are excluded from the normal city-base pool unless the
+    traveller explicitly confirmed that property or there is no alternative.
+    """
+    text = _hotel_text(candidate)
+    if _INCOMFORTABLE_LODGING_RE.search(text):
+        return False
+    if (
+        not allow_transit
+        and not candidate.get("user_confirmed")
+        and not candidate.get("user_requested")
+        and _TRANSIT_FOCUSED_LODGING_RE.search(text)
+    ):
+        return False
+    return True
 
 
 def _candidate_quality(candidate: dict[str, Any]) -> tuple[float, float, float, str]:
@@ -186,6 +220,12 @@ def _hotel_for_day(
 ) -> dict[str, Any] | None:
     """Reuse one hotel while consecutive days stay in the same area."""
     pool = [item for item in hotels if _comfortable_hotel(item)]
+    # A provider outage should not erase accommodation from the itinerary. If
+    # every returned property is attached to a terminal, keep one as a
+    # visibly sub-optimal fallback rather than reverting to a city-centre
+    # coordinate with no hotel record at all.
+    if not pool:
+        pool = [item for item in hotels if _comfortable_hotel(item, allow_transit=True)]
     if not pool:
         return None
     for selected, _selected_anchor in reversed(previous):
@@ -213,17 +253,20 @@ def select_primary_hotel(
     hotels: list[dict[str, Any]],
     destination: dict[str, Any] | None,
     attractions: list[dict[str, Any]] | None = None,
+    required_names: set[str] | None = None,
 ) -> dict[str, Any] | None:
     """Choose a comfortable base hotel for the whole destination stay.
 
     The route builder runs before the activity scheduler, so it needs the same
     hotel decision in order to start/end each local day at the booked property.
-    Rank by the average distance to the destination and researched highlights,
-    then use provider quality as a tie-breaker.  This deliberately avoids
-    choosing an airport or railway-station hotel merely because the city
-    geocode happens to be there.
+    Rank by the median distance to the destination and deduplicated researched
+    highlights, then use provider quality as a tie-breaker. This deliberately
+    avoids choosing an airport or railway-station hotel merely because the
+    city geocode or one out-of-town recommendation happens to be there.
     """
     pool = [item for item in hotels if _comfortable_hotel(item)]
+    if not pool:
+        pool = [item for item in hotels if _comfortable_hotel(item, allow_transit=True)]
     if not pool:
         return None
     confirmed = [item for item in pool if item.get("user_confirmed")]
@@ -232,13 +275,42 @@ def select_primary_hotel(
     anchors: list[dict[str, Any]] = []
     if destination:
         anchors.append(destination)
-    for candidate in attractions or []:
+
+    # Research providers often return several entrance/metro/parking records
+    # for one landmark.  Deduplicate nearby variants before scoring, otherwise
+    # one noisy POI cluster can pull the lodging base to the wrong edge of the
+    # city. Required places are considered first, followed by the ranked city
+    # highlights; the selection remains data-driven and does not contain a
+    # city-specific radius or name catalogue.
+    required_keys = {
+        _attraction_name_key(value)
+        for value in (required_names or set())
+        if _attraction_name_key(value)
+    }
+    ordered_attractions = sorted(
+        list(attractions or []),
+        key=lambda item: (
+            0 if _attraction_name_key((item.get("place") or {}).get("name")) in required_keys else 1,
+            *_attraction_sort_key(item),
+        ),
+    )
+    seen_names: set[str] = set()
+    for candidate in ordered_attractions:
         if candidate.get("seasonal_excluded"):
             continue
         place = candidate.get("place") or {}
         if place.get("coordinates"):
+            name_key = _attraction_name_key(place.get("name"))
+            if name_key and name_key in seen_names:
+                continue
+            # Do not count a second entrance/metro point as a separate anchor
+            # when it sits within roughly one kilometre of an existing point.
+            if any(_place_distance_km(place, existing) is not None and _place_distance_km(place, existing) <= 1.0 for existing in anchors):
+                continue
             anchors.append(place)
-        if len(anchors) >= 9:
+            if name_key:
+                seen_names.add(name_key)
+        if len(anchors) >= 13:
             break
 
     def key(item: dict[str, Any]) -> tuple[float, tuple[float, float, float, str]]:
@@ -250,8 +322,13 @@ def select_primary_hotel(
         ]
         # A missing coordinate is kept as a last-resort candidate, never a
         # reason to drop accommodation altogether.
-        average = sum(distances) / len(distances) if distances else 9999.0
-        return average, _candidate_quality(item)
+        # Median distance is deliberately used instead of a raw average. A
+        # three-day Chengdu trip may contain one optional out-of-town result
+        # (for example Dujiangyan); that result must not make an airport or
+        # remote railway-station hotel look like the best city base.
+        typical = float(median(distances)) if distances else 9999.0
+        transit_penalty = 1000.0 if _TRANSIT_FOCUSED_LODGING_RE.search(_hotel_text(item)) else 0.0
+        return typical + transit_penalty, _candidate_quality(item)
 
     return min(pool, key=key)
 
