@@ -768,6 +768,24 @@ async def test_tourism_discovery_keeps_flyai_meal_and_hotel_candidates():
     candidates = result["tourism_candidates"]
     assert any(item["provider"] == "fake-flyai" for item in candidates["meals"])
     assert any(item["provider"] == "fake-flyai" for item in candidates["hotels"])
+    selected_hotel_names = {
+        activity["place"]["name"]
+        for day in result["day_plans"]
+        for activity in day["activities"]
+        if activity.get("type") == "hotel" and activity.get("place", {}).get("name")
+    }
+    assert selected_hotel_names
+    # The hotel chosen by the tourism scheduler is also the base used by the
+    # movement planner.  Every day therefore has an explicit hotel endpoint;
+    # no day can silently teleport from a city centroid or a terminal.
+    for day in result["day_plans"]:
+        day_endpoints = {
+            endpoint["name"]
+            for stage in day["stages"]
+            for endpoint in (stage.get("origin", {}), stage.get("destination", {}))
+            if endpoint.get("name")
+        }
+        assert day_endpoints & selected_hotel_names
     assert {
         "flyai_poi_attractions",
         "flyai_poi_meals",
@@ -917,6 +935,18 @@ async def test_explicit_flight_uses_schedule_adapter_instead_of_default_driving(
     assert intercity
     assert {stage["mode"] for stage in intercity} == {"flight"}
     assert all(stage["traffic_summary"] for stage in intercity)
+    outbound_stage = next(stage for stage in intercity if stage["title"] == "城市出发")
+    return_stage = next(stage for stage in intercity if stage["title"] == "返程")
+    assert outbound_stage["origin"]["name"] == "天河机场"
+    assert outbound_stage["destination"]["name"] == "九江机场"
+    # Even when the morning return flight leaves no sightseeing window, the
+    # hotel-to-terminal connector keeps the movement chain continuous.
+    assert any(
+        stage["title"] == "返程接驳"
+        and stage["destination"]["name"] == return_stage["origin"]["name"]
+        for day in result["day_plans"]
+        for stage in day["stages"]
+    )
 
 
 @pytest.mark.asyncio

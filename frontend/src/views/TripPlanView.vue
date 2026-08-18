@@ -460,7 +460,7 @@ function planningAgentName(event: { tool?: string; node?: string }) {
     'flyai.poi': '旅行信息搜索智能体',
     'flyai.hotel': '住宿搜索智能体',
     'amap.poi/amap.route': '地图路线智能体',
-    'baidu.baike': '百科详情智能体',
+    'web.poi_research': '公开信息检索智能体',
     'ollama.poi_curator': '地点策展智能体',
     'open_meteo.forecast': '天气智能体',
   }

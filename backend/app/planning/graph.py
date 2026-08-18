@@ -53,7 +53,12 @@ from .exclusions import filter_excluded_candidates
 from .poi_enrichment import enrich_scheduled_activities, enrich_tourism_candidates
 from .seasonality import apply_seasonal_guard, parse_trip_date
 from .state import RoadManState
-from .tourism import review_daily_schedule, schedule_tourism_activities, verify_tourism_plan
+from .tourism import (
+    review_daily_schedule,
+    schedule_tourism_activities,
+    select_primary_hotel,
+    verify_tourism_plan,
+)
 
 ProgressCallback = Callable[[str, str, str, int, str, str | None], Awaitable[None]]
 SHANGHAI = ZoneInfo("Asia/Shanghai")
@@ -888,7 +893,17 @@ def build_planning_graph(
             tool="flyai.hotel",
         )
         for category, (keywords, page_size) in categories.items():
-            if category == "hotels" and candidates["hotels"]:
+            if category == "hotels" and any(
+                not re.search(
+                    r"(?:青旅|青年旅舍|青年旅社|青年公寓|学生公寓|旅舍|背包客栈|hostel|backpacker)",
+                    " ".join(
+                        str((item.get("place") or {}).get(field) or "")
+                        for field in ("name", "address")
+                    ),
+                    re.IGNORECASE,
+                )
+                for item in candidates["hotels"]
+            ):
                 continue
             poi_payload: dict[str, Any] = {
                 "keywords": keywords,
@@ -1318,10 +1333,10 @@ def build_planning_graph(
             await emit(
                 state,
                 "enrich_poi_details",
-                "POI Agent 正在汇总百科介绍、图片与可追溯来源",
+                "信息检索智能体正在汇总公开网页介绍、图片与可追溯来源",
                 67,
                 event="tool_started",
-                tool="baidu.baike",
+                tool="web.poi_research",
             )
             candidates = await enrich_tourism_candidates(
                 candidates,
@@ -1330,10 +1345,10 @@ def build_planning_graph(
             await emit(
                 state,
                 "enrich_poi_details",
-                "POI Agent 已完成景点详情与图片补充",
+                "信息检索智能体已完成景点详情与图片补充",
                 67,
                 event="tool_completed",
-                tool="baidu.baike",
+                tool="web.poi_research",
             )
         if settings.ollama_api_key:
             await emit(
@@ -1415,6 +1430,16 @@ def build_planning_graph(
         attraction_candidates = state.get("tourism_candidates", {}).get(
             "attractions", []
         )
+        # Pick the same comfortable base that the tourism scheduler will use.
+        # Local movement must be built around that hotel; otherwise the cards
+        # can show an overnight property while the route still starts from a
+        # city-centre geocode on every morning.
+        primary_hotel = select_primary_hotel(
+            state.get("tourism_candidates", {}).get("hotels", []),
+            destination,
+            attraction_candidates,
+        )
+        local_base = (primary_hotel or {}).get("place") or destination
         # A semantic request such as “三天都在九宫山，不去其他地方” must not
         # reuse stale candidates from the origin city or a previous plan. Keep
         # explicitly required places, and otherwise stay within a generous
@@ -1535,11 +1560,11 @@ def build_planning_graph(
                     {
                         "day_index": day_index,
                         "sequence": 0,
-                        "origin": destination,
-                        "destination": destination,
+                        "origin": local_base,
+                        "destination": local_base,
                         "route": _fallback_local_route(
-                            destination,
-                            destination,
+                            local_base,
+                            local_base,
                             "transit",
                         ),
                         "return_to_base": True,
@@ -1547,7 +1572,7 @@ def build_planning_graph(
                     }
                 )
                 continue
-            anchor = destination
+            anchor = local_base
             # Sequence numbers describe the *successful* route chain, not
             # the candidate index.  Candidates can be skipped when a route
             # lookup fails; using the candidate index here and a hard-coded
@@ -1591,23 +1616,23 @@ def build_planning_graph(
                     anchor = target
                     used_target_names.add(_normalize_poi_name(target.get("name")))
                     route_sequence += 1
-            if anchor is not destination:
+            if not _same_place(anchor, local_base):
                 route = await _route(
                     registry,
                     anchor,
-                    destination,
+                    local_base,
                     state["trip_id"],
                     preferred_mode="transit",
                     fallback_modes=["walking", "riding", "driving"],
                 )
                 if not route.get("success"):
-                    route = _fallback_local_route(anchor, destination, "transit")
+                    route = _fallback_local_route(anchor, local_base, "transit")
                 local_routes.append(
                     {
                         "day_index": day_index,
                         "sequence": route_sequence,
                         "origin": anchor,
-                        "destination": destination,
+                        "destination": local_base,
                         "route": route,
                         "return_to_base": True,
                     }
@@ -1647,6 +1672,12 @@ def build_planning_graph(
         plans: list[dict[str, Any]] = []
         elevation_sources: list[dict[str, Any]] = []
         elevation_cache: dict[str, float | None] = {}
+        hotel_base = select_primary_hotel(
+            state.get("tourism_candidates", {}).get("hotels", []),
+            request.get("destination"),
+            state.get("tourism_candidates", {}).get("attractions", []),
+        )
+        hotel_place = (hotel_base or {}).get("place") or request["destination"]
 
         async def prepare_route(route: dict[str, Any]) -> dict[str, Any]:
             """Attach best-effort terrain gain to walking/riding routes."""
@@ -1704,6 +1735,28 @@ def build_planning_graph(
         for index, day_def in enumerate(day_defs):
             stages: list[MovementStage] = []
             day_date = date.fromisoformat(day_def["date"])
+            return_route = inbound
+            if (
+                index == len(day_defs) - 1
+                and str((inbound.get("data") or {}).get("selected_mode")) == "driving"
+                and hotel_place.get("coordinates")
+                and not _same_place(hotel_place, request["destination"])
+            ):
+                # A self-drive return should leave from the booked hotel, not
+                # teleport back to the destination city centroid.
+                return_route = await _route(
+                    registry,
+                    hotel_place,
+                    request["origin"],
+                    state["trip_id"],
+                    preferred_mode="driving",
+                    fallback_modes=["transit", "riding", "walking"],
+                )
+                if not return_route.get("success"):
+                    return_route = inbound
+                else:
+                    return_route["origin_place"] = hotel_place
+                    return_route["destination_place"] = request["origin"]
             if index == 0:
                 outbound = await prepare_route(outbound)
                 outbound_start = _request_clock(
@@ -1729,8 +1782,8 @@ def build_planning_graph(
                         day_id=f"day_{index + 1}",
                         sequence=len(stages),
                         title="城市出发",
-                        origin=request["origin"],
-                        destination=request["destination"],
+                        origin=outbound.get("origin_place") or request["origin"],
+                        destination=outbound.get("destination_place") or request["destination"],
                         route=outbound,
                         start_at=outbound_start,
                     )
@@ -1743,12 +1796,12 @@ def build_planning_graph(
             return_cutoff: datetime | None = None
             if index == len(day_defs) - 1:
                 scheduled_departure = _parse_train_datetime(
-                    (inbound.get("data") or {}).get("scheduled_departure_at")
+                    (return_route.get("data") or {}).get("scheduled_departure_at")
                 )
                 if scheduled_departure:
                     return_cutoff = scheduled_departure - timedelta(
                         minutes=_intercity_departure_buffer(
-                            (inbound.get("data") or {}).get("selected_mode")
+                            (return_route.get("data") or {}).get("selected_mode")
                         )
                     )
             local_items = [
@@ -1778,6 +1831,43 @@ def build_planning_graph(
                 )
             ):
                 local_items = []
+            if local_items and stages:
+                first_local_origin = local_items[0].get("origin") or hotel_place
+                if not _same_place(
+                    stages[-1].destination.model_dump(mode="json"),
+                    first_local_origin,
+                ):
+                    connector_mode = (
+                        "driving"
+                        if (outbound.get("data") or {}).get("selected_mode") == "driving"
+                        else "transit"
+                    )
+                    connector_route = await _route(
+                        registry,
+                        stages[-1].destination.model_dump(mode="json"),
+                        first_local_origin,
+                        state["trip_id"],
+                        preferred_mode=connector_mode,
+                        fallback_modes=["transit", "riding", "walking", "driving"],
+                    )
+                    if not connector_route.get("success"):
+                        connector_route = _fallback_local_route(
+                            stages[-1].destination.model_dump(mode="json"),
+                            first_local_origin,
+                            connector_mode,
+                        )
+                    connector_route = await prepare_route(connector_route)
+                    arrival_connector = _movement_stage(
+                        day_id=f"day_{index + 1}",
+                        sequence=len(stages),
+                        title="入住酒店接驳",
+                        origin=stages[-1].destination.model_dump(mode="json"),
+                        destination=first_local_origin,
+                        route=connector_route,
+                        start_at=local_start,
+                    )
+                    stages.append(arrival_connector)
+                    local_start = arrival_connector.planned_end + timedelta(minutes=30)
             for local in sorted(local_items, key=lambda item: item["sequence"]):
                 local["route"] = await prepare_route(local["route"])
                 stage = _movement_stage(
@@ -1804,7 +1894,7 @@ def build_planning_graph(
                     # The arrival day has a strict evening boundary.  A
                     # connector that would cross midnight is never a valid
                     # sightseeing leg; stop the local chain and let the
-                    # following day start from the destination city.
+                    # following day start from the booked hotel base.
                     break
                 if return_cutoff and stage.planned_end > return_cutoff:
                     # A scheduled intercity return is a hard timetable.  Do
@@ -1817,10 +1907,11 @@ def build_planning_graph(
             if index == len(day_defs) - 1 and return_cutoff:
                 # The local-route builder may have stopped before its
                 # generated "back to base" connector because that connector
-                # would miss the train.  Reconcile the chain here: retain as
+                # would miss the train. Reconcile the chain here: retain as
                 # many morning activities as fit, then add a final connector
-                # to the destination city so the return stage is continuous.
-                destination_coordinates = request["destination"].get("coordinates") or {}
+                # to the departure terminal so the return stage is continuous.
+                return_origin = return_route.get("origin_place") or request["destination"]
+                destination_coordinates = return_origin.get("coordinates") or {}
 
                 def reaches_destination(stage: MovementStage) -> bool:
                     coordinates = stage.destination.coordinates
@@ -1836,13 +1927,13 @@ def build_planning_graph(
                             ),
                         ) <= 0.2
                     except (AttributeError, KeyError, TypeError, ValueError):
-                        return stage.destination.name == request["destination"].get("name")
+                        return stage.destination.name == return_origin.get("name")
 
                 if stages and not reaches_destination(stages[-1]):
                     connector_route = await _route(
                         registry,
                         stages[-1].destination.model_dump(mode="json"),
-                        request["destination"],
+                        return_origin,
                         state["trip_id"],
                         preferred_mode="transit",
                         fallback_modes=["walking", "riding", "driving"],
@@ -1850,7 +1941,7 @@ def build_planning_graph(
                     if not connector_route.get("success"):
                         connector_route = _fallback_local_route(
                             stages[-1].destination.model_dump(mode="json"),
-                            request["destination"],
+                            return_origin,
                             "transit",
                         )
                     connector_route = await prepare_route(connector_route)
@@ -1860,7 +1951,7 @@ def build_planning_graph(
                         sequence=len(stages),
                         title="返程接驳",
                         origin=stages[-1].destination.model_dump(mode="json"),
-                        destination=request["destination"],
+                        destination=return_origin,
                         route=connector_route,
                         start_at=connector_start,
                     )
@@ -1872,14 +1963,14 @@ def build_planning_graph(
                             connector_route = await _route(
                                 registry,
                                 next_origin,
-                                request["destination"],
+                                return_origin,
                                 state["trip_id"],
                                 preferred_mode="transit",
                                 fallback_modes=["walking", "riding", "driving"],
                             )
                             if not connector_route.get("success"):
                                 connector_route = _fallback_local_route(
-                                    next_origin, request["destination"], "transit"
+                                    next_origin, return_origin, "transit"
                                 )
                             connector_route = await prepare_route(connector_route)
                             connector_stage = _movement_stage(
@@ -1887,7 +1978,7 @@ def build_planning_graph(
                                 sequence=len(stages),
                                 title="返程接驳",
                                 origin=next_origin,
-                                destination=request["destination"],
+                                destination=return_origin,
                                 route=connector_route,
                                 start_at=connector_start,
                             )
@@ -1899,10 +1990,10 @@ def build_planning_graph(
                                 day_id=f"day_{index + 1}",
                                 sequence=0,
                                 title="返程接驳",
-                                origin=request["destination"],
-                                destination=request["destination"],
+                                origin=return_origin,
+                                destination=return_origin,
                                 route=_fallback_local_route(
-                                    request["destination"], request["destination"], "transit"
+                                    return_origin, return_origin, "transit"
                                 ),
                                 start_at=connector_start,
                             )
@@ -1910,17 +2001,62 @@ def build_planning_graph(
                     if not stages or connector_stage.planned_end <= return_cutoff:
                         stages.append(connector_stage)
                         local_start = connector_stage.planned_end + timedelta(minutes=15)
-            # Every calendar day must finish at the destination base before the
-            # next day starts.  If the evening cutoff stopped the sightseeing
-            # chain early, the old code simply dropped the generated
-            # return-to-base leg; the next day's first local stage then started
-            # in the city while the previous day still ended at a distant POI.
+                elif not stages:
+                    # A morning train/flight can leave no sightseeing window on
+                    # the return day, but the stage chain still has to connect
+                    # the overnight hotel to the departure terminal.
+                    connector_origin = hotel_place
+                    connector_destination = return_origin
+                    connector_mode = (
+                        "driving"
+                        if "driving" in request.get("transport_modes", [])
+                        else "transit"
+                    )
+                    connector_route = await _route(
+                        registry,
+                        connector_origin,
+                        connector_destination,
+                        state["trip_id"],
+                        preferred_mode=connector_mode,
+                        fallback_modes=["transit", "riding", "walking", "driving"],
+                    )
+                    if not connector_route.get("success"):
+                        connector_route = _fallback_local_route(
+                            connector_origin,
+                            connector_destination,
+                            connector_mode,
+                        )
+                    connector_route = await prepare_route(connector_route)
+                    connector_start = return_cutoff - timedelta(
+                        minutes=int((connector_route.get("data") or {}).get("duration_minutes") or 30)
+                    )
+                    connector_stage = _movement_stage(
+                        day_id=f"day_{index + 1}",
+                        sequence=0,
+                        title="返程接驳",
+                        origin=connector_origin,
+                        destination=connector_destination,
+                        route=connector_route,
+                        start_at=connector_start,
+                    )
+                    if connector_stage.planned_end <= return_cutoff:
+                        stages.append(connector_stage)
+                        local_start = connector_stage.planned_end + timedelta(minutes=15)
+            # Every calendar day must finish at the booked hotel base before the
+            # next day starts. If the evening cutoff stopped the sightseeing
+            # chain early, retain an explicit return-to-hotel connector rather
+            # than letting the next day's first local stage start elsewhere.
             # Add that missing connector before persisting the day plan.
+            day_base = (
+                (local_items[0].get("origin") if local_items else None)
+                or hotel_place
+                or request["destination"]
+            )
             needs_day_base_connector = (
                 bool(stages)
                 and not _same_place(
                     stages[-1].destination.model_dump(mode="json"),
-                    request["destination"],
+                    day_base,
                 )
                 and (index < len(day_defs) - 1 or not return_cutoff)
             )
@@ -1930,7 +2066,7 @@ def build_planning_graph(
                 connector_route = await _route(
                     registry,
                     base_origin,
-                    request["destination"],
+                    day_base,
                     state["trip_id"],
                     preferred_mode=local_mode,
                     fallback_modes=["transit", "riding", "walking", "driving"],
@@ -1938,7 +2074,7 @@ def build_planning_graph(
                 if not connector_route.get("success"):
                     connector_route = _fallback_local_route(
                         base_origin,
-                        request["destination"],
+                        day_base,
                         local_mode,
                     )
                 connector_route = await prepare_route(connector_route)
@@ -1947,28 +2083,30 @@ def build_planning_graph(
                     sequence=len(stages),
                     title="返回住宿或目的地核心区",
                     origin=base_origin,
-                    destination=request["destination"],
+                    destination=day_base,
                     route=connector_route,
                     start_at=stages[-1].planned_end + timedelta(minutes=15),
                 )
                 stages.append(connector_stage)
                 local_start = connector_stage.planned_end + timedelta(minutes=15)
             if index == len(day_defs) - 1:
-                inbound = await prepare_route(inbound)
+                return_route = await prepare_route(return_route)
                 return_start = _return_stage_start(
                     day_date,
                     request.get("return_time"),
                     local_start,
-                    inbound,
+                    return_route,
                 )
+                return_origin = return_route.get("origin_place") or request["destination"]
+                return_destination = return_route.get("destination_place") or request["origin"]
                 stages.append(
                     _movement_stage(
                         day_id=f"day_{index + 1}",
                         sequence=len(stages),
                         title="返程",
-                        origin=request["destination"],
-                        destination=request["origin"],
-                        route=inbound,
+                        origin=return_origin,
+                        destination=return_destination,
+                        route=return_route,
                         start_at=return_start,
                     )
                 )
@@ -2874,6 +3012,85 @@ async def _ensure_coordinates(
     return resolved
 
 
+def _scheduled_terminal_name(data: dict[str, Any], mode: str, side: str) -> str | None:
+    field_by_mode = {
+        "train": {"origin": "departure_station", "destination": "arrival_station"},
+        "flight": {"origin": "departure_airport", "destination": "arrival_airport"},
+        "ferry": {"origin": "departure_port", "destination": "arrival_port"},
+    }
+    name = data.get(field_by_mode.get(mode, {}).get(side, ""))
+    text = str(name or "").strip()
+    if not text or text in {"出发站", "到达站", "出发机场", "到达机场", "出发码头", "到达码头"}:
+        return None
+    return text
+
+
+async def _attach_scheduled_terminals(
+    registry: SkillRegistry,
+    route: dict[str, Any],
+    origin: dict[str, Any],
+    destination: dict[str, Any],
+    trip_id: str,
+) -> dict[str, Any]:
+    """Attach geocoded terminal places to a scheduled route.
+
+    The schedule itself remains authoritative for time and service number. A
+    terminal geocode is only used for map/stage endpoints; if a provider or
+    geocoder omits it, the original city place is retained as an honest
+    fallback instead of inventing a coordinate.
+    """
+    data = route.get("data") or {}
+    mode = str(data.get("selected_mode") or "")
+    departure_name = _scheduled_terminal_name(data, mode, "origin")
+    arrival_name = _scheduled_terminal_name(data, mode, "destination")
+    if not departure_name and not arrival_name:
+        return route
+    origin_place = origin
+    destination_place = destination
+    if departure_name:
+        origin_place = await _ensure_coordinates(
+            registry,
+            {"name": departure_name, "city": origin.get("city")},
+            trip_id,
+        )
+    if arrival_name:
+        destination_place = await _ensure_coordinates(
+            registry,
+            {"name": arrival_name, "city": destination.get("city")},
+            trip_id,
+        )
+    if not origin_place.get("coordinates"):
+        origin_place = origin
+    if not destination_place.get("coordinates"):
+        destination_place = destination
+    route["origin_place"] = origin_place
+    route["destination_place"] = destination_place
+    origin_coordinates = origin_place.get("coordinates") or {}
+    destination_coordinates = destination_place.get("coordinates") or {}
+    try:
+        origin_point = RoutePoint(
+            longitude=float(origin_coordinates["longitude"]),
+            latitude=float(origin_coordinates["latitude"]),
+        )
+        destination_point = RoutePoint(
+            longitude=float(destination_coordinates["longitude"]),
+            latitude=float(destination_coordinates["latitude"]),
+        )
+    except (KeyError, TypeError, ValueError):
+        return route
+    distance_km = round(_haversine_km(origin_point, destination_point), 2)
+    data["geometry"] = [
+        {"longitude": origin_point.longitude, "latitude": origin_point.latitude},
+        {"longitude": destination_point.longitude, "latitude": destination_point.latitude},
+    ]
+    data["distance_km"] = distance_km
+    for step in data.get("steps", []):
+        if isinstance(step, dict):
+            step["distance_m"] = distance_km * 1000
+    route["data"] = data
+    return route
+
+
 async def _route(
     registry: SkillRegistry,
     origin: dict[str, Any],
@@ -3153,6 +3370,14 @@ async def _train_route(
         destination,
         [item.model_dump(mode="json") for item in result.sources],
     )
+    if route.get("success"):
+        route = await _attach_scheduled_terminals(
+            registry,
+            route,
+            origin,
+            destination,
+            trip_id,
+        )
     route["warnings"] = [*result.warnings, *warnings]
     return route, warnings
 
@@ -3383,6 +3608,14 @@ async def _scheduled_route(
         [item.model_dump(mode="json") for item in result.sources],
         mode=mode,
     )
+    if route.get("success"):
+        route = await _attach_scheduled_terminals(
+            registry,
+            route,
+            origin,
+            destination,
+            trip_id,
+        )
     route["warnings"] = [*result.warnings, *warnings]
     return route, warnings
 

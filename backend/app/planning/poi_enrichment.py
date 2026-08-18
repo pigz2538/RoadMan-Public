@@ -1,9 +1,10 @@
-"""Best-effort web enrichment for tourism candidates.
+"""Best-effort public-web enrichment for tourism candidates.
 
-The planner keeps AMap/FlyAI/OpenTripMap as the authoritative location
-sources.  This module only adds human-friendly copy, a canonical Baidu Baike
-link and an openly published preview image when the page exposes one.  A
-timeout or a blocked page never fails the itinerary.
+AMap/FlyAI/OpenTripMap remain the authoritative location and ticket sources.
+This module adds human-friendly copy, images and traceable public-web facts.
+It deliberately searches broadly (DuckDuckGo's public instant-answer index,
+official pages and provider detail pages) and keeps Baidu Baike only as a
+last-resort fallback. A timeout or blocked page never fails the itinerary.
 """
 
 from __future__ import annotations
@@ -121,17 +122,59 @@ async def _fetch_candidate(client: httpx.AsyncClient, candidate: dict[str, Any])
     name = str((candidate.get("place") or {}).get("name") or "").strip()
     if not name:
         return None
-    url = f"https://baike.baidu.com/item/{quote(name)}"
+    city = str((candidate.get("place") or {}).get("city") or "").strip()
+    query = f"{city} {name}".strip()
+    # Public search evidence is preferred over a single encyclopedia. The
+    # endpoint is intentionally optional: if it is unavailable, continue with
+    # ordinary page metadata below.
     try:
-        response = await client.get(url, headers={"User-Agent": "RoadMan/1.0 POI research"})
-        if response.status_code >= 400:
-            return None
-        meta = parse_web_meta(response.text, url=str(response.url))
-    except (httpx.HTTPError, UnicodeError, ValueError):
-        return None
-    if not meta:
-        return None
-    return {"candidate": candidate, "meta": meta, "url": url}
+        answer = await client.get(
+            "https://api.duckduckgo.com/",
+            params={"q": query, "format": "json", "no_html": 1, "skip_disambig": 1},
+            headers={"User-Agent": "RoadMan/1.0 public-web-research"},
+        )
+        if answer.status_code < 400:
+            payload = answer.json()
+            abstract = str(payload.get("AbstractText") or "").strip()
+            abstract_url = str(payload.get("AbstractURL") or "").strip()
+            image_url = str(payload.get("Image") or "").strip()
+            if abstract or abstract_url:
+                return {
+                    "candidate": candidate,
+                    "meta": {
+                        "title": str(payload.get("Heading") or name),
+                        "description": abstract,
+                        "image_url": image_url,
+                        "detail_url": abstract_url or f"https://duckduckgo.com/?q={quote(query)}",
+                    },
+                    "url": abstract_url or f"https://duckduckgo.com/?q={quote(query)}",
+                    "provider": "公开网页搜索",
+                }
+    except (httpx.HTTPError, ValueError, TypeError):
+        pass
+
+    urls: list[tuple[str, str]] = []
+    for key in ("official_url", "detail_url"):
+        value = str(candidate.get(key) or "").strip()
+        if value.startswith("http"):
+            urls.append((value, "公开网页"))
+    urls.extend(
+        [
+            (f"https://www.amap.com/search?query={quote(name)}", "地图详情页"),
+            (f"https://baike.baidu.com/item/{quote(name)}", "百科资料"),
+        ]
+    )
+    for url, provider in urls:
+        try:
+            response = await client.get(url, headers={"User-Agent": "RoadMan/1.0 public-web-research"})
+            if response.status_code >= 400:
+                continue
+            meta = parse_web_meta(response.text, url=str(response.url))
+        except (httpx.HTTPError, UnicodeError, ValueError):
+            continue
+        if meta:
+            return {"candidate": candidate, "meta": meta, "url": str(response.url), "provider": provider}
+    return None
 
 
 async def enrich_tourism_candidates(
@@ -158,8 +201,8 @@ async def enrich_tourism_candidates(
             continue
         candidate = result["candidate"]
         meta = result["meta"]
-        # The card should open the human-readable encyclopedia page while the
-        # original provider links remain available in source_records.
+        # The card opens the best public-web page found while the original
+        # provider links remain available in source_records.
         candidate["detail_url"] = result["url"]
         if meta.get("description"):
             cleaned = _clean_public_description(meta["description"])
@@ -170,10 +213,11 @@ async def enrich_tourism_candidates(
         if meta.get("image_url") and not candidate.get("image_url"):
             candidate["image_url"] = meta["image_url"]
         records = candidate.setdefault("source_records", [])
-        if not any(item.get("provider") == "百度百科" for item in records):
+        provider = result.get("provider") or "公开网页"
+        if not any(item.get("provider") == provider for item in records):
             records.append({
-                "provider": "百度百科",
-                "title": f"{(candidate.get('place') or {}).get('name', '')} 百科资料",
+                "provider": provider,
+                "title": f"{(candidate.get('place') or {}).get('name', '')} 公开资料",
                 "url": result["url"],
             })
     return candidates

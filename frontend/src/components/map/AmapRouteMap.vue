@@ -230,10 +230,9 @@ function activityPlaceWithFallback(
   return fallback ? { ...activity.place, coordinates: fallback } : activity.place
 }
 
-function itineraryConnectors() {
-  if (!props.day) return []
+function itineraryConnectors(day: NonNullable<typeof props.day>) {
   const coordinatesByName = new Map<string, { longitude: number; latitude: number }>()
-  for (const stage of props.day.stages) {
+  for (const stage of day.stages) {
     for (const endpoint of ['origin', 'destination'] as const) {
       const place = stagePlaceWithFallback(stage, endpoint)
       if (place.coordinates) {
@@ -250,7 +249,7 @@ function itineraryConnectors() {
     plannedStart: string
   }
   const timeline: TimelinePoint[] = [
-    ...props.day.stages.map((stage) => ({
+    ...day.stages.map((stage) => ({
       kind: 'stage' as const,
       id: stage.id,
       name: stage.destination.name,
@@ -258,7 +257,7 @@ function itineraryConnectors() {
       coordinates: stagePlaceWithFallback(stage, 'destination').coordinates,
       plannedStart: stage.planned_start,
     })),
-    ...props.day.activities.map((activity) => ({
+    ...day.activities.map((activity) => ({
       kind: 'activity' as const,
       id: activity.id,
       name: activity.place.name,
@@ -321,15 +320,33 @@ function itineraryConnectors() {
 }
 
 let renderVersion = 0
+function clearRenderedOverlays() {
+  if (!map.value) return
+  map.value.remove([
+    ...routeOverlays.value.map((item) => item.polyline),
+    ...otherOverlays.value,
+  ])
+  routeOverlays.value = []
+  otherOverlays.value = []
+}
+
 async function renderRoutes() {
   if (!map.value || !AMap.value || !props.day) return
   const version = ++renderVersion
+  // Snapshot the selected day for the whole asynchronous render. Route
+  // lookups can take several seconds; reading props.day again after an await
+  // used to combine the previous day's paths with the newly selected day's
+  // markers. Clear the old overlays immediately so the map never advertises a
+  // different day while the new routes are being fetched.
+  const day = props.day
+  const dayId = day.id
+  clearRenderedOverlays()
   routeLoading.value = true
   const plannedPaths = await Promise.all(
-    props.day.stages.map(async (stage) => ({ stage, route: await stagePath(stage) })),
+    day.stages.map(async (stage) => ({ stage, route: await stagePath(stage) })),
   )
   const plannedConnectors = await Promise.all(
-    itineraryConnectors().map(async (connector) => ({
+    itineraryConnectors(day).map(async (connector) => ({
       connector,
       route: await routeWithFallback(
         connector.id,
@@ -341,14 +358,8 @@ async function renderRoutes() {
       ),
     })),
   )
-  if (version !== renderVersion || !map.value) return
+  if (version !== renderVersion || !map.value || props.day?.id !== dayId) return
   routeUnavailable.value = [...plannedPaths, ...plannedConnectors].some(({ route }) => route.mode === 'direct')
-  map.value.remove([
-    ...routeOverlays.value.map((item) => item.polyline),
-    ...otherOverlays.value,
-  ])
-  routeOverlays.value = []
-  otherOverlays.value = []
 
   const modeColor: Record<PlannedRoute['mode'], string> = {
     driving: '#1677ff',
@@ -411,7 +422,7 @@ async function renderRoutes() {
   }
 
   const coordinatesByName = new Map<string, { longitude: number; latitude: number }>()
-  for (const stage of props.day.stages) {
+  for (const stage of day.stages) {
     for (const endpoint of ['origin', 'destination'] as const) {
       const place = stagePlaceWithFallback(stage, endpoint)
       if (place.coordinates) {
@@ -424,9 +435,9 @@ async function renderRoutes() {
     kind: MarkerKind
     activityId?: string
   }>()
-  const firstStage = props.day.stages[0]
-  const lastStage = props.day.stages.at(-1)
-  for (const stage of props.day.stages) {
+  const firstStage = day.stages[0]
+  const lastStage = day.stages.at(-1)
+  for (const stage of day.stages) {
     const origin = stagePlaceWithFallback(stage, 'origin')
     if (origin.coordinates) {
       places.set(
@@ -435,7 +446,7 @@ async function renderRoutes() {
       )
     }
   }
-  for (const stage of props.day.stages) {
+  for (const stage of day.stages) {
     const destination = stagePlaceWithFallback(stage, 'destination')
     if (destination.coordinates) {
       places.set(
@@ -444,7 +455,7 @@ async function renderRoutes() {
       )
     }
   }
-  for (const activity of props.day.activities) {
+  for (const activity of day.activities) {
     const place = activityPlaceWithFallback(activity, coordinatesByName)
     if (place.coordinates) {
       places.set(`activity:${activity.id}`, {

@@ -209,6 +209,53 @@ def _hotel_for_day(
     return min(pool, key=distance_key)
 
 
+def select_primary_hotel(
+    hotels: list[dict[str, Any]],
+    destination: dict[str, Any] | None,
+    attractions: list[dict[str, Any]] | None = None,
+) -> dict[str, Any] | None:
+    """Choose a comfortable base hotel for the whole destination stay.
+
+    The route builder runs before the activity scheduler, so it needs the same
+    hotel decision in order to start/end each local day at the booked property.
+    Rank by the average distance to the destination and researched highlights,
+    then use provider quality as a tie-breaker.  This deliberately avoids
+    choosing an airport or railway-station hotel merely because the city
+    geocode happens to be there.
+    """
+    pool = [item for item in hotels if _comfortable_hotel(item)]
+    if not pool:
+        return None
+    confirmed = [item for item in pool if item.get("user_confirmed")]
+    if confirmed:
+        pool = confirmed
+    anchors: list[dict[str, Any]] = []
+    if destination:
+        anchors.append(destination)
+    for candidate in attractions or []:
+        if candidate.get("seasonal_excluded"):
+            continue
+        place = candidate.get("place") or {}
+        if place.get("coordinates"):
+            anchors.append(place)
+        if len(anchors) >= 9:
+            break
+
+    def key(item: dict[str, Any]) -> tuple[float, tuple[float, float, float, str]]:
+        place = item.get("place") or {}
+        distances = [
+            distance
+            for anchor in anchors
+            if (distance := _place_distance_km(place, anchor)) is not None
+        ]
+        # A missing coordinate is kept as a last-resort candidate, never a
+        # reason to drop accommodation altogether.
+        average = sum(distances) / len(distances) if distances else 9999.0
+        return average, _candidate_quality(item)
+
+    return min(pool, key=key)
+
+
 def schedule_tourism_activities(
     day_plans: list[dict[str, Any]],
     candidates: dict[str, list[dict[str, Any]]],
