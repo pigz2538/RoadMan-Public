@@ -540,6 +540,10 @@ class AmapRouteAdapter(SkillAdapter):
 
 class AmapPoiAdapter(SkillAdapter):
     name = "amap.poi"
+    # The provider can return status=1 with an empty POI array.  Bump the
+    # adapter version so any previously cached empty response is ignored after
+    # deploying the non-empty-result guard.
+    version = "1.1.0"
     category = "poi"
     cache_ttl_seconds = 6 * 3600
 
@@ -586,6 +590,14 @@ class AmapPoiAdapter(SkillAdapter):
                 provider="高德地图",
                 warnings=[body.get("info", "POI 查询失败")],
                 error_code="AMAP_POI_FAILED",
+            )
+        if not pois:
+            return SkillResult(
+                success=False,
+                provider="高德地图",
+                warnings=["高德地图未返回匹配的地点"],
+                error_code="AMAP_POI_EMPTY",
+                latency_ms=int((time.perf_counter() - started) * 1000),
             )
         return SkillResult(
             success=True,

@@ -27,6 +27,17 @@ class CountingAdapter(SkillAdapter):
         return {"status": "ready"}
 
 
+class EmptyCollectionAdapter(SkillAdapter):
+    name = "test.empty-collection"
+    category = "test"
+
+    async def execute(self, payload, context):
+        return SkillResult(success=True, provider="test", data={"items": []})
+
+    async def health_check(self):
+        return {"status": "ready"}
+
+
 @pytest.mark.asyncio
 async def test_registry_caches_and_audits():
     audits = []
@@ -61,6 +72,21 @@ async def test_registry_retries_transport_errors_only():
 
     assert result.success is True
     assert adapter.calls == 2
+
+
+@pytest.mark.asyncio
+async def test_registry_does_not_cache_empty_provider_collections():
+    adapter = EmptyCollectionAdapter()
+    registry = SkillRegistry(cache=MemorySkillCache())
+    registry.register(adapter)
+
+    first = await registry.execute(adapter.name, {"query": "hotel"})
+    second = await registry.execute(adapter.name, {"query": "hotel"})
+
+    assert first.success is True
+    assert second.success is True
+    assert first.cache_hit is False
+    assert second.cache_hit is False
 
 
 class FakeRedis:

@@ -95,7 +95,12 @@ class SkillRegistry:
                 )
                 break
         assert result is not None
-        if result.success:
+        # A successful provider response with an empty collection is not a
+        # useful answer to reuse.  POI/search APIs occasionally return HTTP
+        # success with an empty list during a transient upstream/cache miss;
+        # persisting that result made all later planning runs fall back to a
+        # city-centre coordinate until the long cache TTL expired.
+        if result.success and self._has_cacheable_payload(result.data):
             await self._cache.set(cache_key, result, adapter.cache_ttl_seconds)
         await self._audit(name, result, call_context)
         return result
@@ -129,6 +134,16 @@ class SkillRegistry:
         except Exception:
             # Audit failure must never make a provider result unavailable.
             return
+
+    @staticmethod
+    def _has_cacheable_payload(data: Any) -> bool:
+        if not isinstance(data, dict):
+            return True
+        for key in ("items", "pois", "routes", "plans", "hourly_samples"):
+            value = data.get(key)
+            if isinstance(value, list) and not value:
+                return False
+        return True
 
     @staticmethod
     def _cache_key(name: str, version: str, payload: dict[str, Any]) -> str:
