@@ -38,6 +38,38 @@
           ],
           "default": null,
           "title": "License"
+        },
+        "source_type": {
+          "default": "unknown",
+          "enum": [
+            "official",
+            "map",
+            "ticketing",
+            "travel_platform",
+            "open_data",
+            "web_search",
+            "encyclopedia",
+            "agent",
+            "unknown"
+          ],
+          "title": "Source Type",
+          "type": "string"
+        },
+        "confidence": {
+          "default": "unknown",
+          "enum": [
+            "high",
+            "medium",
+            "low",
+            "unknown"
+          ],
+          "title": "Confidence",
+          "type": "string"
+        },
+        "facts": {
+          "additionalProperties": true,
+          "title": "Facts",
+          "type": "object"
         }
       },
       "required": [

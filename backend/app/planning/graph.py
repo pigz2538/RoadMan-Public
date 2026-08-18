@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import time as monotonic_time
 from collections.abc import Awaitable, Callable
 from copy import deepcopy
@@ -17,6 +18,7 @@ from ..domain.models import (
     Coordinates,
     DayItemRef,
     DayPlan,
+    MoneyRange,
     MovementStage,
     PlaceRef,
     PlanWarning,
@@ -939,6 +941,22 @@ def build_planning_graph(
                     {
                         "place": place,
                         "detail_url": f"https://www.amap.com/search?query={quote(item['name'])}",
+                        "amap_source_id": item.get("id"),
+                        "amap_facts": {
+                            key: item.get(key)
+                            for key in (
+                                "opening_hours_text", "price_text", "parking_text",
+                                "ticket_ordering", "hotel_ordering", "website", "photos",
+                            )
+                            if item.get(key) not in (None, "", [])
+                        },
+                        "opening_hours": (
+                            {"text": item["opening_hours_text"], "confirmed": True, "source_count": 1}
+                            if item.get("opening_hours_text") else None
+                        ),
+                        "ticket_note": item.get("price_text"),
+                        "parking_note": item.get("parking_text"),
+                        "image_url": (item.get("photos") or [None])[0],
                         "source_records": [
                             *source_records,
                             {
@@ -2373,6 +2391,8 @@ def build_planning_graph(
                 plans,
                 state.get("tourism_candidates", {}),
                 timeout_seconds=settings.poi_web_timeout_seconds,
+                registry=registry,
+                trip_id=state["trip_id"],
             )
         else:
             enriched_candidates = state.get("tourism_candidates", {})
@@ -2623,6 +2643,25 @@ def build_planning_graph(
             day_title = day.get("title") or f"第 {day.get('day_index', 1)} 天"
             lines.extend([f"## {day_title} · {day['date']}", ""])
             for stage in day.get("stages", []):
+                service_number = stage.get("service_number")
+                terminal_text = ""
+                if stage.get("departure_terminal") or stage.get("arrival_terminal"):
+                    terminal_text = (
+                        f" · {stage.get('departure_terminal') or '出发地'} → "
+                        f"{stage.get('arrival_terminal') or '到达地'}"
+                    )
+                service_line = (
+                    f"- 班次：{service_number or '未返回'}"
+                    f"{terminal_text}"
+                    if stage.get("mode") in {"train", "flight", "ferry"}
+                    else ""
+                )
+                transit_lines = [
+                    f"{leg.get('line_name') or leg.get('line_type') or '公共交通'}："
+                    f"{leg.get('departure_stop') or '上车'} → {leg.get('arrival_stop') or '下车'}"
+                    for leg in stage.get("transit_legs", [])
+                    if isinstance(leg, dict)
+                ]
                 lines.extend(
                     [
                         f"### {stage['origin']['name']} → {stage['destination']['name']}",
@@ -2635,14 +2674,33 @@ def build_planning_graph(
                         f"- 风险：{stage.get('risk_level', 'low')} · "
                         f"{'、'.join(stage.get('risk_tags', [])) or '无'}",
                         f"- 能耗：{_energy_markdown(stage.get('energy_estimate'))}",
+                        *([service_line] if service_line else []),
+                        *([f"- 公交/地铁：{'；'.join(transit_lines)}"] if transit_lines else []),
                         "",
                     ]
                 )
             for activity in day.get("activities", []):
+                opening = (activity.get("opening_hours") or {}).get("text") or "营业时间暂未返回"
+                ticket = activity.get("ticket_or_price") or {}
+                ticket_text = (
+                    f"¥{ticket.get('minimum')}–{ticket.get('maximum')}"
+                    if ticket.get("minimum") is not None
+                    else {"free": "免费", "known": "票价已返回", "unknown": "门票信息暂未返回"}.get(
+                        activity.get("ticket_status"), "门票信息暂未返回"
+                    )
+                )
+                parking = activity.get("parking_note") or "停车信息暂未返回"
                 lines.append(
                     f"- 沿途服务：{activity['place']['name']}（{activity['type']}，"
-                    f"{activity['duration_minutes']} 分钟，估算安排）"
+                    f"{activity['duration_minutes']} 分钟）"
                 )
+                lines.extend([
+                    f"  - 营业时间：{opening}",
+                    f"  - 门票：{ticket_text}",
+                    f"  - 停车：{parking}",
+                    f"  - 资料状态：{activity.get('information_status', 'unavailable')} · "
+                    f"{activity.get('information_sources_count', 0)} 个来源",
+                ])
         if state.get("verification_result", {}).get("issues"):
             lines.extend(["## 校验提示", ""])
             lines.extend(
@@ -2940,7 +2998,8 @@ def _train_route_result(
     duration_minutes = max(train_minutes, listed_minutes) + 75
     departure_station = item.get("departure_station") or "出发站"
     arrival_station = item.get("arrival_station") or "到达站"
-    train_number = item.get("train_number") or "高铁"
+    train_number = item.get("train_number")
+    display_number = train_number or "车次号未返回"
     price = item.get("price")
     return {
         "success": True,
@@ -2958,7 +3017,7 @@ def _train_route_result(
                 }
             ],
             "traffic_summary": (
-                f"{train_number} {departure_station} {departure_at:%H:%M} → "
+                f"{display_number} {departure_station} {departure_at:%H:%M} → "
                 f"{arrival_station} {arrival_at:%H:%M}，已预留车站接驳时间"
             ),
             "elevation_gain_m": None,
@@ -2966,6 +3025,9 @@ def _train_route_result(
             "scheduled_departure_at": departure_at.isoformat(),
             "scheduled_arrival_at": arrival_at.isoformat(),
             "train_number": train_number,
+            "service_number": train_number,
+            "service_operator": item.get("operator") or item.get("transport_name"),
+            "service_status": item.get("service_status") or ("confirmed" if train_number else "unavailable"),
             "departure_station": departure_station,
             "arrival_station": arrival_station,
             "seat_class": item.get("seat_class"),
@@ -3150,17 +3212,17 @@ def _scheduled_route_result(
     buffer_minutes = {"flight": 150, "ferry": 45}.get(mode, 75)
     duration_minutes = max(elapsed_minutes, listed_minutes) + buffer_minutes
     if mode == "flight":
-        identifier = item.get("flight_number") or item.get("carrier") or "航班"
+        identifier = item.get("flight_number") or item.get("carrier") or "航班号未返回"
         departure_terminal = item.get("departure_airport") or "出发机场"
         arrival_terminal = item.get("arrival_airport") or "到达机场"
         detail_label = "已预留值机、安检与机场接驳时间"
     elif mode == "ferry":
-        identifier = item.get("ship_name") or "轮船"
+        identifier = item.get("ship_name") or "船名未返回"
         departure_terminal = item.get("departure_port") or "出发码头"
         arrival_terminal = item.get("arrival_port") or "到达码头"
         detail_label = "轮船班次为语义检索结果，已预留码头接驳时间"
     else:
-        identifier = item.get("train_number") or "高铁"
+        identifier = item.get("train_number") or "车次号未返回"
         departure_terminal = item.get("departure_station") or "出发站"
         arrival_terminal = item.get("arrival_station") or "到达站"
         detail_label = "已预留车站接驳时间"
@@ -3189,6 +3251,13 @@ def _scheduled_route_result(
             "scheduled_arrival_at": arrival_at.isoformat(),
             "flight_number": item.get("flight_number"),
             "train_number": item.get("train_number"),
+            "service_number": item.get("flight_number") or item.get("train_number"),
+            "service_operator": item.get("carrier") or item.get("operator"),
+            "service_status": (
+                "estimated" if mode == "ferry" and not (item.get("flight_number") or item.get("train_number"))
+                else "confirmed" if (item.get("flight_number") or item.get("train_number"))
+                else "unavailable"
+            ),
             "ship_name": item.get("ship_name"),
             "departure_station": item.get("departure_station") or departure_terminal,
             "arrival_station": item.get("arrival_station") or arrival_terminal,
@@ -3617,6 +3686,28 @@ def _movement_stage(
                 "flight": traffic_summary or "已按 FlyAI 实时航班规划，并预留机场接驳时间",
                 "ferry": traffic_summary or "已按 FlyAI 轮船候选规划，并预留码头接驳时间",
             }.get(mode, "按高德路线规划")
+    transit_legs = [item for item in data.get("transit_legs", []) if isinstance(item, dict)]
+    service_number = data.get("service_number") or data.get("train_number") or data.get("flight_number")
+    service_status = data.get("service_status")
+    if service_status not in {"confirmed", "estimated", "unavailable"}:
+        service_status = "confirmed" if service_number else ("estimated" if data.get("estimated") else "unavailable")
+    service_price = None
+    raw_price = data.get("price")
+    if raw_price not in (None, ""):
+        # Providers return both numeric values and display strings such as
+        # "¥ 540" or "540-680 元". Keep the numeric part when available and
+        # leave the field null when the provider did not return a price.
+        price_values = [
+            float(value.replace(",", ""))
+            for value in re.findall(r"\d+(?:\.\d+)?", str(raw_price))
+        ]
+        if price_values:
+            service_price = MoneyRange(
+                minimum=min(price_values),
+                maximum=max(price_values),
+                estimated=True,
+                note=str(raw_price),
+            )
     return MovementStage(
         day_id=day_id,
         sequence=sequence,
@@ -3624,9 +3715,12 @@ def _movement_stage(
         mode=data.get("selected_mode", "driving"),
         transit_type=(
             "ferry" if data.get("selected_mode") == "ferry"
-            else "bus" if data.get("selected_mode") == "transit"
+            else (
+                "subway" if transit_legs and transit_legs[0].get("mode") == "subway" else "bus"
+            ) if data.get("selected_mode") == "transit"
             else None
         ),
+        transit_legs=transit_legs,
         origin=PlaceRef.model_validate(origin),
         destination=PlaceRef.model_validate(destination),
         route_segments=[segment],
@@ -3636,6 +3730,17 @@ def _movement_stage(
         duration_minutes=duration,
         elevation_gain_m=data.get("elevation_gain_m"),
         traffic_summary=traffic_summary,
+        service_number=service_number,
+        service_operator=data.get("service_operator") or data.get("carrier") or data.get("operator"),
+        departure_terminal=data.get("departure_terminal") or data.get("departure_airport") or data.get("departure_station"),
+        arrival_terminal=data.get("arrival_terminal") or data.get("arrival_airport") or data.get("arrival_station"),
+        service_detail_url=data.get("detail_url"),
+        service_departure_at=_parse_train_datetime(data.get("scheduled_departure_at")),
+        service_arrival_at=_parse_train_datetime(data.get("scheduled_arrival_at")),
+        service_seat_class=data.get("seat_class"),
+        service_price=service_price,
+        service_status=service_status,
+        transit_fare_cny=data.get("fare_cny"),
         toll_fee={
             "minimum": data.get("tolls_cny", 0),
             "maximum": data.get("tolls_cny", 0),

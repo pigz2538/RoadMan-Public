@@ -278,6 +278,48 @@ def test_non_driving_stage_exposes_total_elevation_gain():
     assert stage.traffic_summary == "路线起伏：总爬升约 186 m"
 
 
+def test_intercity_stage_exposes_real_service_details_and_transit_legs():
+    stage = _movement_stage(
+        day_id="day_1",
+        sequence=0,
+        title="公共交通前往景点",
+        origin={"name": "武汉站", "coordinates": {"longitude": 114.4, "latitude": 30.6}},
+        destination={"name": "博物馆", "coordinates": {"longitude": 114.3, "latitude": 30.5}},
+        route={
+            "data": {
+                "selected_mode": "transit",
+                "distance_km": 5.2,
+                "duration_minutes": 30,
+                "geometry": [
+                    {"longitude": 114.4, "latitude": 30.6},
+                    {"longitude": 114.3, "latitude": 30.5},
+                ],
+                "transit_legs": [{
+                    "mode": "subway", "line_name": "2号线",
+                    "departure_stop": "汉口站", "arrival_stop": "江汉路站",
+                    "fare_cny": 3,
+                }],
+                "fare_cny": 3,
+                "price": "¥ 623",
+                "service_number": "G344",
+                "service_operator": "铁路",
+                "seat_class": "二等座",
+            },
+            "sources": [],
+        },
+        start_at=datetime(2026, 8, 1, 9, 0),
+    )
+    assert stage.transit_type == "subway"
+    assert stage.transit_legs[0].line_name == "2号线"
+    assert stage.transit_legs[0].arrival_stop == "江汉路站"
+    assert stage.transit_fare_cny == 3
+    assert stage.service_number == "G344"
+    assert stage.service_price is not None
+    assert stage.service_price.minimum == 623
+    assert stage.service_seat_class == "二等座"
+    assert stage.traffic_summary
+
+
 @pytest.mark.asyncio
 async def test_ambiguous_destination_is_corrected_by_nearby_poi():
     class AmbiguousRegistry:

@@ -58,6 +58,64 @@ class PoiInput(BaseModel):
     page_size: int = Field(default=20, ge=1, le=25)
 
 
+class PoiDetailInput(BaseModel):
+    poi_id: str = Field(min_length=1, max_length=80)
+
+
+def _fact_text(value: Any) -> str | None:
+    """Normalize the loosely typed business fields returned by AMap."""
+    if isinstance(value, dict):
+        for key in ("name", "text", "value", "content"):
+            if value.get(key) not in (None, ""):
+                return _fact_text(value[key])
+        return None
+    return _text_value(value)
+
+
+def _first_fact(item: dict[str, Any], *keys: str) -> Any:
+    containers = [item, item.get("business") or {}, item.get("biz_ext") or {}]
+    for container in containers:
+        if not isinstance(container, dict):
+            continue
+        for key in keys:
+            value = container.get(key)
+            if value not in (None, "", [], {}):
+                return value
+    return None
+
+
+def _poi_facts(item: dict[str, Any]) -> dict[str, Any]:
+    price = _first_fact(item, "cost", "price", "ticket_price", "ticketPrice")
+    photos = _first_fact(item, "photos", "photo")
+    if isinstance(photos, dict):
+        photos = [photos]
+    if not isinstance(photos, list):
+        photos = []
+    photo_urls = []
+    for photo in photos:
+        if isinstance(photo, dict):
+            url = photo.get("url") or photo.get("src") or photo.get("image")
+        else:
+            url = photo
+        if url:
+            photo_urls.append(str(url))
+    return {
+        "opening_hours_text": _fact_text(
+            _first_fact(item, "opentime", "open_time", "opening_hours", "openTime", "business_time")
+        ),
+        "price_text": _fact_text(price),
+        "parking_text": _fact_text(
+            _first_fact(item, "parking_info", "parking", "parking_type", "parkingInfo")
+        ),
+        "ticket_ordering": _fact_text(_first_fact(item, "ticket_ordering", "ticketOrdering")),
+        "hotel_ordering": _fact_text(_first_fact(item, "hotel_ordering", "hotelOrdering")),
+        "website": _fact_text(_first_fact(item, "website", "weburl", "url")),
+        "tel": _fact_text(_first_fact(item, "tel", "telephone")),
+        "rating": _fact_text(_first_fact(item, "rating", "star")),
+        "photos": photo_urls,
+    }
+
+
 class AmapGeocodeAdapter(SkillAdapter):
     name = "amap.geocode"
     category = "geocoding"
@@ -412,18 +470,57 @@ class AmapRouteAdapter(SkillAdapter):
     def _transit_path(transit: dict[str, Any], endpoint: str) -> dict[str, Any]:
         geometry: list[dict[str, float]] = []
         transfers: list[dict[str, Any]] = []
+        transit_legs: list[dict[str, Any]] = []
         for segment in transit.get("segments", []):
             for step in segment.get("walking", {}).get("steps", []):
                 geometry.extend(_polyline_points(step.get("polyline", "")))
-            for line in segment.get("bus", {}).get("buslines", []):
-                geometry.extend(_polyline_points(line.get("polyline", "")))
-                transfers.append(
+            railway = segment.get("railway") or segment.get("rail") or {}
+            for line in railway.get("spaces", []) if isinstance(railway, dict) else []:
+                transit_legs.append(
                     {
-                        "name": line.get("name"),
-                        "departure_stop": line.get("departure_stop", {}).get("name"),
-                        "arrival_stop": line.get("arrival_stop", {}).get("name"),
+                        "mode": "subway" if "地铁" in str(line.get("name") or "") else "rail",
+                        "line_name": line.get("name"),
+                        "line_id": line.get("id") or line.get("line_id"),
+                        "line_type": "rail",
+                        "departure_stop": (line.get("departure_stop") or {}).get("name"),
+                        "arrival_stop": (line.get("arrival_stop") or {}).get("name"),
+                        "stop_count": line.get("via_num") or line.get("stop_count"),
+                        "duration_minutes": round(float(line.get("duration") or 0) / 60) or None,
+                        "distance_km": round(float(line.get("distance") or 0) / 1000, 2) or None,
+                        "fare_cny": float(line.get("cost") or 0) or None,
                     }
                 )
+            for line in segment.get("bus", {}).get("buslines", []):
+                geometry.extend(_polyline_points(line.get("polyline", "")))
+                line_name = line.get("name") or line.get("line_name")
+                line_type = str(line.get("type") or "bus").lower()
+                mode = "subway" if "地铁" in str(line_name or "") or "subway" in line_type else "bus"
+                leg = {
+                    "mode": mode,
+                    "line_name": line_name,
+                    "line_id": line.get("id") or line.get("line_id"),
+                    "line_type": line.get("type") or mode,
+                    "departure_stop": (line.get("departure_stop") or {}).get("name"),
+                    "arrival_stop": (line.get("arrival_stop") or {}).get("name"),
+                    "departure_time": line.get("stime") or line.get("departure_time"),
+                    "arrival_time": line.get("etime") or line.get("arrival_time"),
+                    "stop_count": line.get("via_num") or line.get("stop_count"),
+                    "duration_minutes": round(float(line.get("duration") or 0) / 60) or None,
+                    "distance_km": round(float(line.get("distance") or 0) / 1000, 2) or None,
+                    "fare_cny": float(line.get("cost") or 0) or None,
+                }
+                transfers.append(
+                    {
+                        "name": line_name,
+                        "departure_stop": leg["departure_stop"],
+                        "arrival_stop": leg["arrival_stop"],
+                    }
+                )
+                transit_legs.append(leg)
+        transit_summary = "；".join(
+            f"{leg.get('line_name') or '公共交通'}（{leg.get('departure_stop') or '上车'}→{leg.get('arrival_stop') or '下车'}）"
+            for leg in transit_legs
+        )
         return {
             "distance_km": round(float(transit.get("distance") or 0) / 1000, 2),
             "duration_minutes": round(float(transit.get("duration") or 0) / 60),
@@ -431,6 +528,8 @@ class AmapRouteAdapter(SkillAdapter):
             "geometry": geometry,
             "steps": [],
             "transfers": transfers,
+            "transit_legs": transit_legs,
+            "transit_summary": transit_summary or None,
             "fare_cny": float(transit.get("cost") or 0) or None,
             "endpoint": endpoint,
         }
@@ -471,7 +570,7 @@ class AmapPoiAdapter(SkillAdapter):
             "radius": request.radius if request.location else None,
             "page_num": request.page,
             "page_size": request.page_size,
-            "show_fields": "business",
+            "show_fields": "business,photos",
         }
         async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
             response = await client.get(
@@ -502,11 +601,84 @@ class AmapPoiAdapter(SkillAdapter):
                         "location": poi.get("location"),
                         "city": poi.get("cityname"),
                         "district": poi.get("adname"),
+                        **_poi_facts(poi),
                     }
                     for poi in pois
                 ],
             },
             sources=[SourceRecord(provider="高德地图", title="POI 2.0 API", url=endpoint)],
+            latency_ms=int((time.perf_counter() - started) * 1000),
+        )
+
+    async def health_check(self) -> dict[str, Any]:
+        return {"status": "ready" if self.api_key else "degraded", "configured": bool(self.api_key)}
+
+
+class AmapPoiDetailAdapter(SkillAdapter):
+    """Fetch authoritative business facts for one concrete AMap POI."""
+
+    name = "amap.poi_detail"
+    category = "poi"
+    cache_ttl_seconds = 6 * 3600
+
+    def __init__(self, api_key: str):
+        self.api_key = api_key
+
+    async def validate_input(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return PoiDetailInput.model_validate(payload).model_dump()
+
+    async def execute(self, payload: dict[str, Any], _: SkillContext) -> SkillResult:
+        if not self.api_key:
+            return SkillResult(
+                success=False,
+                provider="高德地图",
+                warnings=["未配置 AMAP_WEBSERVICE_KEY"],
+                error_code="SKILL_NOT_CONFIGURED",
+            )
+        request = PoiDetailInput.model_validate(payload)
+        started = time.perf_counter()
+        endpoint = f"{AMAP_BASE_URL}/v3/place/detail"
+        async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+            response = await client.get(
+                endpoint,
+                params={"key": self.api_key, "id": request.poi_id, "extensions": "all"},
+            )
+            response.raise_for_status()
+            body = response.json()
+        pois = body.get("pois") or body.get("poi") or []
+        if isinstance(pois, dict):
+            pois = [pois]
+        if body.get("status") != "1" or not pois:
+            return SkillResult(
+                success=False,
+                provider="高德地图",
+                warnings=[body.get("info", "未找到 POI 详情")],
+                error_code="AMAP_POI_DETAIL_FAILED",
+            )
+        poi = pois[0]
+        facts = _poi_facts(poi)
+        item = {
+            "id": poi.get("id") or request.poi_id,
+            "name": poi.get("name"),
+            "address": _text_value(poi.get("address")),
+            "location": poi.get("location"),
+            "city": poi.get("cityname"),
+            "district": poi.get("adname"),
+            **facts,
+        }
+        source = SourceRecord(
+            provider="高德地图",
+            title="POI 详情与营业信息",
+            url=endpoint,
+            source_type="map",
+            confidence="high",
+            facts={key: value for key, value in facts.items() if value not in (None, [], "")},
+        )
+        return SkillResult(
+            success=True,
+            provider="高德地图",
+            data={"item": item},
+            sources=[source],
             latency_ms=int((time.perf_counter() - started) * 1000),
         )
 

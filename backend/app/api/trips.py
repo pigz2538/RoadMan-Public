@@ -1,6 +1,6 @@
 import asyncio
 import json
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, Header, Query, Response, status
@@ -223,6 +223,22 @@ async def preflight_trip(
         for key, value in payload.answers.items()
         if value.strip() and key.partition(":")[2]
     }
+    answered_codes = {
+        key.partition(":")[0]
+        for key, value in payload.answers.items()
+        if value.strip() and key.partition(":")[0]
+    }
+    # A free-form answer resolves the whole constraint, not only the exact
+    # field label emitted by one model round.  Cloud validation is allowed to
+    # name the same decision as departure_time/return_time or preferences;
+    # carry the resolution across those equivalent labels so a transient
+    # wording change cannot reopen an already answered question.
+    if "IMPOSSIBLE_TIME_WINDOW" in answered_codes:
+        answered_fields.update({"time_window", "departure_time", "return_time"})
+    if "INVALID_DATE_ORDER" in answered_codes:
+        answered_fields.update({"start_date", "end_date", "date"})
+    if "CROSS_SEA_MODE_REQUIRED" in answered_codes:
+        answered_fields.update({"preferences", "cross_sea_mode", "transport_mode"})
     for field in ("start_date", "end_date", "cross_sea_required"):
         if structural_dates.get(field) and field not in answered_fields:
             extracted[field] = structural_dates[field]
@@ -243,9 +259,40 @@ async def preflight_trip(
             parsed = _safe_date(value)
             if parsed:
                 extracted[field] = parsed.isoformat()
+        elif field == "time_window":
+            # The user is answering a safety question about an impossible
+            # same-leg window.  Treat any explicit answer as a decision to
+            # relax that hard window; the free-form clarification remains in
+            # the summary for auditability.
+            extracted["time_window_minutes"] = None
         elif key.startswith("CROSS_SEA_MODE_REQUIRED:"):
             extracted["cross_sea_required"] = True
             extracted["cross_sea_mode"] = value
+
+    # “玩三天/最多三天” is a duration constraint, not a reason to leave the
+    # return date blank once a concrete start date is known. Choose the full
+    # requested window as the first executable draft; the user can still edit
+    # the end date during confirmation. This also keeps Agent output stable
+    # when the model omits a derivable date on one turn.
+    #
+    # A previous extraction can be stale (for example after the user edits a
+    # prompt following a failed round), and the cloud Agent may occasionally
+    # hallucinate an end date for a duration-only phrase. When the original
+    # text contains no explicit second date, the duration is the authoritative
+    # end boundary; replace any stale/invalid model value instead of surfacing
+    # a false INVALID_DATE_ORDER question.
+    if (
+        extracted.get("start_date")
+        and extracted.get("max_days")
+        and not structural_dates.get("end_date")
+    ):
+        duration_start = _safe_date(extracted.get("start_date"))
+        try:
+            duration_days = int(extracted.get("max_days"))
+        except (TypeError, ValueError):
+            duration_days = 0
+        if duration_start and duration_days > 0 and not extracted.get("past_return_requested"):
+            extracted["end_date"] = (duration_start + timedelta(days=duration_days - 1)).isoformat()
 
     # Research named seasonal/astronomical events during requirement review,
     # before a user has to choose exact travel dates.  This lets the
@@ -270,7 +317,10 @@ async def preflight_trip(
 
     def answered(code: str, field: str | None = None) -> bool:
         key = f"{code}:{field or ''}"
-        return bool(payload.answers.get(key, "").strip())
+        return bool(payload.answers.get(key, "").strip()) or (
+            code in answered_codes
+            and (field is None or field in answered_fields)
+        )
 
     issues: list[PreflightIssue] = []
     labels = {

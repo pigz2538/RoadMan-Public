@@ -630,10 +630,10 @@ onBeforeUnmount(() => {
   <div class="amap-shell" :class="{ 'is-picking': pickEnabled }">
     <div v-show="!failed" :id="containerId" class="amap-container" />
     <MockRouteMap v-if="failed" :day="day" :active-stage-id="activeStageId" />
-    <div v-if="loading" class="map-loading"><i />正在加载高德地图…</div>
-    <div v-if="failed" class="map-fallback-badge">高德地图不可用 · 已切换 Mock 地图</div>
+    <div v-if="loading" class="map-loading"><i />正在加载在线地图…</div>
+    <div v-if="failed" class="map-fallback-badge">在线地图暂不可用 · 已切换示例底图</div>
     <div v-else-if="!loading" class="map-live-badge" :class="{ warning: routeUnavailable }">
-      {{ routeLoading ? '高德道路点列计算中…' : routeUnavailable ? '部分路段未返回道路点列 · 仅局部虚线直连' : '高德 JSAPI · 真实道路轨迹' }}
+      {{ routeLoading ? '真实道路点列计算中…' : routeUnavailable ? '部分路段未返回道路点列 · 仅局部虚线直连' : '真实道路轨迹' }}
     </div>
   </div>
 </template>

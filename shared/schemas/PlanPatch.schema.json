@@ -21,6 +21,37 @@
           "default": true,
           "title": "Estimated",
           "type": "boolean"
+        },
+        "source_count": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Source Count",
+          "type": "integer"
+        },
+        "as_of": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "As Of"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Note"
         }
       },
       "required": [

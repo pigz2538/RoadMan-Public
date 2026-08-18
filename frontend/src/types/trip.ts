@@ -26,8 +26,29 @@ export interface Activity {
     minimum: number
     maximum: number
     estimated: boolean
+    source_count?: number
+    as_of?: string
+    note?: string
   }
-  opening_hours?: { text: string; confirmed: boolean }
+  ticket_name?: string
+  ticket_status?: 'known' | 'free' | 'unknown'
+  ticket_note?: string
+  parking_note?: string
+  parking_or_price?: {
+    currency: string
+    minimum: number
+    maximum: number
+    estimated: boolean
+    source_count?: number
+    as_of?: string
+    note?: string
+  }
+  opening_hours?: { text: string; confirmed: boolean; source_count?: number; as_of?: string; note?: string }
+  official_url?: string
+  booking_url?: string
+  information_status?: 'complete' | 'partial' | 'unavailable'
+  information_checked_at?: string
+  information_sources_count?: number
   reservation_status?: 'required' | 'recommended' | 'not_required' | 'unknown'
   reservation_note?: string
   risk_level?: 'low' | 'moderate' | 'high'
@@ -37,6 +58,9 @@ export interface Activity {
     provider: string
     title: string
     url?: string
+    source_type?: string
+    confidence?: string
+    facts?: Record<string, unknown>
   }>
   warnings?: Array<{ code: string; message: string; severity?: string }>
 }
@@ -48,6 +72,20 @@ export interface Stage {
   title: string
   mode: string
   transit_type?: 'bus' | 'subway' | 'shuttle' | 'ferry'
+  transit_legs?: Array<{
+    mode: 'bus' | 'subway' | 'rail' | 'walk' | 'shuttle' | 'ferry' | 'other'
+    line_name?: string
+    line_id?: string
+    line_type?: string
+    departure_stop?: string
+    arrival_stop?: string
+    departure_time?: string
+    arrival_time?: string
+    stop_count?: number
+    duration_minutes?: number
+    distance_km?: number
+    fare_cny?: number
+  }>
   origin: Place
   destination: Place
   waypoints: Place[]
@@ -63,6 +101,17 @@ export interface Stage {
   duration_minutes: number
   elevation_gain_m?: number
   traffic_summary?: string
+  service_number?: string
+  service_operator?: string
+  departure_terminal?: string
+  arrival_terminal?: string
+  service_detail_url?: string
+  service_departure_at?: string
+  service_arrival_at?: string
+  service_seat_class?: string
+  service_price?: { currency: string; minimum: number; maximum: number; estimated: boolean; note?: string }
+  service_status?: 'confirmed' | 'estimated' | 'unavailable'
+  transit_fare_cny?: number
   weather_summary?: string
   toll_fee?: { currency: string; minimum: number; maximum: number; estimated: boolean }
   energy_estimate?: { amount: number; unit: string; remaining_percent?: number; estimated: boolean }

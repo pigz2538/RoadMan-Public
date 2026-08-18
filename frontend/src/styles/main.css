@@ -496,6 +496,8 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .stage-time { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; color: #667993; font-size: 14px; }
 .stage-time span:last-child { text-align: right; }
 .stage-time b { color: #17365f; font-size: 16px; }
+.stage-service-detail { margin: 4px 0 0; color: #245d9c; font-size: 13px; line-height: 1.35; }
+.stage-service-detail a { margin-left: 6px; color: #2563eb; text-decoration: underline; }
 .stage-card dl { margin: 0; display: grid; gap: 5px; }
 .stage-card dl div { display: grid; grid-template-columns: 48px minmax(0,1fr); gap: 7px; font-size: 15px; line-height: 1.35; }
 .stage-card dt { color: #7b8ba3; }

@@ -88,6 +88,13 @@ class OllamaRequirementExtractor:
                 parsed = _parse_json_object(response.json().get("response", ""))
                 structural = extract_structural_constraints(raw_text, today)
                 merged = _merge_extraction(structural, parsed)
+                # A valid cloud response may still be partial.  Preserve
+                # explicit travel-clause locations from the user's sentence
+                # when the model omitted one of them; this is structural
+                # recovery, not a destination keyword classifier.
+                for field, value in extract_explicit_location_constraints(raw_text).items():
+                    if value and not merged.get(field):
+                        merged[field] = value
                 # Literal calendar tokens are hard user constraints. Do not
                 # let the Agent hallucinate another year.
                 for date_field in ("start_date", "end_date"):

@@ -798,6 +798,8 @@ async def test_flyai_flight_adapter_normalizes_schedule(monkeypatch):
     )
     assert result.success
     assert result.data["items"][0]["flight_number"] == "CA123"
+    assert result.data["items"][0]["service_number"] == "CA123"
+    assert result.data["items"][0]["service_status"] == "confirmed"
     assert result.data["items"][0]["duration_minutes"] == 135
     assert calls[0][1:3] == ("search-flight", "--origin")
 

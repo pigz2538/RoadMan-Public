@@ -161,7 +161,7 @@ def main() -> int:
         require_success=True,
         timeout=60,
     )
-    call(
+    amap_poi_response = call(
         "skill.amap.poi",
         "POST",
         "/api/v1/skills/amap/poi",
@@ -169,6 +169,21 @@ def main() -> int:
         require_success=True,
         timeout=60,
     )
+    if amap_poi_response and amap_poi_response.ok:
+        try:
+            poi_items = (amap_poi_response.json().get("data") or {}).get("items") or []
+            poi_id = poi_items[0].get("id") if poi_items and isinstance(poi_items[0], dict) else None
+        except (ValueError, AttributeError):
+            poi_id = None
+        if poi_id:
+            call(
+                "skill.amap.poi-detail",
+                "POST",
+                "/api/v1/skills/amap/poi-detail",
+                json_body={"poi_id": poi_id},
+                require_success=True,
+                timeout=60,
+            )
     call(
         "skill.weather.forecast",
         "POST",
@@ -203,6 +218,27 @@ def main() -> int:
         "/api/v1/skills/flyai/hotel",
         json_body={"destination": "北京", "check_in_date": "2026-08-20", "check_out_date": "2026-08-21"},
         require_success=True,
+        timeout=60,
+    )
+    call(
+        "skill.flyai.train",
+        "POST",
+        "/api/v1/skills/flyai/train",
+        json_body={"origin": "武汉", "destination": "北京", "dep_date": "2026-08-20", "sort_type": 4},
+        timeout=60,
+    )
+    call(
+        "skill.flyai.flight",
+        "POST",
+        "/api/v1/skills/flyai/flight",
+        json_body={"origin": "武汉", "destination": "北京", "dep_date": "2026-08-20", "sort_type": 4},
+        timeout=60,
+    )
+    call(
+        "skill.flyai.ferry",
+        "POST",
+        "/api/v1/skills/flyai/ferry",
+        json_body={"origin": "上海", "destination": "舟山", "dep_date": "2026-08-20"},
         timeout=60,
     )
     call(

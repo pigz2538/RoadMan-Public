@@ -25,6 +25,7 @@ import { useTripSSE } from '../composables/useTripSSE'
 import AmapRouteMap from '../components/map/AmapRouteMap.vue'
 import ActivityList from '../components/trip/ActivityList.vue'
 import AgentPanel from '../components/agent/AgentPanel.vue'
+import { humanizeDisplayText } from '../utils/displayLabels'
 import type { Trip } from '../types/trip'
 import mockTrip from '../../../shared/examples/wuhan-lushan-trip.json'
 
@@ -451,40 +452,40 @@ function formatTime(value: string) {
 
 function planningAgentName(event: { tool?: string; node?: string }) {
   const tools: Record<string, string> = {
-    'flyai.keyword_search': 'FlyAI 目的地检索 Agent',
-    'flyai.ai_search': 'FlyAI 语义检索 Agent',
-    'web.destination_research': '目的地研究 Agent',
-    'amap.route': '高德路线 Agent',
-    'amap.poi': '高德地点 Agent',
-    'flyai.poi': 'FlyAI 旅行搜索 Agent',
-    'flyai.hotel': 'FlyAI 住宿搜索 Agent',
-    'amap.poi/amap.route': '地图路线 Agent',
-    'baidu.baike': '百科详情 Agent',
-    'ollama.poi_curator': 'POI 策展 Agent',
-    'open_meteo.forecast': '天气 Agent',
+    'flyai.keyword_search': '目的地检索智能体',
+    'flyai.ai_search': '语义旅行检索智能体',
+    'web.destination_research': '目的地研究智能体',
+    'amap.route': '在线地图路线智能体',
+    'amap.poi': '在线地图地点智能体',
+    'flyai.poi': '旅行信息搜索智能体',
+    'flyai.hotel': '住宿搜索智能体',
+    'amap.poi/amap.route': '地图路线智能体',
+    'baidu.baike': '百科详情智能体',
+    'ollama.poi_curator': '地点策展智能体',
+    'open_meteo.forecast': '天气智能体',
   }
   const nodes: Record<string, string> = {
-    destination_research: '目的地研究 Agent',
-    review_tourism_suitability: '候选适配 Agent',
-    review_tourism_suitability_wait: '候选适配 Agent',
-    review_tourism_suitability_finalize: '候选适配 Agent',
-    load_context: '上下文 Agent',
-    extract_trip_request: '需求 Agent',
-    apply_defaults: '需求校验 Agent',
-    build_base_route: '路线 Agent',
-    split_into_days: '日程拆分 Agent',
-    discover_tourism: 'POI 策展 Agent',
-    enrich_poi_details: '百科详情 Agent',
-    build_local_routes: '接驳路线 Agent',
-    discover_services: '补能服务 Agent',
-    enrich_deep_drive: '驾驶安全 Agent',
-    schedule_tourism: '行程编排 Agent',
-    review_daily_schedule: '每日复核 Agent',
-    verify_plan: '验证 Agent',
-    render_markdown: '报告 Agent',
-    persist_trip: '报告 Agent',
+    destination_research: '目的地研究智能体',
+    review_tourism_suitability: '候选适配智能体',
+    review_tourism_suitability_wait: '候选适配智能体',
+    review_tourism_suitability_finalize: '候选适配智能体',
+    load_context: '上下文智能体',
+    extract_trip_request: '需求理解智能体',
+    apply_defaults: '需求校验智能体',
+    build_base_route: '路线智能体',
+    split_into_days: '日程拆分智能体',
+    discover_tourism: '地点策展智能体',
+    enrich_poi_details: '地点详情智能体',
+    build_local_routes: '接驳路线智能体',
+    discover_services: '补能服务智能体',
+    enrich_deep_drive: '驾驶安全智能体',
+    schedule_tourism: '行程编排智能体',
+    review_daily_schedule: '每日复核智能体',
+    verify_plan: '行程验证智能体',
+    render_markdown: '报告整理智能体',
+    persist_trip: '报告整理智能体',
   }
-  return (event.tool && tools[event.tool]) || (event.node && nodes[event.node]) || '规划 Agent'
+  return (event.tool && tools[event.tool]) || (event.node && nodes[event.node]) || '规划智能体'
 }
 
 function planningEventLabel(event: { label?: string; tool?: string; node?: string }) {
@@ -493,17 +494,17 @@ function planningEventLabel(event: { label?: string; tool?: string; node?: strin
   // "render markdown"). Keep those labels readable even when the backend
   // event was emitted before the localized label map was introduced.
   const normalized = label.toLowerCase().replace(/[_-]+/g, ' ')
-  if (normalized.includes('render markdown')) return '报告 Agent 正在整理最终行程安排'
-  if (normalized.includes('persist trip')) return '报告 Agent 正在保存并核对行程安排'
-  if (normalized.includes('build base route')) return '路线 Agent 已完成跨城主路线'
-  if (normalized.includes('discover tourism')) return 'POI 策展 Agent 已完成景点、餐饮与住宿候选'
-  if (normalized.includes('build local routes')) return '接驳路线 Agent 正在补齐本地交通'
-  if (normalized.includes('review daily schedule')) return '每日复核 Agent 正在检查全天时间覆盖'
-  if (normalized.includes('verify plan')) return '验证 Agent 正在核验时间、闭环与安全'
+  if (normalized.includes('render markdown')) return '报告整理智能体正在整理最终行程安排'
+  if (normalized.includes('persist trip')) return '报告整理智能体正在保存并核对行程安排'
+  if (normalized.includes('build base route')) return '路线智能体已完成跨城主路线'
+  if (normalized.includes('discover tourism')) return '地点策展智能体已完成景点、餐饮与住宿候选'
+  if (normalized.includes('build local routes')) return '接驳路线智能体正在补齐本地交通'
+  if (normalized.includes('review daily schedule')) return '每日复核智能体正在检查全天时间覆盖'
+  if (normalized.includes('verify plan')) return '行程验证智能体正在核验时间、闭环与安全'
   if (normalized.includes('agent') && /[a-z]{3,}/i.test(label)) {
     return `${planningAgentName(event)} 正在处理当前步骤`
   }
-  return label || `${planningAgentName(event)} 正在处理当前步骤`
+  return humanizeDisplayText(label) || `${planningAgentName(event)} 正在处理当前步骤`
 }
 
 function planningEventKey(event: { event: string; progress: number; node?: string; tool?: string }) {
@@ -570,7 +571,7 @@ function nameClass(value: string) {
 }
 
 function roadNames(stage: NonNullable<typeof store.currentStage>) {
-  return [...new Set(stage.route_segments.map((item) => item.road_name).filter(Boolean))].join(' / ') || '以高德实时规划为准'
+  return [...new Set(stage.route_segments.map((item) => item.road_name).filter(Boolean))].join(' / ') || '以在线地图实时规划为准'
 }
 
 function stageConditionLabel(mode: string) {
@@ -590,11 +591,30 @@ function stageCondition(stage: NonNullable<typeof store.currentStage>) {
       ? `总爬升约 ${Math.round(stage.elevation_gain_m)} m`
       : '高程数据暂不可用'
   }
-  if (stage.mode === 'transit') return '按高德当前班次规划'
-  if (stage.mode === 'train') return '按 FlyAI 实时火车班次规划'
-  if (stage.mode === 'flight') return '按 FlyAI 实时航班规划'
-  if (stage.mode === 'ferry') return '按 FlyAI 轮船候选规划（出发前确认班次）'
-  return '当前路况：高德暂无分段实时数据'
+  if (stage.mode === 'transit') return '按实时公共交通班次规划'
+  if (stage.mode === 'train') return '已按实时铁路班次规划'
+  if (stage.mode === 'flight') return '已按实时航班规划'
+  if (stage.mode === 'ferry') return '已按轮船候选规划（出发前确认班次）'
+  return '当前路况：在线地图暂无分段实时数据'
+}
+
+function stageServiceText(stage: NonNullable<typeof store.currentStage>) {
+  if (stage.mode === 'train' || stage.mode === 'flight' || stage.mode === 'ferry') {
+    const label = stage.mode === 'train' ? '车次' : stage.mode === 'flight' ? '航班' : '船班'
+    const number = stage.service_number || `${label}号暂未返回`
+    const terminals = [stage.departure_terminal, stage.arrival_terminal].filter(Boolean).join(' → ')
+    const seat = stage.service_seat_class ? ` · ${stage.service_seat_class}` : ''
+    const price = stage.service_price
+      ? ` · ¥${stage.service_price.minimum}${stage.service_price.maximum !== stage.service_price.minimum ? `-${stage.service_price.maximum}` : ''}`
+      : ''
+    return `${label} ${number}${stage.service_operator ? ` · ${stage.service_operator}` : ''}${terminals ? ` · ${terminals}` : ''}${seat}${price}`
+  }
+  if (stage.mode === 'transit' && stage.transit_legs?.length) {
+    return stage.transit_legs
+      .map((leg) => `${leg.line_name || (leg.mode === 'subway' ? '地铁' : '公交')} ${leg.departure_stop || '上车'} → ${leg.arrival_stop || '下车'}`)
+      .join('；')
+  }
+  return ''
 }
 
 function modeEmoji(mode: string, transitType?: string) {
@@ -896,6 +916,10 @@ watch(
                   <span><b>{{ formatTime(item.stage.planned_start) }}</b> 预计出发</span>
                   <span><b>{{ formatTime(item.stage.planned_end) }}</b> 预计抵达</span>
                 </div>
+                <p v-if="stageServiceText(item.stage)" class="stage-service-detail">
+                  {{ stageServiceText(item.stage) }}
+                  <a v-if="item.stage.service_detail_url" :href="item.stage.service_detail_url" target="_blank" rel="noreferrer" @click.stop>查看班次</a>
+                </p>
                 <dl>
                   <div><dt>道路</dt><dd>{{ roadNames(item.stage) }}</dd></div>
                   <div><dt>{{ stageConditionLabel(item.stage.mode) }}</dt><dd>{{ stageCondition(item.stage) }}</dd></div>

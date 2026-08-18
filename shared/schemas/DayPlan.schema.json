@@ -126,6 +126,40 @@
           ],
           "default": null
         },
+        "ticket_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ticket Name"
+        },
+        "ticket_status": {
+          "default": "unknown",
+          "enum": [
+            "known",
+            "free",
+            "unknown"
+          ],
+          "title": "Ticket Status",
+          "type": "string"
+        },
+        "ticket_note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ticket Note"
+        },
         "parking_or_price": {
           "anyOf": [
             {
@@ -171,6 +205,59 @@
             }
           ],
           "default": null
+        },
+        "official_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Official Url"
+        },
+        "booking_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Booking Url"
+        },
+        "information_status": {
+          "default": "unavailable",
+          "enum": [
+            "complete",
+            "partial",
+            "unavailable"
+          ],
+          "title": "Information Status",
+          "type": "string"
+        },
+        "information_checked_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Information Checked At"
+        },
+        "information_sources_count": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Information Sources Count",
+          "type": "integer"
         },
         "reservation_status": {
           "default": "unknown",
@@ -358,6 +445,37 @@
           "default": true,
           "title": "Estimated",
           "type": "boolean"
+        },
+        "source_count": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Source Count",
+          "type": "integer"
+        },
+        "as_of": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "As Of"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Note"
         }
       },
       "required": [
@@ -417,6 +535,13 @@
           ],
           "default": null,
           "title": "Transit Type"
+        },
+        "transit_legs": {
+          "items": {
+            "$ref": "#/$defs/TransitLeg"
+          },
+          "title": "Transit Legs",
+          "type": "array"
         },
         "origin": {
           "$ref": "#/$defs/PlaceRef"
@@ -543,6 +668,78 @@
           "default": null,
           "title": "Service Detail Url"
         },
+        "service_departure_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Service Departure At"
+        },
+        "service_arrival_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Service Arrival At"
+        },
+        "service_seat_class": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Service Seat Class"
+        },
+        "service_price": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MoneyRange"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "service_status": {
+          "default": "unavailable",
+          "enum": [
+            "confirmed",
+            "estimated",
+            "unavailable"
+          ],
+          "title": "Service Status",
+          "type": "string"
+        },
+        "transit_fare_cny": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Transit Fare Cny"
+        },
         "weather_summary": {
           "anyOf": [
             {
@@ -652,6 +849,44 @@
           "default": false,
           "title": "Confirmed",
           "type": "boolean"
+        },
+        "source_count": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Source Count",
+          "type": "integer"
+        },
+        "as_of": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "As Of"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Note"
+        },
+        "source_urls": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Source Urls",
+          "type": "array"
         }
       },
       "required": [
@@ -871,6 +1106,38 @@
           ],
           "default": null,
           "title": "License"
+        },
+        "source_type": {
+          "default": "unknown",
+          "enum": [
+            "official",
+            "map",
+            "ticketing",
+            "travel_platform",
+            "open_data",
+            "web_search",
+            "encyclopedia",
+            "agent",
+            "unknown"
+          ],
+          "title": "Source Type",
+          "type": "string"
+        },
+        "confidence": {
+          "default": "unknown",
+          "enum": [
+            "high",
+            "medium",
+            "low",
+            "unknown"
+          ],
+          "title": "Confidence",
+          "type": "string"
+        },
+        "facts": {
+          "additionalProperties": true,
+          "title": "Facts",
+          "type": "object"
         }
       },
       "required": [
@@ -878,6 +1145,162 @@
         "title"
       ],
       "title": "SourceRecord",
+      "type": "object"
+    },
+    "TransitLeg": {
+      "properties": {
+        "mode": {
+          "default": "other",
+          "enum": [
+            "bus",
+            "subway",
+            "rail",
+            "walk",
+            "shuttle",
+            "ferry",
+            "other"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "line_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Line Name"
+        },
+        "line_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Line Id"
+        },
+        "line_type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Line Type"
+        },
+        "departure_stop": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Departure Stop"
+        },
+        "arrival_stop": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Arrival Stop"
+        },
+        "departure_time": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Departure Time"
+        },
+        "arrival_time": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Arrival Time"
+        },
+        "stop_count": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Stop Count"
+        },
+        "duration_minutes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Duration Minutes"
+        },
+        "distance_km": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Distance Km"
+        },
+        "fare_cny": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fare Cny"
+        }
+      },
+      "title": "TransitLeg",
       "type": "object"
     },
     "WeatherSample": {

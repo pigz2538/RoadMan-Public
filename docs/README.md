@@ -1,8 +1,10 @@
 # RoadMan 文档索引
 
+> 交通与地点信息的结构化契约、来源追溯和未知状态处理见 [mobility-and-poi-data-contract.md](mobility-and-poi-data-contract.md)。
+
 本文档索引 `docs/` 目录下的维护文档。所有文档以当前代码、接口与配置为准，均不描述代码中不存在的能力。项目入口与实现边界见根目录 [project.md](../project.md)；快速上手、配置与验证命令见根目录 [README.md](../README.md)。
 
-## 基线文档（7 份）
+## 基线文档（8 份）
 
 | 文档 | 用途 |
 | --- | --- |
@@ -12,6 +14,7 @@
 | [runtime-requirements.md](runtime-requirements.md) | Python/Node/PostgreSQL/Redis 依赖、Conda 与 Docker 两种运行方式 |
 | [operations.md](operations.md) | 部署、健康检查、验收脚本、备份恢复、Nginx/HTTPS、排障与凭据管理 |
 | [carinfo-catalog.md](carinfo-catalog.md) | 车型目录搜索、确定性回退与前端车辆抽屉接入 |
+| [mobility-and-poi-data-contract.md](mobility-and-poi-data-contract.md) | 景点事实、票务预约、停车、图片、公共交通与跨城班次的数据契约和未知状态 |
 | [README.md](README.md) | 本文档索引 |
 
 ## 评审与规划文档（4 份）

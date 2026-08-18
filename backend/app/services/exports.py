@@ -74,22 +74,64 @@ def build_report_html(trip: Trip, markdown: str = "") -> str:
             + "".join(f"<span>{escape(tag)}</span>" for tag in activity.risk_tags[:3])
             + "</div>"
         )
+        ticket = activity.ticket_or_price
+        if ticket:
+            ticket_text = f"¥{ticket.minimum:g}"
+            if ticket.maximum != ticket.minimum:
+                ticket_text += f"–¥{ticket.maximum:g}"
+        elif activity.ticket_status == "free":
+            ticket_text = "免费"
+        else:
+            ticket_text = "暂未返回"
+        parking = activity.parking_note or "暂未返回"
+        if activity.parking_or_price:
+            parking = f"约¥{activity.parking_or_price.minimum:g}"
+            if activity.parking_or_price.maximum != activity.parking_or_price.minimum:
+                parking += f"–¥{activity.parking_or_price.maximum:g}"
+            if activity.parking_note:
+                parking += f"（{activity.parking_note}）"
+        facts = [
+            f"营业：{activity.opening_hours.text if activity.opening_hours else '暂未返回'}",
+            f"门票：{ticket_text}",
+            f"停车：{parking}",
+            f"资料：{'完整' if activity.information_status == 'complete' else '部分' if activity.information_status == 'partial' else '待核验'}（{activity.information_sources_count} 个来源）",
+        ]
+        facts_markup = '<div class="report-facts">' + "".join(
+            f"<span>{escape(item)}</span>" for item in facts
+        ) + "</div>"
         return (
             f'<article class="report-card"><div class="report-card-media">{image_markup}'
             f'<span class="report-card-type">{escape(_activity_label(activity.type))}</span></div>'
             f'<h3>{escape(activity.place.name)}</h3>'
             f'<time>{activity.planned_start:%m月%d日 %H:%M}–{activity.planned_end:%H:%M}</time>'
-            f'<p>{description[:180]}</p>{checks}{link}</article>'
+            f'<p>{description[:180]}</p>{facts_markup}{checks}{link}</article>'
         )
 
     day_sections = []
     for day in trip.days:
-        stages = "".join(
-            f'<li><b>{stage.planned_start:%H:%M}–{stage.planned_end:%H:%M}</b> '
-            f'{escape(stage.origin.name)} → {escape(stage.destination.name)} · '
-            f'{stage.distance_km:g} km · {_mode_label(stage.mode)}</li>'
-            for stage in day.stages
-        )
+        stage_items = []
+        for stage in day.stages:
+            service = ""
+            if stage.mode in {"train", "flight", "ferry"}:
+                terminals = " → ".join(
+                    item for item in (stage.departure_terminal, stage.arrival_terminal) if item
+                )
+                service = f" · {escape(stage.service_number or '班次号暂未返回')}"
+                if terminals:
+                    service += f" · {escape(terminals)}"
+            transit = ""
+            if stage.transit_legs:
+                transit = " · " + "；".join(
+                    f"{escape(leg.line_name or leg.line_type or '公共交通')} "
+                    f"{escape(leg.departure_stop or '上车')}→{escape(leg.arrival_stop or '下车')}"
+                    for leg in stage.transit_legs
+                )
+            stage_items.append(
+                f'<li><b>{stage.planned_start:%H:%M}–{stage.planned_end:%H:%M}</b> '
+                f'{escape(stage.origin.name)} → {escape(stage.destination.name)} · '
+                f'{stage.distance_km:g} km · {_mode_label(stage.mode)}{service}{transit}</li>'
+            )
+        stages = "".join(stage_items)
         cards = "".join(card(activity) for activity in day.activities if activity.type in {"attraction", "meal", "hotel"})
         day_route = _png_data_uri(_render_route_map(trip, 1100, 300, days=[day]).getvalue())
         day_sections.append(
@@ -118,6 +160,7 @@ h1 {{ margin:16px 0 8px; font-size:42px; }} .subtitle {{ color:#d7e8fb; font-siz
 .report-card-placeholder {{ display:grid; place-items:center; height:100%; color:#2377e8; font-weight:800; font-size:20px; }}
 .report-card-type {{ position:absolute; left:12px; top:12px; padding:5px 9px; border-radius:999px; color:#fff; background:#2377e8dd; font-size:12px; font-weight:800; }}
  .report-card h3 {{ margin:14px 14px 5px; font-size:17px; }} .report-card time,.report-card p,.report-card a {{ display:block; margin:0 14px 9px; color:#657b98; font-size:13px; line-height:1.5; }} .report-card a {{ color:#176fe1; text-decoration:none; font-weight:700; }}
+.report-facts {{ display:grid; gap:3px; margin:0 14px 9px; color:#526b89; font-size:11px; line-height:1.35; }}
 .report-checks {{ display:flex; flex-wrap:wrap; gap:5px; margin:0 14px 9px; }} .report-checks span {{ padding:3px 7px; border-radius:999px; color:#7d5d21; background:#fff4d8; font-size:11px; }}
 .report-day {{ margin-top:28px; padding:26px; border:1px solid #d9e6f4; border-radius:24px; background:#f8fbff; }}
 .day-route {{ width:100%; margin:8px 0 18px; border-radius:16px; background:#eef5fc; }}

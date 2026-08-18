@@ -457,14 +457,22 @@ function resetPreflight() {
   planningServiceError.value = ''
 }
 
-async function checkPreflight(confirmed = false) {
+async function checkPreflight(
+  confirmed = false,
+  answersOverride?: Record<string, string>,
+) {
   if (planning.value || preflightChecking.value || !prompt.value.trim()) return
   planningError.value = ''
   try {
     preflightChecking.value = true
+    // Snapshot the answers before awaiting the network request.  A cloud
+    // extraction round can resolve quickly enough to update the panel while
+    // the user is still on the same question; passing a stable copy prevents
+    // that render from dropping the answer that triggered this check.
+    const answers = { ...(answersOverride ?? clarificationAnswers.value) }
     preflight.value = await preflightTrip(
       prompt.value.trim(),
-      clarificationAnswers.value,
+      answers,
       confirmed,
       preflight.value?.extracted,
       preflight.value?.semantic_checked,
@@ -495,7 +503,8 @@ async function submitClarification() {
   const issue = activeClarification.value
   if (!issue) return
   const key = issueKey(issue)
-  if (!clarificationAnswers.value[key]?.trim()) {
+  const answer = clarificationAnswers.value[key]?.trim() || ''
+  if (!answer) {
     planningError.value = '请先回答当前问题。'
     return
   }
@@ -504,7 +513,10 @@ async function submitClarification() {
     clarificationIndex.value += 1
     return
   }
-  await checkPreflight(false)
+  await checkPreflight(false, {
+    ...clarificationAnswers.value,
+    [key]: answer,
+  })
 }
 
 async function confirmAndPlan() {

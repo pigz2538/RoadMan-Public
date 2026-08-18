@@ -136,6 +136,7 @@ submission/  参赛方案书与生成审计工具
 - [project.md](project.md)：系统架构、规划工作流、接口与数据边界
 - [docs/README.md](docs/README.md)：全部维护文档索引
 - [docs/api-contract.md](docs/api-contract.md)：HTTP/SSE 接口契约
+- [docs/mobility-and-poi-data-contract.md](docs/mobility-and-poi-data-contract.md)：地点事实、票务预约、停车、公共交通与跨城班次的数据契约
 - [docs/operations.md](docs/operations.md)：部署运维、备份恢复与排障
 - [submission/GOAI_Boundless_Agents/RoadMan_赛道二参赛方案书.md](submission/GOAI_Boundless_Agents/RoadMan_赛道二参赛方案书.md)：参赛方案书
 

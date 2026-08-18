@@ -72,6 +72,15 @@ async def poi(
     return await registry.execute("amap.poi", payload, context)
 
 
+@router.post("/amap/poi-detail")
+async def poi_detail(
+    payload: dict,
+    context: SkillContext = Depends(context_from_request),
+    registry: SkillRegistry = Depends(get_registry),
+):
+    return await registry.execute("amap.poi_detail", payload, context)
+
+
 @router.post("/weather/forecast")
 async def weather_forecast(
     payload: dict,
@@ -110,6 +119,33 @@ async def flyai_hotel(
     registry: SkillRegistry = Depends(get_registry),
 ):
     return await registry.execute("flyai.hotel", payload, context)
+
+
+@router.post("/flyai/train")
+async def flyai_train(
+    payload: dict,
+    context: SkillContext = Depends(context_from_request),
+    registry: SkillRegistry = Depends(get_registry),
+):
+    return await registry.execute("flyai.train", payload, context)
+
+
+@router.post("/flyai/flight")
+async def flyai_flight(
+    payload: dict,
+    context: SkillContext = Depends(context_from_request),
+    registry: SkillRegistry = Depends(get_registry),
+):
+    return await registry.execute("flyai.flight", payload, context)
+
+
+@router.post("/flyai/ferry")
+async def flyai_ferry(
+    payload: dict,
+    context: SkillContext = Depends(context_from_request),
+    registry: SkillRegistry = Depends(get_registry),
+):
+    return await registry.execute("flyai.ferry", payload, context)
 
 
 @router.post("/flyai/keyword-search")

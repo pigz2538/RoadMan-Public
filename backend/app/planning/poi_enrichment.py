@@ -11,10 +11,13 @@ from __future__ import annotations
 import asyncio
 from html.parser import HTMLParser
 import re
+from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import quote
 
 import httpx
+
+from ..skills.base import SkillContext
 
 
 _PROVIDER_BOILERPLATE = (
@@ -176,11 +179,231 @@ async def enrich_tourism_candidates(
     return candidates
 
 
+def _numeric_price(value: Any) -> float | None:
+    if value in (None, ""):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    match = re.search(r"(\d+(?:\.\d+)?)", str(value))
+    return float(match.group(1)) if match else None
+
+
+def _price_range(value: Any) -> tuple[float, float] | None:
+    """Read a conservative CNY range from provider display text."""
+    if value in (None, ""):
+        return None
+    values = [float(item) for item in re.findall(r"\d+(?:\.\d+)?", str(value))]
+    if not values:
+        return None
+    return min(values), max(values)
+
+
+def _append_sources(candidate: dict[str, Any], records: list[Any]) -> None:
+    existing = candidate.setdefault("source_records", [])
+    seen = {(item.get("provider"), item.get("url")) for item in existing if isinstance(item, dict)}
+    for record in records:
+        data = record.model_dump(mode="json") if hasattr(record, "model_dump") else record
+        if not isinstance(data, dict):
+            continue
+        key = (data.get("provider"), data.get("url"))
+        if key in seen:
+            continue
+        existing.append(data)
+        seen.add(key)
+
+
+def _merge_structured_facts(candidate: dict[str, Any], item: dict[str, Any], *, provider: str) -> None:
+    """Merge provider facts while retaining an explicit unknown state."""
+    if item.get("name") and not candidate.get("place", {}).get("name"):
+        candidate.setdefault("place", {})["name"] = item["name"]
+    opening = item.get("opening_hours_text") or item.get("openingHours")
+    if opening:
+        candidate["opening_hours"] = {
+            "text": str(opening)[:240],
+            "confirmed": provider == "高德地图",
+            "source_count": max(1, int((candidate.get("opening_hours") or {}).get("source_count") or 0) + 1),
+            "as_of": datetime.now(timezone.utc).date().isoformat(),
+        }
+    ticket_name = item.get("ticket_name") or item.get("ticketName")
+    free_status = str(item.get("free_status") or item.get("freePoiStatus") or "").lower()
+    price_text = item.get("price_text") or item.get("price") or item.get("price_min_cny")
+    price = _price_range(price_text)
+    if ticket_name:
+        candidate["ticket_name"] = str(ticket_name)
+    if price is not None:
+        candidate["ticket_or_price"] = {
+            "currency": "CNY",
+            "minimum": price[0],
+            "maximum": _price_range(item.get("price_max_cny"))[1] if _price_range(item.get("price_max_cny")) else price[1],
+            "estimated": provider != "高德地图",
+            "source_count": 1,
+        }
+        candidate["ticket_status"] = "known"
+    elif "free" in free_status or free_status in {"0", "false"}:
+        candidate["ticket_status"] = "free"
+    elif ticket_name:
+        candidate["ticket_status"] = "known"
+    parking = item.get("parking_text") or item.get("parking_note")
+    if parking:
+        candidate["parking_note"] = str(parking)[:240]
+        if re.search(r"(?:元|¥|￥)", str(parking)):
+            parking_price = _price_range(parking)
+            if parking_price:
+                candidate["parking_or_price"] = {
+                    "currency": "CNY",
+                    "minimum": parking_price[0],
+                    "maximum": parking_price[1],
+                    "estimated": provider != "高德地图",
+                    "source_count": 1,
+                }
+    ticket_ordering = item.get("ticket_ordering") or item.get("ticketOrdering")
+    if ticket_ordering:
+        ordering_text = str(ticket_ordering)[:240]
+        candidate["reservation_status"] = (
+            "recommended"
+            if re.search(r"预约|预订|实名|购票", ordering_text)
+            else "unknown"
+        )
+        candidate["reservation_note"] = f"门票信息：{ordering_text}；请以官方公告为准"
+        if re.match(r"https?://", ordering_text):
+            candidate["booking_url"] = ordering_text
+    website = item.get("website") or item.get("official_url")
+    if website and re.match(r"https?://", str(website)):
+        candidate["official_url"] = str(website)
+    if item.get("rating") and not candidate.get("information_summary"):
+        candidate["information_summary"] = f"公开评分：{item['rating']}"
+    image = (item.get("photos") or [None])[0] if isinstance(item.get("photos"), list) else item.get("image_url")
+    if image and not candidate.get("image_url"):
+        candidate["image_url"] = image
+    if item.get("detail_url") and not candidate.get("detail_url"):
+        candidate["detail_url"] = item["detail_url"]
+
+
+async def _enrich_with_provider_skills(
+    matches: list[tuple[dict[str, Any], dict[str, Any]]],
+    *,
+    registry: Any,
+    trip_id: str | None,
+    timeout_seconds: float,
+) -> None:
+    """Fetch exact map/ticket facts for scheduled items.
+
+    A failed provider is intentionally non-blocking: the activity keeps an
+    explicit ``partial``/``unavailable`` status instead of receiving invented
+    opening hours or ticket prices.
+    """
+    if registry is None:
+        return
+    semaphore = asyncio.Semaphore(6)
+
+    async def enrich_one(activity: dict[str, Any], candidate: dict[str, Any]) -> None:
+        async with semaphore:
+            place = candidate.get("place") or activity.get("place") or {}
+            name = str(place.get("name") or "").strip()
+            city = str(place.get("city") or "").strip()
+            amap_id = candidate.get("amap_source_id")
+            if not amap_id:
+                has_map_source = any(
+                    isinstance(record, dict) and "高德" in str(record.get("provider") or "")
+                    for record in candidate.get("source_records", [])
+                )
+                if has_map_source:
+                    amap_id = place.get("source_id") or place.get("id")
+            if not amap_id and name and "amap.poi" in registry.names():
+                try:
+                    lookup = await asyncio.wait_for(
+                        registry.execute(
+                            "amap.poi",
+                            {"keywords": name, "city": city or None, "page_size": 5},
+                            SkillContext(trip_id=trip_id, metadata={"exact_name": name}),
+                        ),
+                        timeout=timeout_seconds + 1,
+                    )
+                    if lookup.success and isinstance(lookup.data, dict):
+                        normalized = "".join(name.split()).casefold()
+                        match = next(
+                            (
+                                item for item in lookup.data.get("items", [])
+                                if "".join(str(item.get("name") or "").split()).casefold() == normalized
+                            ),
+                            None,
+                        )
+                        if isinstance(match, dict) and match.get("id"):
+                            amap_id = match["id"]
+                            place["source_id"] = amap_id
+                            _append_sources(candidate, lookup.sources)
+                except Exception:
+                    pass
+            if amap_id and "amap.poi_detail" in registry.names():
+                try:
+                    result = await asyncio.wait_for(
+                        registry.execute("amap.poi_detail", {"poi_id": str(amap_id)}, SkillContext(trip_id=trip_id)),
+                        timeout=timeout_seconds + 1,
+                    )
+                    if result.success and isinstance(result.data, dict):
+                        item = result.data.get("item") or {}
+                        _merge_structured_facts(candidate, item, provider="高德地图")
+                        _append_sources(candidate, result.sources)
+                except Exception:
+                    pass
+            # Exact ticket/attraction lookup supplies admission details and a
+            # travel-platform URL; meals/hotels already have dedicated pools.
+            if activity.get("type") == "attraction" and name and "flyai.poi" in registry.names():
+                try:
+                    result = await asyncio.wait_for(
+                        registry.execute(
+                            "flyai.poi",
+                            {"city_name": city or name, "keyword": name},
+                            SkillContext(trip_id=trip_id, metadata={"exact_name": name}),
+                        ),
+                        timeout=timeout_seconds + 1,
+                    )
+                    if result.success and isinstance(result.data, dict):
+                        normalized = "".join(name.split()).casefold()
+                        item = next(
+                            (
+                                item for item in result.data.get("items", [])
+                                if "".join(str(item.get("name") or "").split()).casefold() == normalized
+                            ),
+                            None,
+                        ) or (result.data.get("items") or [None])[0]
+                        if isinstance(item, dict):
+                            _merge_structured_facts(candidate, item, provider="旅行服务")
+                            _append_sources(candidate, result.sources)
+                            if item.get("detail_url"):
+                                _append_sources(candidate, [{
+                                    "provider": "旅行服务",
+                                    "title": f"{name} 门票与预约",
+                                    "url": item["detail_url"],
+                                    "source_type": "ticketing",
+                                    "confidence": "medium",
+                                }])
+                except Exception:
+                    pass
+            providers = {
+                str(item.get("provider"))
+                for item in candidate.get("source_records", [])
+                if isinstance(item, dict) and item.get("provider")
+            }
+            candidate["information_sources_count"] = len(providers)
+            has_opening = bool((candidate.get("opening_hours") or {}).get("text"))
+            has_ticket = candidate.get("ticket_status") in {"known", "free"}
+            candidate["information_status"] = (
+                "complete" if len(providers) >= 2 and (has_opening or has_ticket)
+                else "partial" if providers else "unavailable"
+            )
+            candidate["information_checked_at"] = datetime.now(timezone.utc).isoformat()
+
+    await asyncio.gather(*(enrich_one(activity, candidate) for activity, candidate in matches))
+
+
 async def enrich_scheduled_activities(
     day_plans: list[dict[str, Any]],
     candidates: dict[str, list[dict[str, Any]]],
     *,
     timeout_seconds: float = 1.8,
+    registry: Any = None,
+    trip_id: str | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, list[dict[str, Any]]]]:
     """Search every scheduled POI, including items absent from the pool.
 
@@ -210,8 +433,19 @@ async def enrich_scheduled_activities(
         await enrich_tourism_candidates(synthetic, max_attractions=None, max_other=None, timeout_seconds=timeout_seconds)
         for category, items in synthetic.items():
             candidates.setdefault(category, []).extend(item for item in items if item.get("detail_url"))
+    await _enrich_with_provider_skills(
+        matches,
+        registry=registry,
+        trip_id=trip_id,
+        timeout_seconds=timeout_seconds,
+    )
     for activity, candidate in matches:
-        for key in ("description", "information_summary", "image_url", "detail_url", "ticket_or_price", "parking_or_price", "parking_note", "opening_hours", "reservation_status", "reservation_note"):
+        for key in (
+            "description", "information_summary", "image_url", "detail_url", "ticket_or_price",
+            "ticket_name", "ticket_status", "ticket_note", "parking_or_price", "parking_note",
+            "opening_hours", "reservation_status", "reservation_note", "official_url", "booking_url",
+            "information_status", "information_checked_at", "information_sources_count",
+        ):
             if candidate.get(key):
                 activity[key] = candidate[key]
         if candidate.get("source_records"):

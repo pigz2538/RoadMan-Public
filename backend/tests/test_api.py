@@ -412,6 +412,33 @@ async def test_preflight_resolves_chinese_weekday_return_without_clarification(c
 
 
 @pytest.mark.asyncio
+async def test_preflight_replaces_stale_end_date_for_relative_duration(client):
+    """A duration-only request must not inherit an invalid date from a prior round."""
+    response = await client.post(
+        "/api/v1/trips/preflight",
+        json={
+            "raw_text": "下周三想和对象从武汉坐飞机去成都玩三天，一定要去麓湖CPI",
+            "previous_extracted": {
+                "origin_name": "武汉",
+                "destination_name": "成都",
+                "start_date": "2026-08-26",
+                "end_date": "2026-08-17",
+                "travelers": 2,
+                "max_days": 3,
+                "transport_modes": ["flight"],
+            },
+            "semantic_checked": True,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["extracted"]["start_date"] == "2026-08-26"
+    assert body["extracted"]["end_date"] == "2026-08-28"
+    assert "INVALID_DATE_ORDER" not in {item["code"] for item in body["issues"]}
+
+
+@pytest.mark.asyncio
 async def test_preflight_understands_departure_then_arrival_clock_order(client):
     response = await client.post(
         "/api/v1/trips/preflight",

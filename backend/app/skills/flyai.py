@@ -122,6 +122,26 @@ def _duration_minutes(value: object) -> int | None:
     return max(1, round(float(match.group(1)))) if match else None
 
 
+def _transport_number(segment: dict[str, Any], *fallback_keys: str) -> str | None:
+    """Return a real service identifier without confusing carrier names with it."""
+    for key in ("marketingTransportNo", *fallback_keys, "transportNo", "transportNumber", "number", "code"):
+        value = segment.get(key)
+        if value not in (None, ""):
+            text = str(value).strip()
+            if text:
+                return text
+    return None
+
+
+def _segment_numbers(segments: list[dict[str, Any]], *keys: str) -> list[str]:
+    values: list[str] = []
+    for segment in segments:
+        number = _transport_number(segment, *keys)
+        if number and number not in values:
+            values.append(number)
+    return values
+
+
 def _place_variants(value: object) -> set[str]:
     """Build conservative name variants for provider-result validation."""
     text = str(value or "").strip().casefold()
@@ -278,6 +298,7 @@ class FlyAITrainAdapter(SkillAdapter):
             )
             if duration is None:
                 duration = max(1, round((arrival_at - departure_at).total_seconds() / 60))
+            train_numbers = _segment_numbers(segments, "trainNo", "trainNumber")
             items.append(
                 {
                     "id": raw.get("id") or f"train_{index}",
@@ -286,10 +307,13 @@ class FlyAITrainAdapter(SkillAdapter):
                     "departure_at": departure_at.isoformat(),
                     "arrival_at": arrival_at.isoformat(),
                     "duration_minutes": duration,
-                    "train_number": first.get("marketingTransportNo"),
+                    "train_number": " / ".join(train_numbers) if train_numbers else None,
+                    "service_number": " / ".join(train_numbers) if train_numbers else None,
                     "transport_name": first.get("marketingTransportName") or first.get("transportType"),
+                    "operator": first.get("marketingTransportName") or first.get("operator"),
                     "departure_station": first.get("depStationName"),
                     "arrival_station": last.get("arrStationName"),
+                    "service_status": "confirmed" if train_numbers else "unavailable",
                     "seat_class": first.get("seatClassName"),
                     "price": raw.get("price") or raw.get("adultPrice"),
                     "detail_url": raw.get("jumpUrl"),
@@ -436,6 +460,7 @@ class FlyAIFlightAdapter(SkillAdapter):
             )
             if duration is None:
                 duration = max(1, round((arrival_at - departure_at).total_seconds() / 60))
+            flight_numbers = _segment_numbers(segments, "flightNo", "flightNumber")
             items.append(
                 {
                     "id": raw.get("id") or f"flight_{index}",
@@ -444,12 +469,15 @@ class FlyAIFlightAdapter(SkillAdapter):
                     "departure_at": departure_at.isoformat(),
                     "arrival_at": arrival_at.isoformat(),
                     "duration_minutes": duration,
-                    "flight_number": first.get("marketingTransportNo"),
+                    "flight_number": " / ".join(flight_numbers) if flight_numbers else None,
+                    "service_number": " / ".join(flight_numbers) if flight_numbers else None,
                     "carrier": first.get("marketingTransportName") or first.get("transportType"),
+                    "operator": first.get("marketingTransportName") or first.get("operator"),
                     "departure_city": departure_city,
                     "arrival_city": arrival_city,
                     "departure_airport": first.get("depStationName"),
                     "arrival_airport": last.get("arrStationName"),
+                    "service_status": "confirmed" if flight_numbers else "unavailable",
                     "seat_class": first.get("seatClassName"),
                     "price": raw.get("adultPrice") or raw.get("ticketPrice") or raw.get("price"),
                     "detail_url": raw.get("jumpUrl"),

@@ -4,6 +4,7 @@ from ..skills.amap import (
     AmapDrivingAdapter,
     AmapGeocodeAdapter,
     AmapPoiAdapter,
+    AmapPoiDetailAdapter,
     AmapRouteAdapter,
 )
 from ..skills.cache import RedisFallbackSkillCache
@@ -36,6 +37,7 @@ def build_skill_registry(settings: Settings | None = None) -> SkillRegistry:
     registry.register(AmapDrivingAdapter(config.amap_webservice_key))
     registry.register(AmapRouteAdapter(config.amap_webservice_key))
     registry.register(AmapPoiAdapter(config.amap_webservice_key))
+    registry.register(AmapPoiDetailAdapter(config.amap_webservice_key))
     registry.register(OpenMeteoForecastAdapter())
     registry.register(CarInfoDemoAdapter())
     registry.register(CarInfoCatalogAdapter())

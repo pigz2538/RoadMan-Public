@@ -1,5 +1,16 @@
 # API 契约
 
+## 交通与 POI 事实接口（新增）
+
+| 方法 | 路径 | 作用 |
+| --- | --- | --- |
+| POST | `/api/v1/skills/amap/poi-detail` | 按 POI ID 查询营业时间、价格、停车、电话、官网和图片 |
+| POST | `/api/v1/skills/flyai/train` | 返回具体车次号、站点、时间、座席、价格和详情链接 |
+| POST | `/api/v1/skills/flyai/flight` | 返回具体航班号、机场、时间、座席、价格和详情链接 |
+| POST | `/api/v1/skills/flyai/ferry` | 返回轮船语义候选，时间和班次明确标记为估算 |
+
+行程阶段将上述结果映射到 `service_number`、`service_operator`、`departure_terminal`、`arrival_terminal`、`service_departure_at`、`service_arrival_at`、`service_seat_class`、`service_price`、`service_status`；公共交通映射到 `transit_legs`，每段包含线路名、上下车站、站数、耗时和票价。景点/餐饮/住宿卡片同时保留 `opening_hours`、`ticket_or_price`、`parking_or_price`、`reservation_status`、`information_status` 和来源核验时间；缺失字段明确返回未知状态。
+
 后端 ASGI 入口为 `http://localhost:8000`（本地 uvicorn），Docker 统一 Web 入口为 `http://localhost:8080`，交互式 OpenAPI 文档在 `/docs`。前端在运行时仅与同一宿主下的 API 通信，生产走 Nginx 反代。
 
 ## 通用约定

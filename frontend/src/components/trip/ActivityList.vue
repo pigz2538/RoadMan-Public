@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { MapPin, MessageCircle, Trash2 } from '@lucide/vue'
 import type { Activity } from '../../types/trip'
+import { humanizeProvider } from '../../utils/displayLabels'
 
 defineProps<{ activities: Activity[]; selectedId?: string | null }>()
 defineEmits<{
@@ -68,6 +69,18 @@ const reservationLabels: Record<string, string> = {
           {{ activity.ticket_or_price.estimated ? '预计' : '' }}
           ¥{{ activity.ticket_or_price.minimum }}–{{ activity.ticket_or_price.maximum }}
         </span>
+        <span v-else-if="activity.type === 'attraction'" class="activity-meta activity-unknown">
+          门票信息：{{ activity.ticket_status === 'free' ? '免费' : '暂未返回，出发前复核' }}
+        </span>
+        <span v-if="activity.ticket_name" class="activity-meta">票种：{{ activity.ticket_name }}</span>
+        <span v-if="activity.parking_note" class="activity-meta">停车：{{ activity.parking_note }}</span>
+        <span v-if="activity.parking_or_price" class="activity-meta">
+          停车费：{{ activity.parking_or_price.estimated ? '约' : '' }}¥{{ activity.parking_or_price.minimum }}<template v-if="activity.parking_or_price.maximum !== activity.parking_or_price.minimum">-{{ activity.parking_or_price.maximum }}</template>
+        </span>
+        <span v-if="activity.information_status" class="activity-meta">
+          信息完整度：{{ activity.information_status === 'complete' ? '多源已核对' : activity.information_status === 'partial' ? '部分来源' : '暂不可用' }}
+          <template v-if="activity.information_sources_count">（{{ activity.information_sources_count }} 个来源）</template>
+        </span>
         <div v-if="activity.reservation_status || activity.risk_tags?.length" class="activity-checks">
           <span
             v-if="activity.reservation_status"
@@ -84,14 +97,14 @@ const reservationLabels: Record<string, string> = {
         <p v-if="activity.reservation_note" class="activity-check-note">{{ activity.reservation_note }}</p>
         <p v-if="activity.risk_note" class="activity-check-note risk-note">{{ activity.risk_note }}</p>
         <span v-if="activity.source_records?.length" class="activity-source">
-          来源：{{ [...new Set(activity.source_records.map((item) => item.provider))].join('、') }}
+          来源：{{ [...new Set(activity.source_records.map((item) => humanizeProvider(item.provider)))].join('、') }}
         </span>
         <p v-if="activity.user_note" class="activity-note">{{ activity.user_note }}</p>
         <p v-if="activity.description" class="activity-description">{{ activity.description }}</p>
         <a
-          v-if="activity.detail_url || activity.source_records?.find((item) => item.url)"
+          v-if="activity.detail_url || activity.official_url || activity.booking_url || activity.source_records?.find((item) => item.url)"
           class="activity-detail-link"
-          :href="activity.detail_url || activity.source_records?.find((item) => item.url)?.url"
+          :href="activity.detail_url || activity.official_url || activity.booking_url || activity.source_records?.find((item) => item.url)?.url"
           target="_blank"
           rel="noreferrer"
           @click.stop

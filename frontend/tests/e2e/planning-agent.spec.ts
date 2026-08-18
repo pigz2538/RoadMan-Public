@@ -82,7 +82,10 @@ test('首页在规划前集中询问矛盾与缺失信息', async ({ page }) => 
   await expect(panel).toContainText('时间窗口只有 0 分钟')
   await panel.locator('.preflight-answer').fill('取消原到达限制，按合理车程安排')
   await panel.getByRole('button', { name: '重新检查全部条件' }).click()
-  await expect(panel).toContainText('最终确认')
+  // The final review may include one more cloud semantic validation round;
+  // keep the UI assertion above the single-request latency while the panel
+  // remains visibly in its checking state.
+  await expect(panel).toContainText('最终确认', { timeout: 30_000 })
   await expect(panel).toContainText('上海')
   await expect(panel).toContainText('普陀山')
   await expect(panel).toContainText('2099-08-03')

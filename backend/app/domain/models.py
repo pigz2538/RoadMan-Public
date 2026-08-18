@@ -41,6 +41,9 @@ class MoneyRange(BaseModel):
     minimum: float = Field(ge=0)
     maximum: float = Field(ge=0)
     estimated: bool = True
+    source_count: int = Field(default=0, ge=0)
+    as_of: date | None = None
+    note: str | None = None
 
     @model_validator(mode="after")
     def validate_range(self) -> "MoneyRange":
@@ -55,6 +58,31 @@ class SourceRecord(BaseModel):
     url: str | None = None
     retrieved_at: datetime = Field(default_factory=utc_now)
     license: str | None = None
+    source_type: Literal[
+        "official", "map", "ticketing", "travel_platform", "open_data",
+        "web_search", "encyclopedia", "agent", "unknown"
+    ] = "unknown"
+    confidence: Literal["high", "medium", "low", "unknown"] = "unknown"
+    facts: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def infer_source_type(self) -> "SourceRecord":
+        """Keep legacy provider records useful without rewriting old snapshots."""
+        if self.source_type != "unknown":
+            return self
+        provider = self.provider.casefold()
+        title = self.title.casefold()
+        if "高德" in provider or "amap" in provider or "地图" in title:
+            self.source_type = "map"
+        elif "飞猪" in provider or "flyai" in provider or "航班" in title or "车次" in title:
+            self.source_type = "travel_platform"
+        elif "opentripmap" in provider or "openstreetmap" in provider or "开放地图" in title:
+            self.source_type = "open_data"
+        elif "百科" in provider or "encyclopedia" in provider:
+            self.source_type = "encyclopedia"
+        elif "天气" in title or "meteo" in provider:
+            self.source_type = "open_data"
+        return self
 
 
 class PlanWarning(BaseModel):
@@ -260,6 +288,7 @@ class MovementStage(BaseModel):
     title: str
     mode: Literal["driving", "transit", "walking", "riding", "taxi", "flight", "train", "ferry"]
     transit_type: Literal["bus", "subway", "shuttle", "ferry"] | None = None
+    transit_legs: list["TransitLeg"] = Field(default_factory=list)
     origin: PlaceRef
     destination: PlaceRef
     waypoints: list[PlaceRef] = Field(default_factory=list)
@@ -275,6 +304,12 @@ class MovementStage(BaseModel):
     departure_terminal: str | None = None
     arrival_terminal: str | None = None
     service_detail_url: str | None = None
+    service_departure_at: datetime | None = None
+    service_arrival_at: datetime | None = None
+    service_seat_class: str | None = None
+    service_price: MoneyRange | None = None
+    service_status: Literal["confirmed", "estimated", "unavailable"] = "unavailable"
+    transit_fare_cny: float | None = Field(default=None, ge=0)
     weather_summary: str | None = None
     toll_fee: MoneyRange | None = None
     energy_estimate: EnergyEstimate | None = None
@@ -289,6 +324,25 @@ class MovementStage(BaseModel):
 class OpeningHours(BaseModel):
     text: str
     confirmed: bool = False
+    source_count: int = Field(default=0, ge=0)
+    as_of: date | None = None
+    note: str | None = None
+    source_urls: list[str] = Field(default_factory=list)
+
+
+class TransitLeg(BaseModel):
+    mode: Literal["bus", "subway", "rail", "walk", "shuttle", "ferry", "other"] = "other"
+    line_name: str | None = None
+    line_id: str | None = None
+    line_type: str | None = None
+    departure_stop: str | None = None
+    arrival_stop: str | None = None
+    departure_time: str | None = None
+    arrival_time: str | None = None
+    stop_count: int | None = Field(default=None, ge=0)
+    duration_minutes: int | None = Field(default=None, ge=0)
+    distance_km: float | None = Field(default=None, ge=0)
+    fare_cny: float | None = Field(default=None, ge=0)
 
 
 class Activity(BaseModel):
@@ -315,10 +369,18 @@ class Activity(BaseModel):
     # they represent onboard/waypoint dining during that movement.
     in_transit: bool = False
     ticket_or_price: MoneyRange | None = None
+    ticket_name: str | None = None
+    ticket_status: Literal["known", "free", "unknown"] = "unknown"
+    ticket_note: str | None = None
     parking_or_price: MoneyRange | None = None
     parking_note: str | None = None
     information_summary: str | None = None
     opening_hours: OpeningHours | None = None
+    official_url: str | None = None
+    booking_url: str | None = None
+    information_status: Literal["complete", "partial", "unavailable"] = "unavailable"
+    information_checked_at: datetime | None = None
+    information_sources_count: int = Field(default=0, ge=0)
     reservation_status: Literal["required", "recommended", "not_required", "unknown"] = "unknown"
     reservation_note: str | None = None
     risk_level: Literal["low", "moderate", "high"] = "low"

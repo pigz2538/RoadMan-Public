@@ -7,7 +7,7 @@ const activeIndex = computed(() => props.day?.stages.findIndex((item) => item.id
 </script>
 
 <template>
-  <div class="mock-map" aria-label="武汉至庐山 Mock 路线地图">
+  <div class="mock-map" aria-label="武汉至庐山示例路线地图">
     <svg viewBox="0 0 800 600" role="img">
       <defs>
         <linearGradient id="land" x1="0" y1="0" x2="1" y2="1">
