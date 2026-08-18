@@ -107,6 +107,48 @@ def test_tourism_scheduler_adds_attraction_and_overnight_hotel():
     assert verify_tourism_plan(scheduled, candidates) == []
 
 
+def test_tourism_scheduler_preserves_explicit_required_attraction():
+    days = [
+        {
+            "id": "day_required",
+            "date": "2026-08-23",
+            "items": [],
+            "activities": [],
+            "stages": [
+                {
+                    "id": "stage_required",
+                    "title": "公共交通前往景点",
+                    "destination": {"name": "麓湖CPI", "city": "成都市"},
+                    "planned_start": "2026-08-23T14:00:00+08:00",
+                    "planned_end": "2026-08-23T14:30:00+08:00",
+                }
+            ],
+        }
+    ]
+    candidates = {
+        "attractions": [
+            {
+                "place": {
+                    "name": "麓湖CPI",
+                    "city": "成都市",
+                    "coordinates": {"longitude": 104.04, "latitude": 30.46},
+                },
+                "user_required": True,
+                "source_records": [],
+            }
+        ],
+        "hotels": [],
+        "meals": [],
+    }
+
+    scheduled = schedule_tourism_activities(days, candidates)
+    attraction = next(
+        item for item in scheduled[0]["activities"] if item["type"] == "attraction"
+    )
+    assert attraction["place"]["name"] == "麓湖CPI"
+    assert attraction["required"] is True
+
+
 def test_primary_hotel_prefers_city_base_over_airport_or_station_property():
     destination = {
         "name": "成都",

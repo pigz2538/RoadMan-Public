@@ -344,12 +344,14 @@ def schedule_tourism_activities(
         item["place"]["name"]: item
         for item in candidates.get("attractions", [])
         if item.get("place", {}).get("name")
-        and not item.get("seasonal_excluded")
+        and (not item.get("seasonal_excluded") or item.get("user_required"))
     }
     seasonal_excluded_names = {
         item.get("place", {}).get("name")
         for item in candidates.get("attractions", [])
-        if item.get("seasonal_excluded") and item.get("place", {}).get("name")
+        if item.get("seasonal_excluded")
+        and not item.get("user_required")
+        and item.get("place", {}).get("name")
     }
     used_attraction_names: set[str] = set()
     used_meal_names = {
@@ -520,6 +522,7 @@ def schedule_tourism_activities(
                     duration_minutes=duration,
                     sources=candidate.get("source_records", []),
                     opening_text="开放时间以景区当天公告为准",
+                    required=bool(candidate.get("user_required")),
                     ticket_or_price=candidate.get("ticket_or_price"),
                     user_note=(
                         candidate.get("agent_reason")
@@ -604,7 +607,7 @@ def schedule_tourism_activities(
                 name = place.get("name")
                 if (
                     not name
-                    or candidate.get("seasonal_excluded")
+                    or (candidate.get("seasonal_excluded") and not candidate.get("user_required"))
                     or name in existing_names
                     or name in used_attraction_names
                 ):
@@ -647,6 +650,7 @@ def schedule_tourism_activities(
                         duration_minutes=duration,
                         sources=candidate.get("source_records", []),
                         opening_text="开放时间以景区当天公告为准",
+                        required=bool(candidate.get("user_required")),
                         ticket_or_price=candidate.get("ticket_or_price"),
                         user_note=(
                             candidate.get("agent_reason")

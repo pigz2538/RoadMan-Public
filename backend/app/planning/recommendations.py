@@ -28,6 +28,9 @@ def rank_tourism_candidates(
             )
             score = 55.0
             reasons: list[str] = []
+            if item.get("user_required"):
+                score += 40
+                reasons.append("用户明确指定，必须纳入行程")
             if rating is not None:
                 score += min(20, rating * 4)
                 reasons.append(f"评分 {rating:g}")
@@ -66,6 +69,7 @@ def rank_tourism_candidates(
             item["recommendation_reasons"] = reasons[:3] or ["按数据完整度排序"]
         items.sort(
             key=lambda item: (
+                -1 if item.get("user_required") else 0,
                 -float(item.get("destination_research_priority") or 0),
                 -float(item.get("score") or 0),
                 item["place"]["name"],
@@ -106,6 +110,7 @@ def apply_agent_ranking(
             item["recommendation_reasons"] = [decision["reason"]]
         items.sort(
             key=lambda item: (
+                -1 if item.get("user_required") else 0,
                 -float(item.get("destination_research_priority") or 0),
                 -(item.get("agent_score") if item.get("agent_score") is not None else item.get("score", 0)),
                 -item.get("score", 0),
