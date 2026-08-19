@@ -34,8 +34,9 @@ from .deep_drive import (
     verify_deep_drive_plan,
 )
 from .event_research import event_research_summary, research_special_events
-from .destination_research import research_destination
+from .destination_research import research_destination, research_destinations
 from .llm import (
+    OllamaDestinationPlanAgent,
     OllamaDestinationResearchAgent,
     OllamaEventResearchAgent,
     OllamaPoiCurator,
@@ -105,6 +106,19 @@ def _normalize_poi_name(value: Any) -> str:
     return "".join(str(value or "").split()).casefold()
 
 
+def _destination_search_area(destination: dict[str, Any]) -> str:
+    """Return the provider search scope without collapsing admin regions."""
+    scope = str(destination.get("destination_scope") or "unknown").strip().lower()
+    if scope in {"province", "region", "multi_destination"}:
+        return str(
+            destination.get("province")
+            or destination.get("city")
+            or destination.get("name")
+            or ""
+        ).strip()
+    return str(destination.get("city") or destination.get("name") or "").strip()
+
+
 def _is_authoritative_admin_geocode(requested_name: Any, geocode: dict[str, Any]) -> bool:
     """Return whether a geocoder result is authoritative for an admin place.
 
@@ -162,6 +176,7 @@ def build_planning_graph(
     poi_ranker = OllamaPoiRanker(settings)
     poi_suitability_agent = OllamaPoiSuitabilityAgent(settings)
     destination_research_agent = OllamaDestinationResearchAgent(settings)
+    destination_plan_agent = OllamaDestinationPlanAgent(settings)
 
     async def emit(
         state: RoadManState,
@@ -190,7 +205,36 @@ def build_planning_graph(
         if extracted.get("origin_name") and not current.get("origin"):
             current["origin"] = {"name": extracted["origin_name"]}
         if extracted.get("destination_name") and not current.get("destination"):
-            current["destination"] = {"name": extracted["destination_name"]}
+            current["destination"] = {
+                "name": extracted["destination_name"],
+                "destination_scope": extracted.get("destination_scope", "unknown"),
+            }
+        if extracted.get("destination_scope") and current.get("destination"):
+            current["destination"]["destination_scope"] = extracted["destination_scope"]
+        destination_names = extracted.get("destination_names")
+        if isinstance(destination_names, list):
+            current["destination_names"] = [
+                str(item).strip()
+                for item in destination_names
+                if isinstance(item, str) and item.strip()
+            ][:20]
+        elif extracted.get("destination_name"):
+            current["destination_names"] = [str(extracted["destination_name"]).strip()]
+        if extracted.get("destination_scope"):
+            current["destination_scope"] = extracted["destination_scope"]
+        if isinstance(extracted.get("travel_intents"), list):
+            current["travel_intents"] = list(
+                dict.fromkeys(
+                    [
+                        *current.get("travel_intents", []),
+                        *[
+                            str(item).strip()
+                            for item in extracted["travel_intents"]
+                            if isinstance(item, str) and item.strip()
+                        ],
+                    ]
+                )
+            )
         defaults = set(current.get("defaults_applied", []))
         for field in ("start_date", "end_date", "departure_time", "return_time", "travelers", "max_days"):
             if extracted.get(field) is not None and (
@@ -664,23 +708,80 @@ def build_planning_graph(
             event="tool_started",
             tool="web.destination_research",
         )
-        destination_research = await research_destination(
-            registry,
-            destination.get("city") or destination["name"],
-            state["trip_id"],
-        )
+        destination_names = [
+            str(item).strip()
+            for item in (trip_request.get("destination_names") or [])
+            if isinstance(item, str) and item.strip()
+        ]
+        if not destination_names:
+            destination_names = [_destination_search_area(destination)]
+        if len(destination_names) == 1:
+            destination_research = await research_destination(
+                registry,
+                destination_names[0],
+                state["trip_id"],
+            )
+            research_bundles = [destination_research]
+        else:
+            destination_research = await research_destinations(
+                registry,
+                destination_names,
+                state["trip_id"],
+            )
+            research_bundles = [
+                item
+                for item in destination_research.get("destinations", [])
+                if isinstance(item, dict)
+            ]
+        recommendations: list[dict[str, Any]] = []
+        research_timeout = min(45, max(15, int(settings.ollama_timeout_seconds)))
         try:
-            destination_research["agent_recommendations"] = await asyncio.wait_for(
-                destination_research_agent.summarize(
-                    destination.get("city") or destination["name"],
+            for bundle in research_bundles:
+                bundle_recommendations = await asyncio.wait_for(
+                    destination_research_agent.summarize(
+                        str(bundle.get("destination") or destination_names[0]),
+                        bundle,
+                        state.get("trip_request", {}),
+                    ),
+                    timeout=research_timeout,
+                )
+                for item in bundle_recommendations:
+                    if isinstance(item, dict):
+                        recommendations.append(
+                            {**item, "research_destination": bundle.get("destination")}
+                        )
+        except asyncio.TimeoutError:
+            destination_research["agent_error"] = "OLLAMA_DESTINATION_RESEARCH_TIMEOUT"
+        destination_research["agent_recommendations"] = recommendations[:48]
+        destination_research["destination_names"] = destination_names
+        try:
+            await emit(
+                state,
+                "destination_plan",
+                "目的地策划智能体正在根据研究结果生成分区与每日计划单",
+                66,
+                event="tool_started",
+                tool="ollama.destination_plan",
+            )
+            destination_research["agent_plan"] = await asyncio.wait_for(
+                destination_plan_agent.draft(
+                    destination_names,
                     destination_research,
                     state.get("trip_request", {}),
                 ),
-                timeout=min(45, max(15, int(settings.ollama_timeout_seconds))),
+                timeout=research_timeout,
             )
         except asyncio.TimeoutError:
-            destination_research["agent_recommendations"] = []
-            destination_research["agent_error"] = "OLLAMA_DESTINATION_RESEARCH_TIMEOUT"
+            destination_research["agent_plan"] = {}
+            destination_research["agent_plan_error"] = "OLLAMA_DESTINATION_PLAN_TIMEOUT"
+        await emit(
+            state,
+            "destination_plan",
+            "目的地策划智能体已生成分区与每日计划单，交给路线智能体执行",
+            67,
+            event="tool_completed",
+            tool="ollama.destination_plan",
+        )
         await emit(
             state,
             "destination_research",
@@ -711,8 +812,18 @@ def build_planning_graph(
         flyai_pois = await registry.execute(
             "flyai.poi",
             {
-                "city_name": destination.get("city") or destination["name"],
-                "keyword": destination["name"],
+                "city_name": _destination_search_area(destination),
+                # Do not search a province/region by its bare name.  Providers
+                # may return a restaurant or a university whose name contains
+                # that region.  The semantic destination Agent has already
+                # supplied the canonical scope; the provider query should ask
+                # for tourist landmarks inside it.
+                "keyword": (
+                    f"{destination['name']} 著名旅游景点"
+                    if str(destination.get("destination_scope") or "unknown")
+                    in {"province", "region", "multi_destination", "city"}
+                    else destination["name"]
+                ),
             },
             SkillContext(trip_id=state["trip_id"]),
         )
@@ -756,7 +867,7 @@ def build_planning_graph(
         flyai_meals = await registry.execute(
             "flyai.poi",
             {
-                "city_name": destination.get("city") or destination["name"],
+                "city_name": _destination_search_area(destination),
                 "keyword": "餐厅",
             },
             SkillContext(trip_id=state["trip_id"], metadata={"category": "meals"}),
@@ -834,7 +945,7 @@ def build_planning_graph(
         flyai_hotels = await registry.execute(
             "flyai.hotel",
             {
-                "destination": destination.get("city") or destination["name"],
+                "destination": _destination_search_area(destination),
                 "poi_name": destination["name"],
                 "check_in_date": state["trip_request"]["start_date"],
                 "check_out_date": state["trip_request"]["end_date"],
@@ -907,7 +1018,7 @@ def build_planning_graph(
                 continue
             poi_payload: dict[str, Any] = {
                 "keywords": keywords,
-                "city": destination.get("city") or destination.get("name"),
+                "city": _destination_search_area(destination),
                 "page_size": page_size,
             }
             # Only an explicit local-only request gets a coordinate radius.
@@ -1014,7 +1125,7 @@ def build_planning_graph(
                     tool="ollama.poi_curator",
                 )
                 decisions = await poi_curator.curate(
-                    destination.get("city") or destination["name"],
+                    _destination_search_area(destination),
                     candidates["attractions"],
                     osm_items,
                 )
@@ -1189,6 +1300,38 @@ def build_planning_graph(
             and item.get("category") == "attractions"
             and str(item.get("name") or "").strip()
         ]
+        # The destination-plan Agent may select a source-backed highlight that
+        # was not returned in the first recommendation slice.  Feed those
+        # named selections into the same coordinate lookup so the high-level
+        # plan is actually executable rather than decorative.
+        planned_attractions = (
+            destination_research.get("agent_plan", {}).get("selected_attractions", [])
+            if isinstance(destination_research.get("agent_plan"), dict)
+            else []
+        )
+        known_research_names = {
+            _normalize_poi_name(item.get("name")) for item in researched_attractions
+        }
+        for item in planned_attractions:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name") or "").strip()
+            normalized = _normalize_poi_name(name)
+            if not name or normalized in known_research_names:
+                continue
+            researched_attractions.append(
+                {
+                    "name": name,
+                    "category": "attractions",
+                    "importance": 80,
+                    "area": item.get("area"),
+                    "reason": item.get("reason") or "目的地策划 Agent 纳入每日计划",
+                    "suggested_minutes": 90,
+                    "best_time": "any",
+                    "source_indexes": [],
+                }
+            )
+            known_research_names.add(normalized)
         if researched_attractions and "amap.poi" in registry.names():
             existing_names = {
                 _normalize_poi_name(item.get("place", {}).get("name"))
@@ -3276,6 +3419,18 @@ async def _ensure_coordinates(
     # nearby POI search to select the matching local attraction instead of
     # silently planning a 1,900 km detour.
     nearby_coordinates = (nearby or {}).get("coordinates") or {}
+    destination_scope = str(place.get("destination_scope") or "unknown").strip().lower()
+    # Administrative requests (a province, city or broad region) must stay an
+    # administrative anchor.  Never disambiguate them by searching nearby POIs:
+    # a query for “新疆” around Wuhan can otherwise become a restaurant named
+    # “新疆烤肉”, and a city can become a university campus.  Scenic POI
+    # requests keep the older nearby-POI correction path.
+    administrative_scope = destination_scope in {
+        "city",
+        "province",
+        "region",
+        "multi_destination",
+    }
     if nearby_coordinates:
         distance = _haversine_km(
             RoutePoint(
@@ -3288,6 +3443,7 @@ async def _ensure_coordinates(
             distance > 250
             and len(str(place.get("name") or "")) <= 12
             and not _is_authoritative_admin_geocode(place.get("name"), result.data)
+            and not administrative_scope
         ):
             poi_result = await registry.execute(
                 "amap.poi",

@@ -13,34 +13,37 @@ class OllamaRequirementExtractor:
         self.settings = settings
 
     async def extract(self, raw_text: str, today: date) -> dict[str, Any]:
-        # The model owns semantic interpretation. The offline fallback handles
-        # structural calendar constraints and only preserves places explicitly
-        # written in a travel clause; it never infers preferences, party size,
-        # events or travel modes.
-        # If the cloud Agent is temporarily unreachable, keep explicitly
-        # stated places as a conservative grammar fallback.  This is not a
-        # place-name keyword list: it only reads grammatical anchors such as
-        # “从 A 出发，去 B”.  The cloud Agent remains authoritative whenever
-        # it returns a valid semantic extraction.
-        legacy_fallback = {
-            **extract_structural_constraints(raw_text, today),
-            **extract_explicit_location_constraints(raw_text),
-        }
+        # Semantic intent is owned by the Requirement Agent.  The deterministic
+        # parser is used only for calendar literals/relative calendar structure;
+        # it must never guess an origin, destination, POI, party size or travel
+        # mode.  In particular, an unavailable Agent must not turn “新疆” into
+        # whichever restaurant/campus happens to be returned by a nearby search.
+        structural = extract_structural_constraints(raw_text, today)
         if (
             not self.settings.enable_llm_requirement_extraction
             or not self.settings.ollama_api_key
         ):
-            # No cloud Agent means no semantic guess.  Keep only hard,
-            # structural fields from the offline parser and let preflight ask
-            # the user instead of silently inventing party size/preferences.
-            return legacy_fallback
+            return {
+                **structural,
+                "_intent_status": "unavailable",
+                "_intent_error": "REQUIREMENT_AGENT_UNAVAILABLE",
+            }
         prompt = (
             "You are RoadMan Requirement Agent. Extract requirements only; never plan a route. "
             f"Today is {today.isoformat()}. Return ONLY one valid JSON object (no markdown, no explanation) "
-            "with exactly these keys: origin_name, destination_name, start_date, end_date, "
+            "with exactly these keys: origin_name, destination_name, destination_names, destination_scope, "
+            "travel_intents, start_date, end_date, "
             "departure_time, return_time, travelers, max_days, preferences, transport_modes, special_events, "
             "cross_sea_required, cross_sea_mode, past_return_requested, time_window_minutes, stay_only_at_destination, must_visit_names. "
-            "Dates must be YYYY-MM-DD; unknown scalar fields must be null and preferences/special_events must be arrays. "
+            "Dates must be YYYY-MM-DD; unknown scalar fields must be null and all list fields must be arrays. "
+            "destination_name is one canonical route anchor string or null; destination_names is the complete ordered "
+            "list of places explicitly requested by the user. Never stringify a list into destination_name. "
+            "destination_scope must be exactly one of poi, city, province, region, multi_destination, unknown. "
+            "For a province/region/city, keep the administrative name itself; never replace it with a nearby hotel, "
+            "restaurant, university, campus or other POI. For multiple regions/cities, preserve every destination in "
+            "destination_names and use the first explicitly ordered region as destination_name only when a route anchor "
+            "is needed. travel_intents contains the user's actual experience goals (for example stargazing or food), "
+            "not guessed place names. "
             "Only fill start_date/end_date when the user's text explicitly gives a calendar date, a relative date "
             "such as 今天/明天/后天/前天, or an unambiguous weekday. English relative dates and weekdays "
             "(today, tomorrow, the day after tomorrow, Monday, next Sunday/next week Sunday, this weekend) must also be "
@@ -86,15 +89,12 @@ class OllamaRequirementExtractor:
                 )
                 response.raise_for_status()
                 parsed = _parse_json_object(response.json().get("response", ""))
-                structural = extract_structural_constraints(raw_text, today)
+                if _destination_payload_needs_repair(parsed):
+                    parsed = await self._repair_destination_payload(
+                        raw_text,
+                        parsed,
+                    )
                 merged = _merge_extraction(structural, parsed)
-                # A valid cloud response may still be partial.  Preserve
-                # explicit travel-clause locations from the user's sentence
-                # when the model omitted one of them; this is structural
-                # recovery, not a destination keyword classifier.
-                for field, value in extract_explicit_location_constraints(raw_text).items():
-                    if value and not merged.get(field):
-                        merged[field] = value
                 # Literal calendar tokens are hard user constraints. Do not
                 # let the Agent hallucinate another year.
                 for date_field in ("start_date", "end_date"):
@@ -118,10 +118,39 @@ class OllamaRequirementExtractor:
                 merged["cross_sea_mode"] = structural.get("cross_sea_mode")
                 if not merged.get("start_date"):
                     merged.pop("end_date", None)
-                if merged.get("destination_name"):
-                    merged["destination_name"] = _normalize_place_name(
-                        str(merged["destination_name"])
-                    )
+                destination_name = merged.get("destination_name")
+                if destination_name is not None:
+                    if not isinstance(destination_name, str) or _looks_like_serialized_list(destination_name):
+                        return {
+                            **structural,
+                            "_intent_status": "invalid",
+                            "_intent_error": "INVALID_DESTINATION_SHAPE",
+                        }
+                    normalized_destination = _normalize_place_name(destination_name)
+                    if normalized_destination:
+                        merged["destination_name"] = normalized_destination
+                    else:
+                        merged.pop("destination_name", None)
+                merged["destination_names"] = _normalize_destination_names(
+                    merged.get("destination_names")
+                )
+                if not merged.get("destination_name") and len(merged["destination_names"]) == 1:
+                    # This is not a place-name inference: the Agent already
+                    # returned the typed destination_names array.  A single
+                    # entry has an unambiguous route anchor.
+                    merged["destination_name"] = merged["destination_names"][0]
+                scope = str(merged.get("destination_scope") or "unknown").strip().lower()
+                merged["destination_scope"] = (
+                    scope
+                    if scope in {"poi", "city", "province", "region", "multi_destination", "unknown"}
+                    else "unknown"
+                )
+                merged["travel_intents"] = _normalize_text_list(
+                    merged.get("travel_intents"), maximum=20
+                )
+                merged["preferences"] = _normalize_text_list(
+                    merged.get("preferences"), maximum=40
+                )
                 merged["special_events"] = _normalize_special_events(merged.get("special_events"))
                 merged["must_visit_names"] = [
                     str(item).strip() for item in (merged.get("must_visit_names") or [])
@@ -172,9 +201,58 @@ class OllamaRequirementExtractor:
                 merged["time_window_minutes"] = _coerce_time_window_minutes(
                     merged.get("time_window_minutes")
                 )
+                merged["_intent_status"] = "ok"
+                merged["_intent_source"] = "ollama"
+                merged["_source_raw_text"] = raw_text
                 return merged
         except (httpx.HTTPError, ValueError, TypeError, json.JSONDecodeError):
-            return legacy_fallback
+            return {
+                **structural,
+                "_intent_status": "unavailable",
+                "_intent_error": "REQUIREMENT_AGENT_UNAVAILABLE",
+            }
+
+    async def _repair_destination_payload(
+        self,
+        raw_text: str,
+        invalid_payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Ask the same semantic Agent to repair a malformed destination shape.
+
+        A model sometimes returns ``destination_name: "['西藏', '新疆']"``.
+        Treating that value as a normal string is dangerous because the map
+        geocoder may resolve a similarly named restaurant or university.  The
+        repair is deliberately another LLM call, not ``ast.literal_eval`` or
+        a keyword table, so the Agent remains responsible for entity boundaries
+        and administrative scope.
+        """
+        repair_prompt = (
+            "你是 RoadMan Requirement Agent 的 JSON 修复回合。原始用户需求如下。"
+            "上一回合的目的地字段类型不合法，绝不能把数组字符串当作地点。请根据原文重新理解，"
+            "只返回一个 JSON 对象，字段为 destination_name（单个规范字符串或 null）、"
+            "destination_names（按用户顺序排列的规范字符串数组）、destination_scope（poi/city/province/"
+            "region/multi_destination/unknown）、origin_name（字符串或 null）、travel_intents（字符串数组）、"
+            "must_visit_names（字符串数组）。省份/城市必须保留行政区名称，不要替换成附近餐馆、校园或酒店；"
+            "‘看流星雨’等体验放入 travel_intents，不要变成地点。"
+            f"原始需求：{raw_text}；错误回合：{json.dumps(invalid_payload, ensure_ascii=False)}"
+        )
+        async with httpx.AsyncClient(timeout=min(self.settings.ollama_timeout_seconds, 45)) as client:
+            response = await client.post(
+                self.settings.ollama_api_url,
+                headers={"Authorization": f"Bearer {self.settings.ollama_api_key}"},
+                json={
+                    "model": self.settings.ollama_model,
+                    "prompt": repair_prompt,
+                    "stream": False,
+                    "think": False,
+                    "format": "json",
+                },
+            )
+            response.raise_for_status()
+            repaired = _parse_json_object(response.json().get("response", ""))
+        if _destination_payload_needs_repair(repaired):
+            raise ValueError("LLM returned an invalid destination shape after repair")
+        return repaired
 
 
 class OllamaRequirementValidator:
@@ -462,8 +540,11 @@ class OllamaDestinationResearchAgent:
             "You are RoadMan Destination Research Agent. Based ONLY on supplied web/FlyAI evidence, "
             "identify famous, source-backed must-see attractions and representative local foods. "
             "For a city destination, cover different districts and landmark types instead of only places near a hotel; "
+            "for a province or broad region, first organize the evidence into representative cities/景区片区 and "
+            "select nationally or locally recognized landmarks before nearby generic POIs; "
             "return enough distinct attractions for the number of travel days (up to 12 attraction recommendations). "
-            "Do not invent names or promote obscure nearby POIs. Do not turn an experience into a place name. "
+            "Do not invent names, choose a restaurant/university/campus as a province or city destination, or promote "
+            "obscure nearby POIs just because they are close to a geocoder point. Do not turn an experience into a place name. "
             "Return JSON only: {\"recommendations\":[{\"name\":\"...\",\"category\":\"attractions|meals\","
             "\"importance\":0,\"area\":\"城区或地理片区\",\"suggested_minutes\":90,"
             "\"best_time\":\"morning|afternoon|evening|any\",\"reason\":\"中文依据\","
@@ -531,6 +612,111 @@ class OllamaDestinationResearchAgent:
                 }
             )
         return cleaned
+
+
+class OllamaDestinationPlanAgent:
+    """Turn destination evidence into a high-level, routeable trip brief.
+
+    This is intentionally separate from the route adapter.  The Agent first
+    selects recognizable, source-backed landmarks and geographic clusters;
+    only after this brief is available does the graph ask map/schedule tools
+    for executable legs.  A province therefore becomes a set of representative
+    city/area clusters instead of a random POI returned by geocoding.
+    """
+
+    def __init__(self, settings: Settings) -> None:
+        self.settings = settings
+
+    async def draft(
+        self,
+        destinations: list[str],
+        research: dict[str, Any],
+        trip_request: dict[str, Any],
+    ) -> dict[str, Any]:
+        if not self.settings.ollama_api_key:
+            return {}
+        recommendations = research.get("agent_recommendations") or []
+        if not recommendations and research.get("destinations"):
+            recommendations = [
+                item
+                for bundle in research.get("destinations", [])
+                if isinstance(bundle, dict)
+                for item in bundle.get("agent_recommendations", [])
+                if isinstance(item, dict)
+            ]
+        prompt = (
+            "你是 RoadMan 目的地行程策划 Agent。你已经拿到公开网页和旅行信息服务的证据，"
+            "现在只写一份供路线 Agent 执行的高层计划单，不直接返回地图坐标。"
+            "对于省份/大区域，必须拆成有代表性的城市或景区片区；对于城市，必须覆盖不同片区的著名地标，"
+            "不要只围绕酒店，不要把学校、餐馆或搜索结果中的偶然地点当作目的地。"
+            "根据用户日期、交通、人数和舒适度约束安排每天的主轴，给出景点、三餐和住宿区域的建议。"
+            "没有证据支持的地点不要写入 selected_attractions。只返回 JSON："
+            '{"strategy":"中文总体策略","selected_attractions":[{"name":"...","destination":"...",'
+            '"area":"...","reason":"..."}],"day_plans":[{"day":1,"focus":"...",'
+            '"area":"...","attraction_names":["..."],"meal_notes":["早餐","午餐","晚餐"],'
+            '"overnight_area":"...","reason":"..."}],"unresolved_questions":[]}。'
+            f"目的地列表：{json.dumps(destinations, ensure_ascii=False)}；"
+            f"用户约束：{json.dumps(trip_request, ensure_ascii=False)}；"
+            f"目的地研究与候选：{json.dumps({**research, 'agent_recommendations': recommendations}, ensure_ascii=False)}"
+        )
+        try:
+            async with httpx.AsyncClient(timeout=min(self.settings.ollama_timeout_seconds, 45)) as client:
+                response = await client.post(
+                    self.settings.ollama_api_url,
+                    headers={"Authorization": f"Bearer {self.settings.ollama_api_key}"},
+                    json={
+                        "model": self.settings.ollama_model,
+                        "prompt": prompt,
+                        "stream": False,
+                        "think": False,
+                        "format": "json",
+                    },
+                )
+                response.raise_for_status()
+                payload = _parse_unfiltered_json_object(response.json().get("response", ""))
+        except (httpx.HTTPError, ValueError, TypeError, json.JSONDecodeError):
+            return {}
+        selected = []
+        for item in payload.get("selected_attractions", [])[:30]:
+            if not isinstance(item, dict) or not str(item.get("name") or "").strip():
+                continue
+            selected.append(
+                {
+                    "name": str(item.get("name")).strip()[:120],
+                    "destination": str(item.get("destination") or "").strip()[:80],
+                    "area": str(item.get("area") or "").strip()[:80],
+                    "reason": str(item.get("reason") or "").strip()[:240],
+                }
+            )
+        days = []
+        for item in payload.get("day_plans", [])[:30]:
+            if not isinstance(item, dict):
+                continue
+            try:
+                day = int(item.get("day"))
+            except (TypeError, ValueError):
+                continue
+            names = _normalize_text_list(item.get("attraction_names"), maximum=12)
+            days.append(
+                {
+                    "day": max(1, day),
+                    "focus": str(item.get("focus") or "").strip()[:160],
+                    "area": str(item.get("area") or "").strip()[:80],
+                    "attraction_names": names,
+                    "meal_notes": _normalize_text_list(item.get("meal_notes"), maximum=6),
+                    "overnight_area": str(item.get("overnight_area") or "").strip()[:100],
+                    "reason": str(item.get("reason") or "").strip()[:240],
+                }
+            )
+        return {
+            "strategy": str(payload.get("strategy") or "").strip()[:500],
+            "selected_attractions": selected,
+            "day_plans": days,
+            "unresolved_questions": _normalize_text_list(
+                payload.get("unresolved_questions"), maximum=8
+            ),
+            "source": "destination_plan_agent",
+        }
 
 
 class OllamaPoiRanker:
@@ -929,6 +1115,9 @@ def _parse_json_object(text: str) -> dict[str, Any]:
     allowed = {
         "origin_name",
         "destination_name",
+        "destination_names",
+        "destination_scope",
+        "travel_intents",
         "start_date",
         "end_date",
         "departure_time",
@@ -947,6 +1136,50 @@ def _parse_json_object(text: str) -> dict[str, Any]:
         "must_visit_names",
     }
     return {key: value for key, value in value.items() if key in allowed}
+
+
+def _looks_like_serialized_list(value: str) -> bool:
+    text = value.strip()
+    return len(text) >= 2 and text[0] == "[" and text[-1] == "]"
+
+
+def _normalize_text_list(value: Any, *, maximum: int = 40) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    result: list[str] = []
+    seen: set[str] = set()
+    for item in value:
+        if not isinstance(item, str):
+            continue
+        text = re.sub(r"\s+", " ", item).strip(" \t\r\n，,。；;、:：")
+        if not text or text in seen:
+            continue
+        result.append(text[:120])
+        seen.add(text)
+        if len(result) >= maximum:
+            break
+    return result
+
+
+def _normalize_destination_names(value: Any) -> list[str]:
+    return _normalize_text_list(value, maximum=20)
+
+
+def _destination_payload_needs_repair(value: dict[str, Any]) -> bool:
+    """Reject ambiguous model shapes before anything reaches geocoding."""
+    destination_name = value.get("destination_name")
+    if destination_name is not None and (
+        not isinstance(destination_name, str)
+        or _looks_like_serialized_list(destination_name)
+    ):
+        return True
+    destination_names = value.get("destination_names")
+    if destination_names is not None and (
+        not isinstance(destination_names, list)
+        or any(not isinstance(item, str) or not item.strip() for item in destination_names)
+    ):
+        return True
+    return False
 
 
 def _parse_unfiltered_json_object(text: str) -> dict[str, Any]:

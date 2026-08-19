@@ -721,7 +721,17 @@ function activate(label: string) {
           </div>
           <strong>请确认以下需求，确认后才会开始规划</strong>
           <dl class="preflight-summary">
-            <div><dt>路线</dt><dd>{{ preflight.summary.origin_name }} → {{ preflight.summary.destination_name }}</dd></div>
+            <div>
+              <dt>路线</dt>
+              <dd>
+                {{ preflight.summary.origin_name }} →
+                {{ preflight.summary.destination_names?.length
+                  ? preflight.summary.destination_names.join('、')
+                  : preflight.summary.destination_name }}
+              </dd>
+            </div>
+            <div v-if="preflight.summary.destination_scope && preflight.summary.destination_scope !== 'unknown'"><dt>目的地范围</dt><dd>{{ preflight.summary.destination_scope === 'province' ? '省域策划' : preflight.summary.destination_scope === 'city' ? '城市策划' : preflight.summary.destination_scope === 'multi_destination' ? '多目的地策划' : '地点策划' }}</dd></div>
+            <div v-if="preflight.summary.travel_intents?.length"><dt>出行目的</dt><dd>{{ preflight.summary.travel_intents.join('、') }}</dd></div>
             <div><dt>日期</dt><dd>{{ preflight.summary.start_date }} 至 {{ preflight.summary.end_date }}</dd></div>
             <div><dt>人数</dt><dd>{{ preflight.summary.travelers ?? '待确认' }}{{ preflight.summary.travelers ? ' 人' : '' }}</dd></div>
             <div v-if="preflight.summary.max_days"><dt>行程上限</dt><dd>最多 {{ preflight.summary.max_days }} 天</dd></div>

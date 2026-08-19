@@ -383,8 +383,8 @@ async def test_preflight_blocks_temporal_and_cross_sea_conflicts(client):
 
 
 @pytest.mark.asyncio
-async def test_preflight_resolves_chinese_weekday_return_without_clarification(client):
-    """A weekday range in the original request must survive Agent/offline parsing."""
+async def test_preflight_requires_semantic_agent_for_locations_but_keeps_calendar_structure(client):
+    """Without the cloud Agent, dates may be checked but locations are never guessed."""
     today = date.today()
     monday = today - timedelta(days=today.weekday())
     if monday < today:
@@ -400,15 +400,11 @@ async def test_preflight_resolves_chinese_weekday_return_without_clarification(c
 
     assert response.status_code == 200
     body = response.json()
-    assert body["extracted"]["origin_name"] == "武汉"
-    assert body["extracted"]["destination_name"] == "九宫山"
+    assert "origin_name" not in body["extracted"]
+    assert "destination_name" not in body["extracted"]
     assert body["extracted"]["start_date"] == monday.isoformat()
     assert body["extracted"]["end_date"] == friday.isoformat()
-    assert not {
-        (item["code"], item.get("field"))
-        for item in body["issues"]
-        if item["code"] == "MISSING_FIELD"
-    }
+    assert "REQUIREMENT_AGENT_UNAVAILABLE" in {item["code"] for item in body["issues"]}
 
 
 @pytest.mark.asyncio
@@ -439,8 +435,8 @@ async def test_preflight_replaces_stale_end_date_for_relative_duration(client):
 
 
 @pytest.mark.asyncio
-async def test_preflight_recovers_transport_clause_origin_and_destination(client):
-    """A natural flight clause must not ask for the origin or misread the date range."""
+async def test_preflight_does_not_use_transport_clause_as_semantic_fallback(client):
+    """A natural flight clause is delegated to the semantic Agent in production."""
     response = await client.post(
         "/api/v1/trips/preflight",
         json={
@@ -453,15 +449,11 @@ async def test_preflight_recovers_transport_clause_origin_and_destination(client
     body = response.json()
     today = date.today()
     this_sunday = today + timedelta(days=(6 - today.weekday()) % 7)
-    assert body["extracted"]["origin_name"] == "武汉"
-    assert body["extracted"]["destination_name"] == "成都"
+    assert "origin_name" not in body["extracted"]
+    assert "destination_name" not in body["extracted"]
     assert body["extracted"]["start_date"] == this_sunday.isoformat()
     assert body["extracted"]["end_date"] == (this_sunday + timedelta(days=3)).isoformat()
-    assert not {
-        (item["code"], item.get("field"))
-        for item in body["issues"]
-        if item["code"] == "MISSING_FIELD"
-    }
+    assert "REQUIREMENT_AGENT_UNAVAILABLE" in {item["code"] for item in body["issues"]}
 
 
 @pytest.mark.asyncio

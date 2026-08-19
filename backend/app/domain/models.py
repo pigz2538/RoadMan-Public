@@ -201,6 +201,15 @@ class TripRequest(BaseModel):
     raw_text: str
     origin: PlaceRef | None = None
     destination: PlaceRef | None = None
+    # The Requirement Agent keeps the complete destination scope separate from
+    # the single route anchor used by legacy route adapters.  This prevents a
+    # province/city list such as ["西藏", "新疆"] from being stringified and
+    # geocoded as if it were one POI.
+    destination_names: list[str] = Field(default_factory=list)
+    destination_scope: Literal[
+        "poi", "city", "province", "region", "multi_destination", "unknown"
+    ] = "unknown"
+    travel_intents: list[str] = Field(default_factory=list)
     start_date: date | None = None
     end_date: date | None = None
     departure_time: time | None = None

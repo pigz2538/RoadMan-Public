@@ -59,6 +59,11 @@
 }
 ```
 
+需求地点字段由云端需求理解智能体产生：响应 `extracted.destination_names` 保存完整目的地顺序，
+`extracted.destination_scope` 标记 `poi`、`city`、`province`、`region` 或
+`multi_destination`。行政区和多目的地会先进入目的地研究/策划智能体，再进入路线规划；模型返回数组字符串、
+餐馆/校园替代行政区等非法形态时，接口会请求智能体修复或暂停，不使用地点关键词兜底。
+
 响应给出 `ready`、`confirmation_required`、`semantic_checked`、`issues`、`extracted`、`summary` 和 `special_event_research`。确认前不创建 Trip、不投递规划任务。
 
 日期与返程时间校验遵循同一套规则：出发必须早于返回；返程目标时间允许 15 分钟以内的静默误差，超出但不超过半天时返回可调整的 `RETURN_WINDOW_FLEXIBLE` 警告，超过半天返回阻断问题 `RETURN_DEADLINE_UNACHIEVABLE`。警告不阻止确认，阻断问题需要修改日期、时间窗口或交通方式。

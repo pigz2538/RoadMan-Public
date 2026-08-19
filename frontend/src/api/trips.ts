@@ -62,6 +62,9 @@ export interface PreflightResult {
   summary: {
     origin_name?: string
     destination_name?: string
+    destination_names?: string[]
+    destination_scope?: string
+    travel_intents?: string[]
     start_date?: string
     end_date?: string
     departure_time?: string
@@ -153,6 +156,9 @@ export async function createTrip(
         raw_text: rawText,
         origin: extracted.origin_name ? { name: extracted.origin_name } : undefined,
         destination: extracted.destination_name ? { name: extracted.destination_name } : undefined,
+        destination_names: Array.isArray(extracted.destination_names) ? extracted.destination_names : undefined,
+        destination_scope: typeof extracted.destination_scope === 'string' ? extracted.destination_scope : undefined,
+        travel_intents: Array.isArray(extracted.travel_intents) ? extracted.travel_intents : undefined,
         start_date: extracted.start_date,
         end_date: extracted.end_date,
         departure_time: extracted.departure_time,

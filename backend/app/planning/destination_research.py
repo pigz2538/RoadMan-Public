@@ -172,3 +172,63 @@ async def research_destination(
             ],
         },
     }
+
+
+async def research_destinations(
+    registry: SkillRegistry,
+    destinations: list[str],
+    trip_id: str,
+) -> dict[str, Any]:
+    """Research every Agent-recognized destination without collapsing names.
+
+    A request can legitimately contain a province plus a city, or two regions
+    connected by an intercity leg.  Keeping one evidence bundle per canonical
+    destination lets the destination Agent compare famous sights and food in
+    each scope before the route planner chooses day clusters.  It also prevents
+    a joined query such as ``"西藏、新疆"`` from being geocoded as one unknown
+    POI.
+    """
+    unique: list[str] = []
+    seen: set[str] = set()
+    for value in destinations:
+        normalized = re.sub(r"\s+", " ", str(value or "")).strip()
+        if not normalized or normalized in seen:
+            continue
+        unique.append(normalized)
+        seen.add(normalized)
+    if not unique:
+        return {
+            "destinations": [],
+            "sources": [],
+            "web_sources": [],
+            "flyai_items": [],
+            "flyai_semantic_text": "",
+            "providers": {},
+            "status": "needs_review",
+        }
+    bundles = await asyncio.gather(
+        *(research_destination(registry, destination, trip_id) for destination in unique)
+    )
+    sources: list[dict[str, Any]] = []
+    web_sources: list[dict[str, Any]] = []
+    flyai_items: list[dict[str, Any]] = []
+    semantic_text: list[str] = []
+    providers: dict[str, Any] = {}
+    for bundle in bundles:
+        sources.extend(bundle.get("sources") or [])
+        web_sources.extend(bundle.get("web_sources") or [])
+        flyai_items.extend(bundle.get("flyai_items") or [])
+        if bundle.get("flyai_semantic_text"):
+            semantic_text.append(str(bundle["flyai_semantic_text"]))
+        providers[str(bundle.get("destination") or "unknown")] = bundle.get("providers") or {}
+    return {
+        "destinations": bundles,
+        "destination": "、".join(unique),
+        "status": "researched" if sources else "needs_review",
+        "queries": [query for bundle in bundles for query in bundle.get("queries", [])],
+        "web_sources": web_sources[:80],
+        "flyai_items": flyai_items[:80],
+        "flyai_semantic_text": "\n\n".join(semantic_text)[:30000],
+        "sources": sources[:120],
+        "providers": providers,
+    }

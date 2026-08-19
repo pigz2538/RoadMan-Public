@@ -17,6 +17,7 @@
 
 - **地图/POI**：`amap.geocode`、`amap.poi`（`backend/app/skills/amap.py`）提供地理编码与 POI，是地点身份的权威来源。
 - **目的地研究**：`destination_research.py` 的 `research_destination` 并行发起公开网页搜索（DuckDuckGo HTML）与 FlyAI 的 `keyword_search`/`ai_search`，产出 `web_sources` 与 `flyai_items`，保留查询（`queries`）、来源（`sources`）与各 provider 成功/失败状态（`providers`）。搜索层不下决定，只收集带来源的本地亮点。
+- **行政区与多目的地流程**：需求理解智能体返回 `destination_names`、`destination_scope` 和一个规范路线锚点；省份/城市/多目的地会分别建立证据包。目的地研究智能体先从来源中筛选著名地标/代表性美食，随后 `OllamaDestinationPlanAgent` 输出分区、每日主轴、三餐和住宿区域的计划单，路线工具只执行这份经过语义筛选的计划。数组字符串、餐馆/校园误替代等非法形态会再次交给需求智能体修复。
 - **开放地点**：`opentripmap.nearby`（`backend/app/skills/opentripmap.py`）在坐标半径内召回开放位置，保留 `xid`、名称、坐标、`detail_url` 与距离。
 - **旅行候选**：FlyAI 的各适配器提供交通、酒店、餐饮与搜索候选。
 - **模型研究建议**：`llm.py` 的 `OllamaDestinationResearchAgent` 产出 `agent_recommendations`，经 `recommendations.py` 的 `_research_recommendations` 提取，作为对既有候选的来源背书，而非新增无来源地点。

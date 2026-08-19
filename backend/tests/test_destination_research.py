@@ -1,7 +1,7 @@
 import pytest
 
 from app.domain.models import SkillResult, SourceRecord
-from app.planning.destination_research import research_destination
+from app.planning.destination_research import research_destination, research_destinations
 
 
 class _ResearchRegistry:
@@ -71,3 +71,26 @@ async def test_destination_research_does_not_block_dry_registry():
 
     assert result["status"] == "needs_review"
     assert result["providers"]["flyai_errors"] == ["SEARCH_ADAPTERS_UNAVAILABLE"]
+
+
+@pytest.mark.asyncio
+async def test_destination_research_keeps_multiple_regions_separate(monkeypatch):
+    async def fake_web_sources(destination):
+        return ([{
+            "provider": "Web Destination Research",
+            "title": f"{destination} 必去景点",
+            "url": f"https://example.test/{destination}",
+            "category_hint": "attractions",
+        }], [f"{destination} 必去景点"])
+
+    monkeypatch.setattr(
+        "app.planning.destination_research._web_sources",
+        fake_web_sources,
+    )
+    result = await research_destinations(
+        _ResearchRegistry(), ["西藏", "新疆", "西藏"], "trip_multi"
+    )
+
+    assert result["destination"] == "西藏、新疆"
+    assert [item["destination"] for item in result["destinations"]] == ["西藏", "新疆"]
+    assert all(item["destination"] in {"西藏", "新疆"} for item in result["sources"] if item.get("destination"))

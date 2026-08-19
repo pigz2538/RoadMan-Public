@@ -263,6 +263,62 @@ async def test_requirement_agent_preserves_explicit_party_size(monkeypatch):
     assert extracted["travelers"] == 2
 
 
+@pytest.mark.asyncio
+async def test_requirement_agent_repairs_serialized_multi_destination_without_geocoding_it(monkeypatch):
+    class FakeResponse:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"response": self.payload}
+
+    class FakeClient:
+        responses = [
+            '{"origin_name":"武汉","destination_name":"[\\"西藏\\", \\"新疆\\"]",'
+            '"destination_names":[],"destination_scope":"multi_destination"}',
+            '{"origin_name":"武汉","destination_name":"西藏",'
+            '"destination_names":["西藏","新疆"],"destination_scope":"multi_destination",'
+            '"travel_intents":["自然风光"]}',
+        ]
+
+        def __init__(self, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return None
+
+        async def post(self, *_args, **_kwargs):
+            return FakeResponse(self.responses.pop(0))
+
+    monkeypatch.setattr("app.planning.llm.httpx.AsyncClient", FakeClient)
+    extracted = await OllamaRequirementExtractor(
+        Settings(ollama_api_key="test-key", enable_llm_requirement_extraction=True)
+    ).extract("我从武汉出发去西藏和新疆看自然风光", date(2026, 8, 1))
+
+    assert extracted["origin_name"] == "武汉"
+    assert extracted["destination_name"] == "西藏"
+    assert extracted["destination_names"] == ["西藏", "新疆"]
+    assert extracted["destination_scope"] == "multi_destination"
+    assert extracted["_intent_status"] == "ok"
+
+
+@pytest.mark.asyncio
+async def test_requirement_agent_without_cloud_does_not_guess_locations():
+    extracted = await OllamaRequirementExtractor(
+        Settings(ollama_api_key="", enable_llm_requirement_extraction=True)
+    ).extract("我说武汉到新疆", date(2026, 8, 1))
+
+    assert extracted["_intent_status"] == "unavailable"
+    assert "origin_name" not in extracted
+    assert "destination_name" not in extracted
+
+
 def test_non_driving_stage_exposes_total_elevation_gain():
     stage = _movement_stage(
         day_id="day_1",
@@ -431,6 +487,41 @@ async def test_city_destination_is_not_replaced_by_nearby_restaurant():
     assert destination["name"] == "北京"
     assert destination["city"] == "北京市"
     assert destination["coordinates"] == {"longitude": 116.407387, "latitude": 39.904179}
+    assert registry.calls == ["amap.geocode"]
+
+
+@pytest.mark.asyncio
+async def test_region_scope_never_uses_nearby_poi_disambiguation():
+    class RegionRegistry:
+        def __init__(self):
+            self.calls = []
+
+        async def execute(self, name, payload, _):
+            self.calls.append(name)
+            if name == "amap.geocode":
+                return SkillResult(
+                    success=True,
+                    provider="fake-amap",
+                    data={
+                        "formatted_address": "新疆维吾尔自治区",
+                        "location": "87.6177,43.7928",
+                        "province": "新疆维吾尔自治区",
+                        "city": "乌鲁木齐市",
+                        "district": "天山区",
+                        "level": "兴趣点",
+                    },
+                )
+            raise AssertionError(f"unexpected nearby lookup: {name}")
+
+    registry = RegionRegistry()
+    destination = await _ensure_coordinates(
+        registry,
+        {"name": "新疆", "destination_scope": "province"},
+        "trip",
+        nearby={"coordinates": {"longitude": 114.3055, "latitude": 30.5928}},
+    )
+
+    assert destination["name"] == "新疆"
     assert registry.calls == ["amap.geocode"]
 
 

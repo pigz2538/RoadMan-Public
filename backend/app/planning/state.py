@@ -41,3 +41,4 @@ class RoadManState(TypedDict, total=False):
     special_event_research: list[dict[str, Any]]
     seasonal_review: list[dict[str, Any]]
     destination_research: dict[str, Any]
+    destination_plan: dict[str, Any]

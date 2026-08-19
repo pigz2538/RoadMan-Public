@@ -1429,6 +1429,33 @@
           ],
           "default": null
         },
+        "destination_names": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Destination Names",
+          "type": "array"
+        },
+        "destination_scope": {
+          "default": "unknown",
+          "enum": [
+            "poi",
+            "city",
+            "province",
+            "region",
+            "multi_destination",
+            "unknown"
+          ],
+          "title": "Destination Scope",
+          "type": "string"
+        },
+        "travel_intents": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Travel Intents",
+          "type": "array"
+        },
         "start_date": {
           "anyOf": [
             {

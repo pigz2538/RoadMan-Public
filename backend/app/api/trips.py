@@ -29,7 +29,6 @@ from ..planning.llm import (
     OllamaTripEditAgent,
     OllamaRequirementExtractor,
     OllamaRequirementValidator,
-    extract_explicit_location_constraints,
     extract_structural_constraints,
 )
 from ..planning.event_research import research_special_events
@@ -200,21 +199,30 @@ async def preflight_trip(
 ) -> PreflightResponse:
     today = date.today()
     structural_dates = extract_structural_constraints(payload.raw_text, today)
-    explicit_locations = extract_explicit_location_constraints(payload.raw_text)
     extracted = dict(payload.previous_extracted)
-    if not extracted:
-        settings = get_settings()
-        fast_extracted = {**structural_dates, **explicit_locations}
-        # Let the Requirement Agent interpret semantic details (for example
-        # relationship-based party size) whenever it is configured. The
-        # deterministic parser remains the offline fallback only.
-        if settings.enable_llm_requirement_extraction and settings.ollama_api_key:
-            extracted = await OllamaRequirementExtractor(settings).extract(
-                payload.raw_text,
-                today,
-            )
-        else:
-            extracted = fast_extracted
+    settings = get_settings()
+    previous_source_text = str(extracted.get("_source_raw_text") or "")
+    # Re-run the semantic Agent whenever the raw request changed or the
+    # previous response did not come from a successful Agent round.  This
+    # prevents a stale/partial extraction from surviving a clarification or a
+    # completely new request.  Answers are merged below after the fresh Agent
+    # result so a confirmation round can still override one field.
+    should_extract = (
+        not extracted
+        or previous_source_text != payload.raw_text
+        or extracted.get("_intent_status") != "ok"
+    )
+    if settings.enable_llm_requirement_extraction and settings.ollama_api_key and should_extract:
+        extracted = await OllamaRequirementExtractor(settings).extract(
+            payload.raw_text,
+            today,
+        )
+    elif not extracted:
+        extracted = {
+            **structural_dates,
+            "_intent_status": "unavailable",
+            "_intent_error": "REQUIREMENT_AGENT_UNAVAILABLE",
+        }
     # A clarification round sends the previous extraction back to us. Refresh
     # only the calendar fields from the original text so an earlier partial
     # Agent response cannot keep asking for a date that was already explicit.
@@ -242,12 +250,6 @@ async def preflight_trip(
     for field in ("start_date", "end_date", "cross_sea_required"):
         if structural_dates.get(field) and field not in answered_fields:
             extracted[field] = structural_dates[field]
-    # A clarification round may carry a partial Agent response.  Preserve an
-    # explicitly written origin/destination if that response omitted it, but
-    # never overwrite a non-empty semantic Agent decision.
-    for field in ("origin_name", "destination_name"):
-        if not extracted.get(field) and explicit_locations.get(field):
-            extracted[field] = explicit_locations[field]
     for key, value in payload.answers.items():
         value = value.strip()
         if not value:
@@ -323,6 +325,25 @@ async def preflight_trip(
         )
 
     issues: list[PreflightIssue] = []
+    intent_status = str(extracted.get("_intent_status") or "")
+    if intent_status in {"unavailable", "invalid"} and not payload.previous_extracted:
+        issues.append(
+            PreflightIssue(
+                code=(
+                    "REQUIREMENT_AGENT_UNAVAILABLE"
+                    if intent_status == "unavailable"
+                    else "REQUIREMENT_AGENT_INVALID_RESPONSE"
+                ),
+                field="preferences",
+                severity="error",
+                message=(
+                    "需求理解智能体暂时不可用，尚未识别出发地、目的地和约束；请稍后重试。"
+                    if intent_status == "unavailable"
+                    else "需求理解智能体返回了无法确认的地点结构，未开始地图搜索；请重新提交需求。"
+                ),
+                answer_type="text",
+            )
+        )
     labels = {
         "origin_name": "请补充从哪里出发。",
         "destination_name": "请补充主要目的地。",
@@ -482,6 +503,9 @@ async def preflight_trip(
     summary = {
         "origin_name": extracted.get("origin_name"),
         "destination_name": extracted.get("destination_name"),
+        "destination_names": extracted.get("destination_names", []),
+        "destination_scope": extracted.get("destination_scope", "unknown"),
+        "travel_intents": extracted.get("travel_intents", []),
         "start_date": extracted.get("start_date"),
         "end_date": extracted.get("end_date"),
         "departure_time": extracted.get("departure_time"),
