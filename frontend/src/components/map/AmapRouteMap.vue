@@ -230,6 +230,94 @@ function activityPlaceWithFallback(
   return fallback ? { ...activity.place, coordinates: fallback } : activity.place
 }
 
+type MarkerCandidate = {
+  place: MapPlace
+  kind: MarkerKind
+  activityIds: string[]
+  stageIds: string[]
+  order: number
+}
+
+type MarkerCluster = {
+  candidates: MarkerCandidate[]
+}
+
+function markerKindGroup(kind: MarkerKind): string {
+  if (kind === 'start' || kind === 'end') return 'terminal'
+  return kind
+}
+
+function markerKindPriority(kind: MarkerKind): number {
+  return {
+    start: 0,
+    end: 1,
+    attraction: 2,
+    hotel: 3,
+    meal: 4,
+    charging: 5,
+    fueling: 6,
+    parking: 7,
+    rest: 8,
+    service: 9,
+  }[kind]
+}
+
+function normalizedMarkerName(name: string): string {
+  return name
+    .toLocaleLowerCase()
+    .replace(/[（(][^）)]*[）)]/g, '')
+    .replace(/风景名胜区|风景区|景区|地质公园|旅游区/g, '')
+    .replace(/[\s·•\-—_/、，,。:：]/g, '')
+    .trim()
+}
+
+function markerDistance(a: MapPlace, b: MapPlace): number {
+  if (!a.coordinates || !b.coordinates) return Number.POSITIVE_INFINITY
+  return Math.hypot(
+    a.coordinates.longitude - b.coordinates.longitude,
+    a.coordinates.latitude - b.coordinates.latitude,
+  )
+}
+
+function mergeMarkerCandidates(candidates: MarkerCandidate[]): MarkerCandidate[] {
+  const merged: MarkerCandidate[] = []
+  for (const candidate of candidates) {
+    const nameKey = normalizedMarkerName(candidate.place.name)
+    const existing = merged.find((item) =>
+      markerKindGroup(item.kind) === markerKindGroup(candidate.kind)
+      && normalizedMarkerName(item.place.name) === nameKey
+      && markerDistance(item.place, candidate.place) <= 0.0007,
+    )
+    if (existing) {
+      existing.activityIds.push(...candidate.activityIds)
+      existing.stageIds.push(...candidate.stageIds)
+      existing.order = Math.min(existing.order, candidate.order)
+      if (markerKindPriority(candidate.kind) < markerKindPriority(existing.kind)) {
+        existing.kind = candidate.kind
+      }
+      continue
+    }
+    merged.push({
+      ...candidate,
+      activityIds: [...candidate.activityIds],
+      stageIds: [...candidate.stageIds],
+    })
+  }
+  return merged
+}
+
+function clusterMarkers(candidates: MarkerCandidate[]): MarkerCluster[] {
+  const clusters: MarkerCluster[] = []
+  for (const candidate of candidates) {
+    const cluster = clusters.find((item) => item.candidates.some((other) =>
+      markerDistance(other.place, candidate.place) <= 0.00085,
+    ))
+    if (cluster) cluster.candidates.push(candidate)
+    else clusters.push({ candidates: [candidate] })
+  }
+  return clusters
+}
+
 function itineraryConnectors(day: NonNullable<typeof props.day>) {
   const coordinatesByName = new Map<string, { longitude: number; latitude: number }>()
   for (const stage of day.stages) {
@@ -430,59 +518,81 @@ async function renderRoutes() {
       }
     }
   }
-  const places = new Map<string, {
-    place: MapPlace
-    kind: MarkerKind
-    activityId?: string
-  }>()
+  const markerCandidates: MarkerCandidate[] = []
+  let markerOrder = 0
   const firstStage = day.stages[0]
   const lastStage = day.stages.at(-1)
   for (const stage of day.stages) {
     const origin = stagePlaceWithFallback(stage, 'origin')
     if (origin.coordinates) {
-      places.set(
-        `stage:${stage.id}:origin`,
-        { place: origin, kind: stage === firstStage ? 'start' : 'service' },
-      )
+      markerCandidates.push({
+        place: origin,
+        kind: stage === firstStage ? 'start' : 'service',
+        activityIds: [],
+        stageIds: [stage.id],
+        order: markerOrder++,
+      })
     }
   }
   for (const stage of day.stages) {
     const destination = stagePlaceWithFallback(stage, 'destination')
     if (destination.coordinates) {
-      places.set(
-        `stage:${stage.id}:destination`,
-        { place: destination, kind: stage === lastStage ? 'end' : 'attraction' },
-      )
+      markerCandidates.push({
+        place: destination,
+        kind: stage === lastStage ? 'end' : 'attraction',
+        activityIds: [],
+        stageIds: [stage.id],
+        order: markerOrder++,
+      })
     }
   }
   for (const activity of day.activities) {
     const place = activityPlaceWithFallback(activity, coordinatesByName)
     if (place.coordinates) {
-      places.set(`activity:${activity.id}`, {
+      markerCandidates.push({
         place,
         kind: activityMarkerKind(activity.type),
-        activityId: activity.id,
+        activityIds: [activity.id],
+        stageIds: [],
+        order: markerOrder++,
       })
     }
   }
-  for (const [index, { place, kind, activityId }] of [...places.values()].entries()) {
-    if (!place.coordinates) continue
-    const terminal = kind === 'start' || kind === 'end'
-    const marker = new AMap.value.Marker({
-      position: [place.coordinates.longitude, place.coordinates.latitude],
-      title: place.name,
-      content: `<div class="${terminal ? 'amap-terminal-marker' : 'amap-poi-marker'} amap-marker-${kind}"><b>${markerIcon(kind)}</b><span>${escapeHtml(place.name)}</span></div>`,
-      // Several activities can intentionally share a hotel/restaurant
-      // coordinate. Stagger their labels so the map still exposes every
-      // planned item instead of letting the last marker hide the rest.
-      offset: new AMap.value.Pixel(
-        -16 + ((index % 3) - 1) * 14,
-        -38 - Math.floor(index / 3) * 10,
-      ),
-      zIndex: 1000 + index,
-    })
-    if (activityId) marker.on('click', () => emit('selectActivity', activityId))
-    otherOverlays.value.push(marker)
+  const mergedMarkers = mergeMarkerCandidates(markerCandidates)
+    .sort((left, right) =>
+      markerKindPriority(left.kind) - markerKindPriority(right.kind)
+      || left.order - right.order,
+    )
+  const markerClusters = clusterMarkers(mergedMarkers)
+  let markerIndex = 0
+  for (const cluster of markerClusters) {
+    const candidates = [...cluster.candidates].sort((left, right) =>
+      markerKindPriority(left.kind) - markerKindPriority(right.kind)
+      || left.order - right.order,
+    )
+    const columns = Math.min(5, candidates.length)
+    for (const [slot, candidate] of candidates.entries()) {
+      const place = candidate.place
+      if (!place.coordinates) continue
+      const terminal = candidate.kind === 'start' || candidate.kind === 'end'
+      const row = Math.floor(slot / columns)
+      const column = slot % columns
+      const xOffset = (column - (columns - 1) / 2) * 180
+      const yOffset = -38 - row * 48
+      const marker = new AMap.value.Marker({
+        position: [place.coordinates.longitude, place.coordinates.latitude],
+        title: place.name,
+        content: `<div class="${terminal ? 'amap-terminal-marker' : 'amap-poi-marker'} amap-marker-${candidate.kind}"><b>${markerIcon(candidate.kind)}</b><span>${escapeHtml(place.name)}</span></div>`,
+        // Same-kind duplicates are merged. Different kinds at one coordinate
+        // share a cluster and are laid out horizontally so their labels stay
+        // readable instead of stacking on the same pixel.
+        offset: new AMap.value.Pixel(-16 + xOffset, yOffset),
+        zIndex: 1000 + markerIndex++,
+      })
+      const activityId = candidate.activityIds[0]
+      if (activityId) marker.on('click', () => emit('selectActivity', activityId))
+      otherOverlays.value.push(marker)
+    }
   }
 
   const overlays = [
