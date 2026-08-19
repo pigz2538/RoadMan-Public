@@ -1178,7 +1178,18 @@ def extract_explicit_location_constraints(raw_text: str) -> dict[str, str]:
         return {}
 
     result: dict[str, str] = {}
-    origin_match = re.search(
+
+    # A very common natural form is “从 A 坐/乘……去 B”.  The previous
+    # fallback only understood “从 A 出发” and therefore missed the origin in
+    # this form.  Keep the recovery grammar transport-agnostic: it looks for a
+    # travel verb between the two places rather than maintaining a city list.
+    transport_origin_match = re.search(
+        r"从\s*(?P<origin>[^，,。；;、]+?)\s*"
+        r"(?=(?:坐|乘坐|乘|搭乘|搭|开车|自驾|骑车|骑行|步行)"
+        r"\s*[^，,。；;、]{0,12}?(?:去|到|前往))",
+        text,
+    )
+    origin_match = transport_origin_match or re.search(
         r"从\s*(?P<origin>[^，,。；;、]+?)\s*(?:出发|启程|开始(?:行程)?|出游|到)",
         text,
     )
@@ -1187,11 +1198,15 @@ def extract_explicit_location_constraints(raw_text: str) -> dict[str, str]:
         if origin:
             result["origin_name"] = origin
 
-    # “去/到/前往 B 看/玩…” and “在 B 及其周边…” are explicit destination
+    # “去/前往 B 看/玩…” and “在 B 及其周边…” are explicit destination
     # clauses.  Stop before the experience so it is not mistaken for a POI.
     destination_patterns = (
-        r"(?:去|到|前往|抵达|游览|参观)\s*(?P<destination>[^，,。；;、]+?)"
-        r"(?=及其周边|周边|看|赏|游玩|旅游|转转|参观|住宿|停留|度假|出游|[，,。；;]|$)",
+        # Do not treat bare “到” as a destination marker: in “周日到下周三”
+        # it is a date-range connector, not a place.  “去/前往/抵达” are
+        # unambiguous travel clauses here; “玩” also stops “去成都玩三天”
+        # before the duration text.
+        r"(?:去|前往|抵达|游览|参观)\s*(?P<destination>[^，,。；;、]+?)"
+        r"(?=及其周边|周边|看|赏|游玩|玩|旅游|转转|参观|住宿|停留|度假|出游|[，,。；;]|$)",
         r"在\s*(?P<destination>[^，,。；;、]+?)"
         r"(?=及其周边|周边|旅游|游玩|转转|住宿|停留|度假|出游|[，,。；;]|$)",
     )

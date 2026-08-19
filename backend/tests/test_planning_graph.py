@@ -149,6 +149,18 @@ def test_explicit_location_fallback_reads_travel_grammar_without_place_keywords(
     ) == {"origin_name": "Wuhan", "destination_name": "Jiugongshan"}
 
 
+def test_explicit_location_fallback_handles_transport_between_origin_and_destination():
+    text = "这周日到下周三想和对象从武汉坐飞机去成都玩三天，一定要去麓湖CPI"
+    assert extract_explicit_location_constraints(text) == {
+        "origin_name": "武汉",
+        "destination_name": "成都",
+    }
+    assert extract_structural_constraints(text, date(2026, 8, 19)) == {
+        "start_date": "2026-08-23",
+        "end_date": "2026-08-26",
+    }
+
+
 def test_structural_calendar_supports_relative_weekend_and_english_dates():
     today = date(2026, 8, 3)
     assert extract_structural_constraints("后天出发，前天回来", today) == {

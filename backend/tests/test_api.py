@@ -439,6 +439,32 @@ async def test_preflight_replaces_stale_end_date_for_relative_duration(client):
 
 
 @pytest.mark.asyncio
+async def test_preflight_recovers_transport_clause_origin_and_destination(client):
+    """A natural flight clause must not ask for the origin or misread the date range."""
+    response = await client.post(
+        "/api/v1/trips/preflight",
+        json={
+            "raw_text": "这周日到下周三想和对象从武汉坐飞机去成都玩三天，一定要去麓湖CPI",
+            "previous_extracted": {},
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    today = date.today()
+    this_sunday = today + timedelta(days=(6 - today.weekday()) % 7)
+    assert body["extracted"]["origin_name"] == "武汉"
+    assert body["extracted"]["destination_name"] == "成都"
+    assert body["extracted"]["start_date"] == this_sunday.isoformat()
+    assert body["extracted"]["end_date"] == (this_sunday + timedelta(days=3)).isoformat()
+    assert not {
+        (item["code"], item.get("field"))
+        for item in body["issues"]
+        if item["code"] == "MISSING_FIELD"
+    }
+
+
+@pytest.mark.asyncio
 async def test_preflight_understands_departure_then_arrival_clock_order(client):
     response = await client.post(
         "/api/v1/trips/preflight",
