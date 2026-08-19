@@ -262,15 +262,6 @@ function markerKindPriority(kind: MarkerKind): number {
   }[kind]
 }
 
-function normalizedMarkerName(name: string): string {
-  return name
-    .toLocaleLowerCase()
-    .replace(/[（(][^）)]*[）)]/g, '')
-    .replace(/风景名胜区|风景区|景区|地质公园|旅游区/g, '')
-    .replace(/[\s·•\-—_/、，,。:：]/g, '')
-    .trim()
-}
-
 function markerDistance(a: MapPlace, b: MapPlace): number {
   if (!a.coordinates || !b.coordinates) return Number.POSITIVE_INFINITY
   return Math.hypot(
@@ -282,16 +273,21 @@ function markerDistance(a: MapPlace, b: MapPlace): number {
 function mergeMarkerCandidates(candidates: MarkerCandidate[]): MarkerCandidate[] {
   const merged: MarkerCandidate[] = []
   for (const candidate of candidates) {
-    const nameKey = normalizedMarkerName(candidate.place.name)
     const existing = merged.find((item) =>
       markerKindGroup(item.kind) === markerKindGroup(candidate.kind)
-      && normalizedMarkerName(item.place.name) === nameKey
-      && markerDistance(item.place, candidate.place) <= 0.0007,
+      // A cluster of attraction records often has slightly different names
+      // (for example “锦里” and “武侯祠锦里古街”) but the same map point. Keep
+      // one representative marker for that visual category; other categories
+      // at the same coordinate remain separate and are laid out side by side.
+      && markerDistance(item.place, candidate.place) <= 0.00055,
     )
     if (existing) {
       existing.activityIds.push(...candidate.activityIds)
       existing.stageIds.push(...candidate.stageIds)
       existing.order = Math.min(existing.order, candidate.order)
+      if (candidate.place.name.length > existing.place.name.length) {
+        existing.place = candidate.place
+      }
       if (markerKindPriority(candidate.kind) < markerKindPriority(existing.kind)) {
         existing.kind = candidate.kind
       }
