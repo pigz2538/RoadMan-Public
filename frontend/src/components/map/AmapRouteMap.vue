@@ -239,7 +239,15 @@ type MarkerCandidate = {
 }
 
 type MarkerCluster = {
-  candidates: MarkerCandidate[]
+  groups: MarkerGroup[]
+}
+
+type MarkerGroup = {
+  place: MapPlace
+  kinds: MarkerKind[]
+  activityIds: string[]
+  stageIds: string[]
+  order: number
 }
 
 function markerKindGroup(kind: MarkerKind): string {
@@ -268,6 +276,15 @@ function markerDistance(a: MapPlace, b: MapPlace): number {
     a.coordinates.longitude - b.coordinates.longitude,
     a.coordinates.latitude - b.coordinates.latitude,
   )
+}
+
+function normalizedMarkerName(name: string): string {
+  return name
+    .toLocaleLowerCase()
+    .replace(/[（(][^）)]*[）)]/g, '')
+    .replace(/风景名胜区|风景区|景区|地质公园|旅游区/g, '')
+    .replace(/[\s·•\-—_/、，,。:：]/g, '')
+    .trim()
 }
 
 function mergeMarkerCandidates(candidates: MarkerCandidate[]): MarkerCandidate[] {
@@ -302,14 +319,47 @@ function mergeMarkerCandidates(candidates: MarkerCandidate[]): MarkerCandidate[]
   return merged
 }
 
-function clusterMarkers(candidates: MarkerCandidate[]): MarkerCluster[] {
-  const clusters: MarkerCluster[] = []
+function groupMarkerCandidates(candidates: MarkerCandidate[]): MarkerGroup[] {
+  const groups: MarkerGroup[] = []
   for (const candidate of candidates) {
-    const cluster = clusters.find((item) => item.candidates.some((other) =>
-      markerDistance(other.place, candidate.place) <= 0.00085,
+    const nameKey = normalizedMarkerName(candidate.place.name)
+    const existing = groups.find((item) =>
+      nameKey
+      && normalizedMarkerName(item.place.name) === nameKey
+      // Route endpoints and activity records for the same named place can
+      // differ by a few hundred metres. Keep one shared name with multiple
+      // category badges instead of repeating the name for every record.
+      && markerDistance(item.place, candidate.place) <= 0.003,
+    )
+    if (existing) {
+      if (!existing.kinds.includes(candidate.kind)) existing.kinds.push(candidate.kind)
+      existing.activityIds.push(...candidate.activityIds)
+      existing.stageIds.push(...candidate.stageIds)
+      existing.order = Math.min(existing.order, candidate.order)
+      if (candidate.place.name.length > existing.place.name.length) {
+        existing.place = candidate.place
+      }
+      continue
+    }
+    groups.push({
+      place: candidate.place,
+      kinds: [candidate.kind],
+      activityIds: [...candidate.activityIds],
+      stageIds: [...candidate.stageIds],
+      order: candidate.order,
+    })
+  }
+  return groups
+}
+
+function clusterMarkers(groups: MarkerGroup[]): MarkerCluster[] {
+  const clusters: MarkerCluster[] = []
+  for (const group of groups) {
+    const cluster = clusters.find((item) => item.groups.some((other) =>
+      markerDistance(other.place, group.place) <= 0.00085,
     ))
-    if (cluster) cluster.candidates.push(candidate)
-    else clusters.push({ candidates: [candidate] })
+    if (cluster) cluster.groups.push(group)
+    else clusters.push({ groups: [group] })
   }
   return clusters
 }
@@ -559,33 +609,43 @@ async function renderRoutes() {
       markerKindPriority(left.kind) - markerKindPriority(right.kind)
       || left.order - right.order,
     )
-  const markerClusters = clusterMarkers(mergedMarkers)
-  let markerIndex = 0
-  for (const cluster of markerClusters) {
-    const candidates = [...cluster.candidates].sort((left, right) =>
-      markerKindPriority(left.kind) - markerKindPriority(right.kind)
+  const markerGroups = groupMarkerCandidates(mergedMarkers)
+    .sort((left, right) =>
+      Math.min(...left.kinds.map(markerKindPriority)) - Math.min(...right.kinds.map(markerKindPriority))
       || left.order - right.order,
     )
-    const columns = Math.min(5, candidates.length)
-    for (const [slot, candidate] of candidates.entries()) {
-      const place = candidate.place
+  const markerClusters = clusterMarkers(markerGroups)
+  let markerIndex = 0
+  for (const cluster of markerClusters) {
+    const groups = [...cluster.groups].sort((left, right) =>
+      Math.min(...left.kinds.map(markerKindPriority)) - Math.min(...right.kinds.map(markerKindPriority))
+      || left.order - right.order,
+    )
+    const columns = Math.min(5, groups.length)
+    for (const [slot, group] of groups.entries()) {
+      const place = group.place
       if (!place.coordinates) continue
-      const terminal = candidate.kind === 'start' || candidate.kind === 'end'
+      const kinds = [...group.kinds].sort((left, right) => markerKindPriority(left) - markerKindPriority(right))
+      const primaryKind = kinds[0] ?? 'service'
+      const terminal = kinds.some((kind) => kind === 'start' || kind === 'end')
       const row = Math.floor(slot / columns)
       const column = slot % columns
       const xOffset = (column - (columns - 1) / 2) * 180
       const yOffset = -38 - row * 48
+      const badges = kinds
+        .map((kind) => `<b class="amap-marker-badge amap-marker-${kind}">${markerIcon(kind)}</b>`)
+        .join('')
       const marker = new AMap.value.Marker({
         position: [place.coordinates.longitude, place.coordinates.latitude],
         title: place.name,
-        content: `<div class="${terminal ? 'amap-terminal-marker' : 'amap-poi-marker'} amap-marker-${candidate.kind}"><b>${markerIcon(candidate.kind)}</b><span>${escapeHtml(place.name)}</span></div>`,
-        // Same-kind duplicates are merged. Different kinds at one coordinate
-        // share a cluster and are laid out horizontally so their labels stay
-        // readable instead of stacking on the same pixel.
+        content: `<div class="${terminal ? 'amap-terminal-marker' : 'amap-poi-marker'} amap-marker-group amap-marker-${primaryKind}"><div class="amap-marker-badges">${badges}</div><span>${escapeHtml(place.name)}</span></div>`,
+        // One named place owns one label. Its attraction/meal/hotel/service
+        // categories are shown as a compact badge row; different named places
+        // in the same map cluster are still laid out horizontally.
         offset: new AMap.value.Pixel(-16 + xOffset, yOffset),
         zIndex: 1000 + markerIndex++,
       })
-      const activityId = candidate.activityIds[0]
+      const activityId = group.activityIds[0]
       if (activityId) marker.on('click', () => emit('selectActivity', activityId))
       otherOverlays.value.push(marker)
     }

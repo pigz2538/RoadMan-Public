@@ -386,6 +386,7 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .map-live-badge.warning { background: rgba(255, 246, 220, .94); color: #9b6810; }
 .amap-live-legend { z-index: 4; }
 .amap-terminal-marker, .amap-poi-marker { display: flex; flex-direction: column; align-items: center; filter: drop-shadow(0 5px 7px rgba(24, 68, 133, .22)); }
+.amap-marker-badges { display: flex; align-items: center; justify-content: center; gap: 4px; min-height: 32px; }
 .amap-terminal-marker b, .amap-poi-marker b {
   width: 32px; height: 32px; display: grid; place-items: center; border-radius: 50%;
   color: white; background: #246ff0; border: 2px solid white; font-size: 15px;
@@ -403,6 +404,14 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .amap-marker-rest b, .amap-marker-service b { background: #168f9b; }
 .amap-marker-hotel b { background: #7358c7; }
 .amap-marker-parking b { background: #52718f; }
+.amap-marker-badge.amap-marker-start, .amap-marker-badge.amap-marker-end { background: #246ff0; }
+.amap-marker-badge.amap-marker-attraction { background: #28a66d; }
+.amap-marker-badge.amap-marker-charging { background: #d89500; }
+.amap-marker-badge.amap-marker-fueling { background: #dc6b21; }
+.amap-marker-badge.amap-marker-meal { background: #d55746; }
+.amap-marker-badge.amap-marker-rest, .amap-marker-badge.amap-marker-service { background: #168f9b; }
+.amap-marker-badge.amap-marker-hotel { background: #7358c7; }
+.amap-marker-badge.amap-marker-parking { background: #52718f; }
 .mock-map svg { width: 100%; height: 100%; display: block; }
 .labels text { fill: #6f8290; font-size: 15px; font-weight: 600; }
 .route-shadow { fill: none; stroke: #54b0ff; stroke-width: 22; opacity: .28; filter: url(#routeGlow); }
