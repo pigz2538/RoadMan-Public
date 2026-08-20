@@ -338,6 +338,7 @@ def build_planning_graph(
             ).isoformat()
             defaults.append("end_date=start_date+1day")
         request.setdefault("max_continuous_drive_minutes", 120)
+        request.setdefault("max_daily_drive_minutes", 540)
         request["defaults_applied"] = list(dict.fromkeys(defaults))
         return {"trip_request": request, "progress": {"node": "apply_defaults", "value": 22}}
 
@@ -2849,6 +2850,7 @@ def build_planning_graph(
             "fueling": "加油站",
             "parking": "停车场",
             "meal": "餐厅",
+            "overnight_hotel": "酒店",
             "hospital": "医院",
             "toilet": "公共厕所",
         }
@@ -2955,6 +2957,9 @@ def build_planning_graph(
             state.get("vehicle_profile") or default_vehicle(),
             state.get("service_pois", {}),
             int(state["trip_request"].get("max_continuous_drive_minutes") or 120),
+            max_daily_drive_minutes=int(
+                state["trip_request"].get("max_daily_drive_minutes") or 540
+            ),
         )
         for day in plans:
             previous_end: datetime | None = None

@@ -8,6 +8,13 @@ from typing import Any
 from ..domain.models import Activity, DayItemRef, EnergyEstimate, PlaceRef, PlanWarning
 
 ELEVATED_ROUTE_THRESHOLD_M = 300.0
+# A long intercity drive is a calendar-spanning activity, not one oversized
+# stage.  Keep a conservative daily driving budget so the planner can reserve
+# a real overnight stop before the continuous-drive splitter adds shorter
+# service/rest breaks.
+DEFAULT_DAILY_DRIVING_MINUTES = 9 * 60
+DRIVING_DAY_END_HOUR = 20
+DRIVING_NEXT_DAY_START_HOUR = 8
 
 
 def default_vehicle() -> dict[str, Any]:
@@ -35,11 +42,21 @@ def enrich_deep_drive_plan(
     vehicle: dict[str, Any],
     service_pois: dict[str, dict[str, list[dict[str, Any]]]],
     max_continuous_drive_minutes: int,
+    max_daily_drive_minutes: int = DEFAULT_DAILY_DRIVING_MINUTES,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     current_percent = float(vehicle.get("current_energy_percent") or 80)
     reserve = float(vehicle.get("safe_energy_reserve_percent") or 15)
     power_type = vehicle.get("power_type", "electric")
     warnings: list[dict[str, Any]] = []
+
+    # Split before energy/rest enrichment.  This makes the calendar date an
+    # invariant for every persisted movement stage and gives the later
+    # continuous-driving splitter a normal, day-sized stage to work with.
+    _split_cross_day_driving_stages(
+        plans,
+        service_pois,
+        max_daily_drive_minutes=max_daily_drive_minutes,
+    )
 
     for day in plans:
         activities: list[dict[str, Any]] = list(day.get("activities", []))
@@ -208,6 +225,320 @@ def enrich_deep_drive_plan(
         ]
         day["items"] = [*stage_refs, *activity_refs]
     return plans, _dedupe_warnings(warnings)
+
+
+def _split_cross_day_driving_stages(
+    plans: list[dict[str, Any]],
+    service_pois: dict[str, dict[str, list[dict[str, Any]]]],
+    *,
+    max_daily_drive_minutes: int = DEFAULT_DAILY_DRIVING_MINUTES,
+) -> None:
+    """Distribute a long driving leg across calendar days with an overnight.
+
+    Route providers return one geometry and one duration for an intercity leg.
+    The old pipeline put that object into the departure day unchanged, so a
+    Wuhan→Xinjiang leg could render as ``08:00–次日20:00`` on day one.  This
+    pass keeps the provider geometry, cuts it at safe driving windows, and
+    moves each piece to the matching day plan.  A hotel/rest activity bridges
+    the gap to the next morning; if no hotel POI was returned, it is explicitly
+    marked as a route-derived stop that still needs booking confirmation.
+    """
+    if not plans:
+        return
+    max_daily = max(60, int(max_daily_drive_minutes or DEFAULT_DAILY_DRIVING_MINUTES))
+    day_by_date = {
+        str(day.get("date")): day
+        for day in plans
+        if day.get("date")
+    }
+    original: list[tuple[dict[str, Any], dict[str, Any]]] = [
+        (day, stage)
+        for day in plans
+        for stage in list(day.get("stages", []))
+    ]
+    staged_by_date: dict[str, list[dict[str, Any]]] = {
+        key: [] for key in day_by_date
+    }
+    activities_by_date: dict[str, list[dict[str, Any]]] = {
+        key: [] for key in day_by_date
+    }
+
+    for owner_day, stage in original:
+        start = _parse_datetime(stage.get("planned_start"))
+        end = _parse_datetime(stage.get("planned_end"))
+        movement_duration = int(
+            (stage.get("route_segments") or [{}])[0].get(
+                "duration_minutes",
+                stage.get("duration_minutes", 0),
+            )
+            or 0
+        )
+        if (
+            stage.get("mode") != "driving"
+            or start is None
+            or end is None
+            or movement_duration <= 0
+            or (end.date() == start.date() and movement_duration <= max_daily)
+        ):
+            owner_key = str(owner_day.get("date"))
+            staged_by_date.setdefault(owner_key, []).append(stage)
+            continue
+
+        pieces, overnight_activities, piece_services = _split_driving_stage(
+            stage,
+            service_pois.get(stage.get("id"), {}),
+            max_daily_minutes=max_daily,
+        )
+        if not pieces:
+            owner_key = str(owner_day.get("date"))
+            staged_by_date.setdefault(owner_key, []).append(stage)
+            continue
+        for piece in pieces:
+            piece_key = str(piece["planned_start"][:10])
+            target_day = day_by_date.get(piece_key) or owner_day
+            target_key = str(target_day.get("date"))
+            piece["day_id"] = target_day.get("id") or f"day_{target_day.get('day_index', 1)}"
+            staged_by_date.setdefault(target_key, []).append(piece)
+            if piece.get("_service_pois") is not None:
+                piece_services[str(piece["id"])] = piece.pop("_service_pois")
+        for activity in overnight_activities:
+            activity_key = str(activity["planned_start"][:10])
+            target_day = day_by_date.get(activity_key) or owner_day
+            target_key = str(target_day.get("date"))
+            activity["day_id"] = target_day.get("id") or f"day_{target_day.get('day_index', 1)}"
+            activities_by_date.setdefault(target_key, []).append(activity)
+        # The later 120-minute splitter works on the newly created piece IDs.
+        # Reuse the original corridor service search for every piece instead
+        # of silently losing charging/rest candidates after the calendar cut.
+        service_pois.update(piece_services)
+
+    # Preserve existing activities and normalize each day's ordering.  The
+    # overlap repair later in the graph can move optional local activities
+    # behind an arrival, while the generated hotel block remains required.
+    for day in plans:
+        key = str(day.get("date"))
+        day["stages"] = sorted(
+            staged_by_date.get(key, []),
+            key=lambda item: (str(item.get("planned_start", "")), item.get("sequence", 0)),
+        )
+        day["activities"] = [
+            *list(day.get("activities", [])),
+            *activities_by_date.get(key, []),
+        ]
+        for sequence, stage in enumerate(day["stages"]):
+            stage["sequence"] = sequence
+        for sequence, activity in enumerate(
+            sorted(day["activities"], key=lambda item: str(item.get("planned_start", "")))
+        ):
+            activity["sequence"] = sequence
+        day["items"] = [
+            *[{"type": "stage", "id": item["id"]} for item in day["stages"]],
+            *[{"type": "activity", "id": item["id"]} for item in day["activities"]],
+        ]
+
+
+def _split_driving_stage(
+    stage: dict[str, Any],
+    stage_services: dict[str, list[dict[str, Any]]],
+    *,
+    max_daily_minutes: int,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, list[dict[str, Any]]]]:
+    start = _parse_datetime(stage.get("planned_start"))
+    if start is None:
+        return [], [], {}
+    segment = deepcopy((stage.get("route_segments") or [{}])[0])
+    geometry = [
+        point
+        for point in segment.get("coordinates", [])
+        if isinstance(point, dict)
+        and point.get("longitude") is not None
+        and point.get("latitude") is not None
+    ]
+    if len(geometry) < 2:
+        origin = stage.get("origin", {}).get("coordinates")
+        destination = stage.get("destination", {}).get("coordinates")
+        if origin and destination:
+            geometry = [origin, destination]
+    if len(geometry) < 2:
+        return [], [], {}
+
+    total_duration = int(segment.get("duration_minutes") or stage.get("duration_minutes") or 0)
+    total_distance = float(segment.get("distance_km") or stage.get("distance_km") or 0)
+    if total_duration <= 0:
+        return [], [], {}
+    remaining = total_duration
+    elapsed = 0
+    cursor = start
+    driven_today = 0
+    pieces: list[dict[str, Any]] = []
+    overnight_activities: list[dict[str, Any]] = []
+    piece_services: dict[str, list[dict[str, Any]]] = {}
+    part_number = 1
+    overnight_number = 1
+
+    while remaining > 0:
+        day_end = cursor.replace(
+            hour=DRIVING_DAY_END_HOUR,
+            minute=0,
+            second=0,
+            microsecond=0,
+        )
+        if cursor >= day_end or driven_today >= max_daily_minutes:
+            cursor = (cursor + timedelta(days=1)).replace(
+                hour=DRIVING_NEXT_DAY_START_HOUR,
+                minute=0,
+                second=0,
+                microsecond=0,
+            )
+            driven_today = 0
+            continue
+        window_minutes = int((day_end - cursor).total_seconds() // 60)
+        available = min(max_daily_minutes - driven_today, window_minutes)
+        if available <= 0:
+            continue
+        duration = min(remaining, available)
+        start_fraction = elapsed / total_duration
+        end_fraction = (elapsed + duration) / total_duration
+        piece_geometry = _slice_route_geometry(geometry, start_fraction, end_fraction)
+        piece_end = cursor + timedelta(minutes=duration)
+        is_last = duration >= remaining
+        stop_place: dict[str, Any] | None = None
+        if not is_last:
+            stop_place = _overnight_stop_place(
+                stage,
+                stage_services,
+                piece_geometry[-1],
+                overnight_number,
+            )
+            overnight_number += 1
+        piece = deepcopy(stage)
+        piece["id"] = f"{stage.get('id', 'driving')}_calendar_{part_number}"
+        piece["title"] = f"{stage.get('title', '长途驾驶')}（跨天第{part_number}段）"
+        piece["origin"] = stage.get("origin") if not pieces else (pieces[-1].get("destination") or stop_place)
+        piece["destination"] = stage.get("destination") if is_last else stop_place
+        piece["waypoints"] = []
+        piece["distance_km"] = round(total_distance * duration / total_duration, 2)
+        piece["duration_minutes"] = duration
+        piece["planned_start"] = cursor.isoformat()
+        piece["planned_end"] = piece_end.isoformat()
+        piece_segment = deepcopy(segment)
+        piece_segment["coordinates"] = piece_geometry
+        piece_segment["distance_km"] = piece["distance_km"]
+        piece_segment["duration_minutes"] = duration
+        piece["route_segments"] = [piece_segment]
+        piece.pop("energy_estimate", None)
+        piece["warnings"] = list(piece.get("warnings", []))
+        piece["risk_tags"] = list(piece.get("risk_tags", []))
+        if not is_last:
+            piece["warnings"].append(
+                _warning(
+                    "OVERNIGHT_STOP_SCHEDULED",
+                    "长途驾驶已拆分，下一段安排次日出发并预留过夜住宿",
+                    "warning",
+                    True,
+                )
+            )
+            piece["risk_tags"].append("跨天驾驶")
+        piece["_service_pois"] = stage_services
+        pieces.append(piece)
+        remaining -= duration
+        elapsed += duration
+        driven_today += duration
+        part_number += 1
+        if not is_last:
+            next_start = (piece_end + timedelta(days=1)).replace(
+                hour=DRIVING_NEXT_DAY_START_HOUR,
+                minute=0,
+                second=0,
+                microsecond=0,
+            )
+            overnight_activities.append(
+                _activity(
+                    str(stage.get("day_id") or "day_1"),
+                    len(overnight_activities),
+                    "hotel",
+                    stop_place or stage.get("destination", {}),
+                    piece_end,
+                    max(60, int((next_start - piece_end).total_seconds() // 60)),
+                    "长途驾驶过夜休息（住宿需提前预订）",
+                    required=True,
+                )
+            )
+            cursor = next_start
+            driven_today = 0
+    return pieces, overnight_activities, piece_services
+
+
+def _parse_datetime(value: Any) -> datetime | None:
+    try:
+        return datetime.fromisoformat(str(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def _slice_route_geometry(
+    geometry: list[dict[str, Any]],
+    start_fraction: float,
+    end_fraction: float,
+) -> list[dict[str, float]]:
+    """Slice a polyline by normalized distance along its point index."""
+    count = len(geometry)
+    if count < 2:
+        return geometry
+    start_position = max(0.0, min(1.0, start_fraction)) * (count - 1)
+    end_position = max(0.0, min(1.0, end_fraction)) * (count - 1)
+
+    def at(position: float) -> dict[str, float]:
+        left = min(count - 2, max(0, int(position)))
+        fraction = position - left
+        first = geometry[left]
+        second = geometry[left + 1]
+        return {
+            "longitude": float(first["longitude"])
+            + (float(second["longitude"]) - float(first["longitude"])) * fraction,
+            "latitude": float(first["latitude"])
+            + (float(second["latitude"]) - float(first["latitude"])) * fraction,
+        }
+
+    result = [at(start_position)]
+    for index in range(int(start_position) + 1, int(end_position) + 1):
+        if index < count - 1:
+            result.append(
+                {
+                    "longitude": float(geometry[index]["longitude"]),
+                    "latitude": float(geometry[index]["latitude"]),
+                }
+            )
+    result.append(at(end_position))
+    deduped: list[dict[str, float]] = []
+    for point in result:
+        if not deduped or point != deduped[-1]:
+            deduped.append(point)
+    return deduped
+
+
+def _overnight_stop_place(
+    stage: dict[str, Any],
+    stage_services: dict[str, list[dict[str, Any]]],
+    coordinate: dict[str, Any],
+    number: int,
+) -> dict[str, Any]:
+    for category in ("overnight_hotel", "hotel", "rest"):
+        place = _first_place(stage_services.get(category))
+        if place and place.get("coordinates"):
+            return place
+    return {
+        "id": f"route_overnight_{stage.get('id', 'stage')}_{number}",
+        "name": f"沿途住宿点 {number}（需预订）",
+        "address": "按实时导航在路线附近选择可入住酒店",
+        "city": (stage.get("origin") or {}).get("city")
+        or (stage.get("destination") or {}).get("city"),
+        "coordinates": {
+            "longitude": float(coordinate["longitude"]),
+            "latitude": float(coordinate["latitude"]),
+        },
+        "source_id": f"route-derived-overnight:{stage.get('id', 'stage')}:{number}",
+    }
 
 
 def verify_deep_drive_plan(
@@ -577,20 +908,30 @@ def _densify_geometry(
     geometry: list[dict[str, Any]],
     minimum_points: int,
 ) -> list[dict[str, float]]:
-    if len(geometry) != 2:
+    if len(geometry) >= minimum_points or len(geometry) < 2:
         return geometry
-    start, end = geometry
-    return [
-        {
-            "longitude": float(start["longitude"]) + (
-                float(end["longitude"]) - float(start["longitude"])
-            ) * index / (minimum_points - 1),
-            "latitude": float(start["latitude"]) + (
-                float(end["latitude"]) - float(start["latitude"])
-            ) * index / (minimum_points - 1),
-        }
+    # Provider geometries are often simplified to only two or three points
+    # for a long leg.  Interpolate by point index for any short polyline so
+    # each safety break can snap to a distinct route vertex.
+    positions = [
+        index * (len(geometry) - 1) / (minimum_points - 1)
         for index in range(minimum_points)
     ]
+    dense: list[dict[str, float]] = []
+    for position in positions:
+        left = min(len(geometry) - 2, max(0, int(position)))
+        fraction = position - left
+        first = geometry[left]
+        second = geometry[left + 1]
+        dense.append(
+            {
+                "longitude": float(first["longitude"])
+                + (float(second["longitude"]) - float(first["longitude"])) * fraction,
+                "latitude": float(first["latitude"])
+                + (float(second["latitude"]) - float(first["latitude"])) * fraction,
+            }
+        )
+    return dense
 
 
 def _select_break_places(

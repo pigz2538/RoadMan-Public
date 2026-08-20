@@ -250,6 +250,68 @@ def test_tied_service_points_do_not_crash_long_drive_split():
     assert len(enriched[0]["stages"]) == 3
 
 
+def test_cross_day_drive_is_distributed_to_calendar_days_with_overnight_hotel():
+    """A 18-hour intercity drive cannot remain on day one as one giant leg."""
+    stage = _stage()
+    stage["duration_minutes"] = 1080
+    stage["planned_start"] = datetime(2026, 8, 1, 8, 0, tzinfo=SHANGHAI).isoformat()
+    stage["planned_end"] = datetime(2026, 8, 2, 2, 0, tzinfo=SHANGHAI).isoformat()
+    stage["route_segments"][0]["duration_minutes"] = 1080
+    stage["route_segments"][0]["coordinates"] = [
+        {"longitude": 114.3 + index * 0.25, "latitude": 30.5 - index * 0.1}
+        for index in range(9)
+    ]
+    plans = [
+        {
+            "id": "day_1",
+            "day_index": 1,
+            "date": "2026-08-01",
+            "title": "第一天",
+            "stages": [stage],
+            "activities": [],
+            "items": [],
+        },
+        {
+            "id": "day_2",
+            "day_index": 2,
+            "date": "2026-08-02",
+            "title": "第二天",
+            "stages": [],
+            "activities": [],
+            "items": [],
+        },
+    ]
+    services = {
+        "stage_long": {
+            "overnight_hotel": [_place("沿途舒适酒店", 115.4)],
+            "charging": [_place("沿途充电站", 115.0)],
+            "rest": [_place("沿途服务区", 115.2)],
+            "meal": [_place("沿途服务区餐厅", 115.2)],
+        }
+    }
+    safe_vehicle = {**_vehicle(), "current_energy_percent": 100, "height_m": 1.7, "mountain_ready": True}
+
+    enriched, _ = enrich_deep_drive_plan(plans, safe_vehicle, services, 120)
+    stages = [stage for day in enriched for stage in day["stages"]]
+    overnight = [
+        activity
+        for day in enriched
+        for activity in day["activities"]
+        if activity["type"] == "hotel"
+    ]
+
+    assert len(stages) >= 10  # calendar split plus 120-minute safety segments
+    assert all(
+        datetime.fromisoformat(item["planned_start"]).date()
+        == datetime.fromisoformat(item["planned_end"]).date()
+        for item in stages
+    )
+    assert any(item["day_id"] == "day_2" for item in stages)
+    assert overnight
+    assert any("过夜" in item["user_note"] for item in overnight)
+    assert all(item["duration_minutes"] <= 120 for item in stages)
+
+
 def test_unreasonable_walking_stage_is_blocked():
     stage = _stage()
     stage["mode"] = "walking"

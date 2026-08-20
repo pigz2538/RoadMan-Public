@@ -20,7 +20,7 @@ RoadMan 已形成从“自然语言需求”到“可确认、可追踪、可编
 - Skill Registry 统一接入高德、Open-Meteo、FlyAI、OpenTripMap、车辆目录和 Ollama；每次调用可审计、可缓存并可降级。
 - 高德路线优先使用真实道路 geometry；驾车不可用时按策略尝试骑行、步行或公共交通，全部失败返回 `ROUTE_UNAVAILABLE`，前端灰色虚线只表示不可用提示。
 - 当前阶段路线高亮，其他路线灰显；地图支持平移/缩放、阶段切换和点选；路线几何跟随地图变换。
-- 每日复核与最终验证由确定性调度和校验器执行，覆盖三餐、住宿、时段、活动冲突、连续驾驶、补能和返程闭环；发现可修复问题时自动重排并循环复核（最多 4 轮），仍无法满足的硬约束才交由用户处理。
+- 每日复核与最终验证由确定性调度和校验器执行，覆盖三餐、住宿、时段、活动冲突、连续驾驶、补能和返程闭环；发现可修复问题时自动重排并循环复核（最多 4 轮），仍无法满足的硬约束才交由用户处理。长途自驾会按每日最多 9 小时拆成跨天路段，在沿途服务区/酒店插入休息与过夜住宿，次日 08:00 再继续，不会把 24 小时以上驾驶压在第一天。
 - 编辑采用 `preview → apply/reject → rollback` 的 PlanPatch 两阶段流程，支持自然语言修改、地图选点、候选景点/酒店/餐饮加入或替换。
 - 规划完成后才能导出 Markdown、HTML、PDF、PPTX、PNG；历史行程从数据库恢复，不重新播放规划动画。
 - 车辆管理支持 CRUD，并提供 `carinfo.catalog` 真实车型搜索；本地车型字段由用户确认后保存。
@@ -70,7 +70,7 @@ load_context
 → discover_services
 → sample_weather
 → review_tourism_suitability
-→ enrich_deep_drive
+→ enrich_deep_drive（每日驾驶上限、服务区/补能、跨天住宿）
 → schedule_tourism
 → review_daily_schedule
 → verify_plan

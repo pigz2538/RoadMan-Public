@@ -352,6 +352,13 @@
       "title": "Max Continuous Drive Minutes",
       "type": "integer"
     },
+    "max_daily_drive_minutes": {
+      "default": 540,
+      "maximum": 900,
+      "minimum": 180,
+      "title": "Max Daily Drive Minutes",
+      "type": "integer"
+    },
     "defaults_applied": {
       "items": {
         "type": "string"

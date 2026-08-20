@@ -230,6 +230,10 @@ class TripRequest(BaseModel):
     stay_only_at_destination: bool = False
     budget: MoneyRange | None = None
     max_continuous_drive_minutes: int = Field(default=120, ge=30)
+    # Daily budget for long-distance self-drive legs.  This is separate from
+    # the shorter continuous-drive limit because a Wuhan→Xinjiang leg must
+    # span calendar days and reserve overnight accommodation.
+    max_daily_drive_minutes: int = Field(default=540, ge=180, le=900)
     defaults_applied: list[str] = Field(default_factory=list)
 
 
