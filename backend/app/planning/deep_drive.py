@@ -346,19 +346,9 @@ def _split_driving_stage(
     start = _parse_datetime(stage.get("planned_start"))
     if start is None:
         return [], [], {}
-    segment = deepcopy((stage.get("route_segments") or [{}])[0])
-    geometry = [
-        point
-        for point in segment.get("coordinates", [])
-        if isinstance(point, dict)
-        and point.get("longitude") is not None
-        and point.get("latitude") is not None
-    ]
-    if len(geometry) < 2:
-        origin = stage.get("origin", {}).get("coordinates")
-        destination = stage.get("destination", {}).get("coordinates")
-        if origin and destination:
-            geometry = [origin, destination]
+    source_segment = _first_route_segment(stage)
+    segment = deepcopy(source_segment)
+    geometry = _stage_geometry(stage)
     if len(geometry) < 2:
         return [], [], {}
 
@@ -551,9 +541,10 @@ def verify_deep_drive_plan(
         issues.append(_issue("VEHICLE_DATA_MISSING", "warning", "车辆数据缺失，能耗只能降级估算"))
     for day in plans:
         for stage in day.get("stages", []):
+            route_segment = _first_route_segment(stage)
             codes = {item["code"] for item in stage.get("warnings", [])}
             movement_minutes = int(
-                stage.get("route_segments", [{}])[0].get(
+                route_segment.get(
                     "duration_minutes",
                     stage.get("duration_minutes", 0),
                 )
@@ -749,9 +740,11 @@ def _split_long_driving_stages(
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     expanded: list[dict[str, Any]] = []
     breaks: list[dict[str, Any]] = []
+    max_minutes = max(1, int(max_minutes or 120))
     for stage in stages:
+        route_segment = _first_route_segment(stage)
         movement_duration = int(
-            stage.get("route_segments", [{}])[0].get(
+            route_segment.get(
                 "duration_minutes",
                 stage.get("duration_minutes", 0),
             )
@@ -760,10 +753,12 @@ def _split_long_driving_stages(
             expanded.append(stage)
             continue
         part_count = ceil(movement_duration / max_minutes)
-        geometry = stage["route_segments"][0].get("coordinates", [])
-        if len(geometry) < part_count + 1:
-            geometry = _densify_geometry(geometry, part_count + 1)
-            stage["route_segments"][0]["coordinates"] = geometry
+        # A route provider may return a simplified/empty polyline for a long
+        # intercity leg.  Always recover the endpoints from the stage before
+        # deciding that the leg cannot be split; otherwise the verifier sees
+        # the original oversized “城市出发” stage and reports a false missing
+        # rest stop.
+        geometry = _stage_geometry(stage, minimum_points=part_count + 1)
         if len(geometry) < 2:
             expanded.append(stage)
             continue
@@ -794,12 +789,25 @@ def _split_long_driving_stages(
                 part_count - 1,
             )
 
+        # ``_fill_planned_rest_points`` intentionally de-duplicates POIs that
+        # snap to the same route vertex.  Keep a final guard here as well: a
+        # duplicate index would create non-increasing boundaries and used to
+        # silently return the unsplit stage.
+        if len(selected) != part_count - 1:
+            selected = _fill_planned_rest_points(stage, [], part_count - 1)
+        if len(selected) != part_count - 1:
+            expanded.append(stage)
+            continue
+
         split_indexes = [
             _nearest_geometry_index(geometry, place["coordinates"])
             for _, place in selected
         ]
         boundaries = [0, *split_indexes, len(geometry) - 1]
-        if any(second <= first for first, second in zip(boundaries, boundaries[1:])):
+        if (
+            len(set(split_indexes)) != len(split_indexes)
+            or any(second <= first for first, second in zip(boundaries, boundaries[1:]))
+        ):
             expanded.append(stage)
             continue
 
@@ -842,6 +850,20 @@ def _split_long_driving_stages(
                     float(piece["energy_estimate"]["amount"]) / part_count,
                     1,
                 )
+            if index < part_count - 1:
+                piece_warnings = list(piece.get("warnings", []))
+                piece_warnings.append(
+                    _warning(
+                        "REST_STOP_SCHEDULED",
+                        "已按路线插入驾驶休息/补能停靠点",
+                        "warning",
+                        True,
+                    )
+                )
+                piece["warnings"] = _dedupe_warnings(piece_warnings)
+                piece["risk_tags"] = list(
+                    dict.fromkeys([*piece.get("risk_tags", []), "连续驾驶"])
+                )
             expanded.append(piece)
             if index < part_count - 1:
                 kind, place = selected[index]
@@ -870,21 +892,45 @@ def _fill_planned_rest_points(
     count: int,
 ) -> list[tuple[str, dict[str, Any]]]:
     """Use route-bound safety break nodes when providers return too few facilities."""
-    geometry = stage.get("route_segments", [{}])[0].get("coordinates", [])
-    indexed = [
-        (_nearest_geometry_index(geometry, place["coordinates"]), kind, place)
-        for kind, place in selected
+    if count <= 0:
+        return []
+    geometry = _stage_geometry(stage, minimum_points=count + 2)
+    if len(geometry) < 2:
+        return selected[:count]
+
+    # Keep at most one facility per route vertex.  AMap often returns several
+    # nearby service POIs with identical coordinates; counting all of them
+    # made the old implementation stop before creating synthetic breaks.
+    indexed_by_route_index: dict[int, tuple[str, dict[str, Any]]] = {}
+    used_names: set[str] = set()
+    for kind, place in selected:
+        coordinates = _coordinate_pair(place.get("coordinates"))
+        if not coordinates:
+            continue
+        index = _nearest_geometry_index(geometry, coordinates)
+        if not 0 < index < len(geometry) - 1:
+            continue
+        name = str(place.get("name") or "")
+        if index in indexed_by_route_index or (name and name in used_names):
+            continue
+        indexed_by_route_index[index] = (kind, place)
+        if name:
+            used_names.add(name)
+
+    used_indexes = set(indexed_by_route_index)
+    targets = [
+        round((len(geometry) - 1) * number / (count + 1))
+        for number in range(1, count + 1)
     ]
-    used_indexes = {item[0] for item in indexed}
-    for number in range(1, count + 1):
-        if len(indexed) >= count:
+    for number, target in enumerate(targets, start=1):
+        if len(indexed_by_route_index) >= count:
             break
-        target = round((len(geometry) - 1) * number / (count + 1))
-        if target in used_indexes:
+        target = _nearest_free_interior_index(target, len(geometry), used_indexes)
+        if target is None:
             continue
         point = geometry[target]
         place = {
-            "id": f"rest_{stage['id']}_{number}",
+            "id": f"rest_{stage.get('id', 'stage')}_{number}",
             "name": f"沿途计划休息点 {number}",
             "address": "按实时导航选择附近服务区或可安全停车区域",
             "city": stage.get("origin", {}).get("city") or stage.get("destination", {}).get("city"),
@@ -892,16 +938,104 @@ def _fill_planned_rest_points(
                 "longitude": float(point["longitude"]),
                 "latitude": float(point["latitude"]),
             },
-            "source_id": f"route-derived:{stage['id']}:{number}",
+            "source_id": f"route-derived:{stage.get('id', 'stage')}:{number}",
         }
-        indexed.append((target, "rest", place))
+        indexed_by_route_index[target] = ("rest", place)
         used_indexes.add(target)
+
+    # If a provider gave an unusually short/duplicated geometry, fill any
+    # remaining interior vertices deterministically after densification.
+    if len(indexed_by_route_index) < count:
+        for target in range(1, len(geometry) - 1):
+            if len(indexed_by_route_index) >= count:
+                break
+            if target in used_indexes:
+                continue
+            point = geometry[target]
+            number = len(indexed_by_route_index) + 1
+            indexed_by_route_index[target] = (
+                "rest",
+                {
+                    "id": f"rest_{stage.get('id', 'stage')}_{number}",
+                    "name": f"沿途计划休息点 {number}",
+                    "address": "按实时导航选择附近服务区或可安全停车区域",
+                    "city": stage.get("origin", {}).get("city") or stage.get("destination", {}).get("city"),
+                    "coordinates": {
+                        "longitude": float(point["longitude"]),
+                        "latitude": float(point["latitude"]),
+                    },
+                    "source_id": f"route-derived:{stage.get('id', 'stage')}:{number}",
+                },
+            )
+            used_indexes.add(target)
+
     # Multiple service POIs can project onto the same route geometry point.
     # Sort only by the numeric route index; comparing the nested place dicts
     # on a tie raises ``TypeError: '<' not supported between instances of
     # 'dict' and 'dict'`` and aborts otherwise valid long-distance plans.
-    ordered = sorted(indexed, key=lambda item: item[0])
-    return [(kind, place) for _, kind, place in ordered[:count]]
+    ordered = sorted(indexed_by_route_index.items(), key=lambda item: item[0])
+    return [item for _, item in ordered[:count]]
+
+
+def _first_route_segment(stage: dict[str, Any]) -> dict[str, Any]:
+    segments = stage.get("route_segments")
+    if not isinstance(segments, list) or not segments or not isinstance(segments[0], dict):
+        stage["route_segments"] = [{}]
+        return stage["route_segments"][0]
+    return segments[0]
+
+
+def _coordinate_pair(value: Any) -> dict[str, float] | None:
+    if not isinstance(value, dict):
+        return None
+    longitude = value.get("longitude", value.get("lng"))
+    latitude = value.get("latitude", value.get("lat"))
+    try:
+        return {"longitude": float(longitude), "latitude": float(latitude)}
+    except (TypeError, ValueError):
+        return None
+
+
+def _stage_geometry(
+    stage: dict[str, Any],
+    *,
+    minimum_points: int = 2,
+) -> list[dict[str, float]]:
+    """Return a valid route polyline, recovering endpoints when needed."""
+    segment = _first_route_segment(stage)
+    geometry = [
+        coordinates
+        for point in (segment.get("coordinates") or [])
+        if (coordinates := _coordinate_pair(point)) is not None
+    ]
+    if len(geometry) < 2:
+        origin = _coordinate_pair((stage.get("origin") or {}).get("coordinates"))
+        destination = _coordinate_pair((stage.get("destination") or {}).get("coordinates"))
+        if origin and destination:
+            geometry = [origin, destination]
+        elif origin:
+            geometry = [origin, dict(origin)]
+        elif destination:
+            geometry = [dict(destination), destination]
+    if len(geometry) < 2:
+        return []
+    geometry = _densify_geometry(geometry, max(2, minimum_points))
+    segment["coordinates"] = geometry
+    return geometry
+
+
+def _nearest_free_interior_index(
+    target: int,
+    geometry_length: int,
+    used_indexes: set[int],
+) -> int | None:
+    if geometry_length <= 2:
+        return None
+    interior = range(1, geometry_length - 1)
+    choices = [index for index in interior if index not in used_indexes]
+    if not choices:
+        return None
+    return min(choices, key=lambda index: (abs(index - target), index))
 
 
 def _densify_geometry(

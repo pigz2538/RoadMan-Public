@@ -3181,10 +3181,30 @@ def build_planning_graph(
             code in {"ROUTE_DISCONTINUITY", "ROUTE_NOT_CLOSED", "EMPTY_DAY_STAGES"}
             for code in issue_codes
         )
+        repair_drive_constraints = rebuild_route or any(
+            code in {"CONTINUOUS_DRIVE", "ENERGY_UNSAFE"}
+            for code in issue_codes
+        )
         repair_input_days = state.get("day_plans", [])
         if rebuild_route:
             rebuilt = await build_stages(state)
             repair_input_days = rebuilt.get("day_plans", repair_input_days)
+        drive_warnings: list[dict[str, Any]] = []
+        if repair_drive_constraints:
+            # A verification blocker such as “城市出发 缺少驾驶休息” is a
+            # planner defect, not a traveller-facing clarification.  Re-run
+            # the driving/energy pass during the repair loop so long legs are
+            # split again after any route rebuild and route-derived safety
+            # stops are materialized before the next verification pass.
+            repair_input_days, drive_warnings = enrich_deep_drive_plan(
+                repair_input_days,
+                state.get("vehicle_profile") or default_vehicle(),
+                state.get("service_pois", {}),
+                int(state["trip_request"].get("max_continuous_drive_minutes") or 120),
+                max_daily_drive_minutes=int(
+                    state["trip_request"].get("max_daily_drive_minutes") or 540
+                ),
+            )
         repaired_days = schedule_tourism_activities(
             repair_input_days,
             state.get("tourism_candidates", {}),
@@ -3202,6 +3222,7 @@ def build_planning_graph(
             "repair_attempted": True,
             "warnings": [
                 *state.get("warnings", []),
+                *drive_warnings,
                 *review_notes,
                 {
                     "code": "AUTO_REPAIR_ATTEMPTED",

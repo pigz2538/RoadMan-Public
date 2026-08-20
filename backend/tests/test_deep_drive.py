@@ -250,6 +250,88 @@ def test_tied_service_points_do_not_crash_long_drive_split():
     assert len(enriched[0]["stages"]) == 3
 
 
+def test_long_city_departure_recovers_from_missing_geometry_and_inserts_rest_points():
+    """A sparse provider polyline must not leave an oversized city departure."""
+    stage = _stage()
+    stage["duration_minutes"] = 360
+    stage["planned_end"] = datetime(2026, 8, 1, 15, 0, tzinfo=SHANGHAI).isoformat()
+    stage["route_segments"][0]["duration_minutes"] = 360
+    stage["route_segments"][0]["coordinates"] = []
+    vehicle = {
+        "power_type": "fuel",
+        "current_energy_percent": 100,
+        "rated_range_km": 10000,
+        "consumption_per_100km": 7.5,
+        "safe_energy_reserve_percent": 15,
+        "height_m": 1.7,
+        "mountain_ready": True,
+    }
+    plans = [
+        {
+            "id": "day_1",
+            "day_index": 1,
+            "date": "2026-08-01",
+            "title": "第一天",
+            "stages": [stage],
+            "activities": [],
+            "items": [],
+        }
+    ]
+
+    enriched, _ = enrich_deep_drive_plan(plans, vehicle, {}, 120)
+    stages = enriched[0]["stages"]
+
+    assert len(stages) == 3
+    assert all(item["duration_minutes"] <= 120 for item in stages)
+    assert len([item for item in enriched[0]["activities"] if item["type"] == "rest"]) >= 2
+    assert not any(
+        item["code"] == "CONTINUOUS_DRIVE"
+        for item in verify_deep_drive_plan(enriched, vehicle, 120)
+    )
+
+
+def test_cross_day_city_departure_with_sparse_geometry_is_split_before_verification():
+    """The Wuhan→Xinjiang-shaped long leg is safe even without provider points."""
+    stage = _stage()
+    stage["duration_minutes"] = 1800
+    stage["planned_start"] = datetime(2026, 8, 1, 8, 0, tzinfo=SHANGHAI).isoformat()
+    stage["planned_end"] = datetime(2026, 8, 2, 14, 0, tzinfo=SHANGHAI).isoformat()
+    stage["route_segments"][0]["duration_minutes"] = 1800
+    stage["route_segments"][0]["coordinates"] = []
+    vehicle = {
+        "power_type": "fuel",
+        "current_energy_percent": 100,
+        "rated_range_km": 10000,
+        "consumption_per_100km": 7.5,
+        "safe_energy_reserve_percent": 15,
+        "height_m": 1.7,
+        "mountain_ready": True,
+    }
+    plans = [
+        {
+            "id": f"day_{index}",
+            "day_index": index,
+            "date": f"2026-08-{index:02d}",
+            "title": f"第 {index} 天",
+            "stages": [stage] if index == 1 else [],
+            "activities": [],
+            "items": [],
+        }
+        for index in range(1, 7)
+    ]
+
+    enriched, _ = enrich_deep_drive_plan(plans, vehicle, {}, 120)
+    stages = [item for day in enriched for item in day["stages"]]
+
+    assert len(stages) >= 8
+    assert all(item["duration_minutes"] <= 120 for item in stages)
+    assert any(item["day_id"] == "day_2" for item in stages)
+    assert not any(
+        item["code"] == "CONTINUOUS_DRIVE"
+        for item in verify_deep_drive_plan(enriched, vehicle, 120)
+    )
+
+
 def test_cross_day_drive_is_distributed_to_calendar_days_with_overnight_hotel():
     """A 18-hour intercity drive cannot remain on day one as one giant leg."""
     stage = _stage()
