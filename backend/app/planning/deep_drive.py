@@ -84,6 +84,20 @@ def enrich_deep_drive_plan(
                 stage_services = service_pois.get(stage["id"], {})
                 if needs_energy:
                     stop_place = _first_place(stage_services.get(stop_type))
+                    energy_stop_estimated = False
+                    if not stop_place:
+                        # A provider outage or a sparse corridor must not make
+                        # an otherwise schedulable cross-city trip fail after
+                        # four identical repair passes.  Insert a clearly
+                        # labelled route-derived candidate and keep the
+                        # uncertainty visible as a warning; the traveller can
+                        # confirm the actual charger/fuel station before
+                        # departure.
+                        stop_place = _route_derived_stop_place(stage, stop_type)
+                        energy_stop_estimated = stop_place is not None
+                        if stop_place:
+                            stage_services.setdefault(stop_type, []).insert(0, stop_place)
+                            service_pois.setdefault(stage["id"], stage_services)
                     if stop_place:
                         stop_minutes = 30 if power_type == "electric" else 15
                         stage["waypoints"].append(stop_place)
@@ -95,14 +109,21 @@ def enrich_deep_drive_plan(
                         stage["energy_estimate"]["remaining_percent"] = round(projected, 1)
                         stage_warnings.append(
                             _warning(
-                                "ENERGY_STOP_SCHEDULED",
-                                f"预计低于 {reserve:.0f}% 安全余量，已插入"
-                                f"{'充电' if power_type == 'electric' else '加油'}点",
+                                "ENERGY_STOP_ESTIMATED"
+                                if energy_stop_estimated
+                                else "ENERGY_STOP_SCHEDULED",
+                                (
+                                    f"预计低于 {reserve:.0f}% 安全余量，沿途补能点暂未返回，"
+                                    "已插入路线估算点；出发前请确认实际可用性"
+                                    if energy_stop_estimated
+                                    else f"预计低于 {reserve:.0f}% 安全余量，已插入"
+                                    f"{'充电' if power_type == 'electric' else '加油'}点"
+                                ),
                                 "warning",
                                 True,
                             )
                         )
-                        risk_tags.append("补能")
+                        risk_tags.append("补能待确认" if energy_stop_estimated else "补能")
                     else:
                         stage_warnings.append(
                             _warning(
@@ -210,8 +231,11 @@ def enrich_deep_drive_plan(
             activities = [
                 item
                 for item in activities
-                if item.get("type") != "rest"
-                and (item.get("type"), item.get("place", {}).get("name")) not in replacement_keys
+                if not (
+                    item.get("type") in {"rest", "charging", "fueling"}
+                    and (item.get("type"), item.get("place", {}).get("name"))
+                    in replacement_keys
+                )
             ]
         activities = _dedupe_activities([*activities, *break_activities])
         activities = _ensure_daily_meals(day, activities, service_pois)
@@ -773,7 +797,10 @@ def _split_long_driving_stages(
         energy_candidates = [item for item in candidates if item[0] == energy_kind]
         selected = (
             _select_break_places(stage, energy_candidates, 1)
-            if "ENERGY_STOP_SCHEDULED" in warning_codes and energy_candidates
+            if warning_codes.intersection(
+                {"ENERGY_STOP_SCHEDULED", "ENERGY_STOP_ESTIMATED"}
+            )
+            and energy_candidates
             else []
         )
         if len(selected) < part_count - 1:
@@ -1036,6 +1063,32 @@ def _nearest_free_interior_index(
     if not choices:
         return None
     return min(choices, key=lambda index: (abs(index - target), index))
+
+
+def _route_derived_stop_place(
+    stage: dict[str, Any],
+    stop_type: str,
+) -> dict[str, Any] | None:
+    """Create an estimated energy stop when the corridor search is empty."""
+    geometry = _stage_geometry(stage, minimum_points=3)
+    if len(geometry) < 2:
+        return None
+    index = max(1, min(len(geometry) - 2, round((len(geometry) - 1) / 2)))
+    point = geometry[index]
+    label = "充电点" if stop_type == "charging" else "加油点"
+    return {
+        "id": f"route_estimated_{stop_type}_{stage.get('id', 'stage')}",
+        "name": f"沿途估算{label}（需确认）",
+        "address": "路线估算位置；出发前请通过导航确认实际营业与可用状态",
+        "city": (stage.get("origin") or {}).get("city")
+        or (stage.get("destination") or {}).get("city"),
+        "coordinates": {
+            "longitude": float(point["longitude"]),
+            "latitude": float(point["latitude"]),
+        },
+        "source_id": f"route-derived-energy:{stage.get('id', 'stage')}:{stop_type}",
+        "estimated": True,
+    }
 
 
 def _densify_geometry(

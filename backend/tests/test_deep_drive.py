@@ -105,7 +105,7 @@ def test_vehicle_weather_and_schedule_agents_insert_required_stops_and_risks():
     assert verify_deep_drive_plan(enriched, _vehicle(), 120) == []
 
 
-def test_verification_blocks_when_required_energy_stop_is_unavailable():
+def test_missing_energy_provider_degrades_to_an_estimated_route_stop():
     plans = [
         {
             "id": "day_1",
@@ -121,9 +121,17 @@ def test_verification_blocks_when_required_energy_stop_is_unavailable():
     enriched, _ = enrich_deep_drive_plan(plans, _vehicle(), {}, 120)
     issues = verify_deep_drive_plan(enriched, _vehicle(), 120)
 
-    assert any(item["code"] == "ENERGY_UNSAFE" and item["severity"] == "blocker" for item in issues)
+    assert not any(item["code"] == "ENERGY_UNSAFE" for item in issues)
     assert not any(item["code"] == "CONTINUOUS_DRIVE" for item in issues)
-    assert any(item["type"] == "rest" for item in enriched[0]["activities"])
+    assert any(item["type"] == "charging" for item in enriched[0]["activities"])
+    assert any(
+        item["type"] in {"rest", "charging", "fueling"}
+        for item in enriched[0]["activities"]
+    )
+    assert any(
+        item["code"] == "ENERGY_STOP_ESTIMATED"
+        for item in enriched[0]["stages"][0]["warnings"]
+    )
 
 
 def test_noncritical_service_and_weather_failures_degrade_without_blocking():
@@ -258,11 +266,7 @@ def test_long_city_departure_recovers_from_missing_geometry_and_inserts_rest_poi
     stage["route_segments"][0]["duration_minutes"] = 360
     stage["route_segments"][0]["coordinates"] = []
     vehicle = {
-        "power_type": "fuel",
-        "current_energy_percent": 100,
-        "rated_range_km": 10000,
-        "consumption_per_100km": 7.5,
-        "safe_energy_reserve_percent": 15,
+        **_vehicle(),
         "height_m": 1.7,
         "mountain_ready": True,
     }
@@ -283,7 +287,13 @@ def test_long_city_departure_recovers_from_missing_geometry_and_inserts_rest_poi
 
     assert len(stages) == 3
     assert all(item["duration_minutes"] <= 120 for item in stages)
-    assert len([item for item in enriched[0]["activities"] if item["type"] == "rest"]) >= 2
+    assert len(
+        [
+            item
+            for item in enriched[0]["activities"]
+            if item["type"] in {"rest", "charging", "fueling"}
+        ]
+    ) >= 2
     assert not any(
         item["code"] == "CONTINUOUS_DRIVE"
         for item in verify_deep_drive_plan(enriched, vehicle, 120)
@@ -299,11 +309,7 @@ def test_cross_day_city_departure_with_sparse_geometry_is_split_before_verificat
     stage["route_segments"][0]["duration_minutes"] = 1800
     stage["route_segments"][0]["coordinates"] = []
     vehicle = {
-        "power_type": "fuel",
-        "current_energy_percent": 100,
-        "rated_range_km": 10000,
-        "consumption_per_100km": 7.5,
-        "safe_energy_reserve_percent": 15,
+        **_vehicle(),
         "height_m": 1.7,
         "mountain_ready": True,
     }
