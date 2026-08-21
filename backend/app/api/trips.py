@@ -965,8 +965,23 @@ async def start_planning(
     pending_state = await repo.load_planning_state(trip_id) or {}
     if isinstance(pending_state.get("pending_replan"), dict):
         raise AppError("REPLAN_CONFIRMATION_REQUIRED", "请先确认修改，再开始重新规划", 409)
+    # Clear stale run-scoped diagnostics before the worker reaches its first
+    # graph node. Otherwise polling this endpoint exposes the previous run's
+    # 99%/ENERGY_UNSAFE result and makes a fresh run look blocked.
+    pending_state.update(
+        {
+            "warnings": [],
+            "verification_result": None,
+            "error": None,
+            "progress": {"node": "queued", "value": 0},
+            "plan_markdown": None,
+            "repair_attempts": 0,
+            "repair_attempted": False,
+        }
+    )
     trip.status = TripStatus.planning
-    await repo.save(trip)
+    trip.warnings = []
+    await repo.save_planning_result(trip, pending_state, None)
     job = await JobRepository(session).create(
         JobCreate(kind="planning", trip_id=trip_id, payload={"trip_id": trip_id})
     )

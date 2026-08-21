@@ -59,6 +59,20 @@ async def run_planning(
                 "repair_attempted": False,
                 "planning_batch_id": batch_id,
             }
+            # A new run must not expose the previous run's verification
+            # blockers while the graph is still querying providers. Keeping
+            # those fields made the UI show an old ENERGY_UNSAFE/99% snapshot
+            # and made a fresh repair look stuck. Preserve user context, but
+            # clear run-scoped diagnostics before the first graph node.
+            state.update(
+                {
+                    "warnings": [],
+                    "verification_result": None,
+                    "error": None,
+                    "progress": {"node": "queued", "value": 0},
+                    "plan_markdown": None,
+                }
+            )
             if trip.selected_vehicle_id:
                 vehicle = await VehicleRepository(session).get(trip.selected_vehicle_id)
                 state["vehicle_profile"] = (
