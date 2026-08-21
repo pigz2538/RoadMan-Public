@@ -134,6 +134,42 @@ def test_missing_energy_provider_degrades_to_an_estimated_route_stop():
     )
 
 
+def test_repair_clears_stale_energy_unavailable_after_route_stop_is_available():
+    """A failed repair must not keep blocking after the fallback is inserted."""
+    stage = _stage()
+    stage["id"] = "城市出发（跨天第1段） · 第 1/5 段"
+    stage["title"] = stage["id"]
+    stage["warnings"] = [
+        {
+            "code": "ENERGY_STOP_UNAVAILABLE",
+            "message": "预计能量不足且沿途补能点查询失败，请人工确认",
+            "severity": "error",
+            "estimated": True,
+        }
+    ]
+    plans = [
+        {
+            "id": "day_1",
+            "day_index": 1,
+            "date": "2026-08-24",
+            "title": "第 1 天",
+            "stages": [stage],
+            "activities": [],
+            "items": [],
+        }
+    ]
+
+    enriched, _ = enrich_deep_drive_plan(plans, _vehicle(), {}, 120)
+    stage_after_repair = enriched[0]["stages"][0]
+    warning_codes = {item["code"] for item in stage_after_repair["warnings"]}
+    issues = verify_deep_drive_plan(enriched, _vehicle(), 120)
+
+    assert "ENERGY_STOP_UNAVAILABLE" not in warning_codes
+    assert "ENERGY_STOP_ESTIMATED" in warning_codes
+    assert not any(item["code"] == "ENERGY_UNSAFE" for item in issues)
+    assert any(item["type"] == "charging" for item in enriched[0]["activities"])
+
+
 def test_noncritical_service_and_weather_failures_degrade_without_blocking():
     stage = _stage()
     stage["distance_km"] = 20

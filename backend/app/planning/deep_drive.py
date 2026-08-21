@@ -99,6 +99,17 @@ def enrich_deep_drive_plan(
                             stage_services.setdefault(stop_type, []).insert(0, stop_place)
                             service_pois.setdefault(stage["id"], stage_services)
                     if stop_place:
+                        # A repair pass may receive the stage snapshot from a
+                        # previous failed attempt.  In that case the old
+                        # provider error can still be present even though a
+                        # real or route-derived stop is now available.  Keep
+                        # only the current resolution state; otherwise the
+                        # verifier would keep emitting ENERGY_UNSAFE forever.
+                        stage_warnings = [
+                            item
+                            for item in stage_warnings
+                            if item.get("code") != "ENERGY_STOP_UNAVAILABLE"
+                        ]
                         stop_minutes = 30 if power_type == "electric" else 15
                         stage["waypoints"].append(stop_place)
                         current_percent = 80.0
