@@ -950,3 +950,135 @@ async def test_flyai_ferry_adapter_marks_semantic_schedule_estimated(monkeypatch
     assert result.data["estimated_schedule"] is True
     assert result.data["items"][0]["departure_at"].endswith("08:30:00")
     assert result.data["items"][0]["estimated"] is True
+
+
+def test_tourism_scheduler_keeps_three_meals_on_long_drive_day():
+    """A long driving day must not stop the planning loop at meal review."""
+    day = {
+        "id": "day_long_drive",
+        "title": "第 1 天",
+        "date": "2026-08-24",
+        "items": [],
+        "activities": [
+            {
+                "id": "breakfast_existing",
+                "day_id": "day_long_drive",
+                "sequence": 0,
+                "type": "meal",
+                "place": {"name": "出发地附近早餐", "city": "武汉"},
+                "planned_start": "2026-08-24T07:15:00+08:00",
+                "planned_end": "2026-08-24T08:00:00+08:00",
+                "duration_minutes": 45,
+            },
+            {
+                "id": "rest_1",
+                "day_id": "day_long_drive",
+                "sequence": 1,
+                "type": "rest",
+                "place": {"name": "服务区休息", "city": "孝感"},
+                "planned_start": "2026-08-24T09:48:00+08:00",
+                "planned_end": "2026-08-24T10:08:00+08:00",
+            },
+            {
+                "id": "rest_2",
+                "day_id": "day_long_drive",
+                "sequence": 2,
+                "type": "rest",
+                "place": {"name": "服务区休息", "city": "信阳"},
+                "planned_start": "2026-08-24T11:56:00+08:00",
+                "planned_end": "2026-08-24T12:16:00+08:00",
+            },
+            {
+                "id": "charge_1",
+                "day_id": "day_long_drive",
+                "sequence": 3,
+                "type": "charging",
+                "place": {"name": "服务区充电", "city": "驻马店"},
+                "planned_start": "2026-08-24T14:04:00+08:00",
+                "planned_end": "2026-08-24T14:34:00+08:00",
+            },
+            {
+                "id": "rest_3",
+                "day_id": "day_long_drive",
+                "sequence": 4,
+                "type": "rest",
+                "place": {"name": "服务区休息", "city": "漯河"},
+                "planned_start": "2026-08-24T16:22:00+08:00",
+                "planned_end": "2026-08-24T16:42:00+08:00",
+            },
+            {
+                "id": "hotel_existing",
+                "day_id": "day_long_drive",
+                "sequence": 5,
+                "type": "hotel",
+                "place": {"name": "哈尔滨舒适酒店", "city": "哈尔滨"},
+                "planned_start": "2026-08-24T18:30:00+08:00",
+                "planned_end": "2026-08-25T09:30:00+08:00",
+            },
+        ],
+        "stages": [
+            {
+                "id": "drive_1",
+                "sequence": 0,
+                "mode": "driving",
+                "origin": {"name": "武汉"},
+                "destination": {"name": "孝感"},
+                "planned_start": "2026-08-24T08:00:00+08:00",
+                "planned_end": "2026-08-24T09:48:00+08:00",
+            },
+            {
+                "id": "drive_2",
+                "sequence": 1,
+                "mode": "driving",
+                "origin": {"name": "孝感"},
+                "destination": {"name": "信阳"},
+                "planned_start": "2026-08-24T10:08:00+08:00",
+                "planned_end": "2026-08-24T11:56:00+08:00",
+            },
+            {
+                "id": "drive_3",
+                "sequence": 2,
+                "mode": "driving",
+                "origin": {"name": "信阳"},
+                "destination": {"name": "驻马店"},
+                "planned_start": "2026-08-24T12:16:00+08:00",
+                "planned_end": "2026-08-24T14:04:00+08:00",
+            },
+            {
+                "id": "drive_4",
+                "sequence": 3,
+                "mode": "driving",
+                "origin": {"name": "驻马店"},
+                "destination": {"name": "漯河"},
+                "planned_start": "2026-08-24T14:34:00+08:00",
+                "planned_end": "2026-08-24T16:22:00+08:00",
+            },
+            {
+                "id": "drive_5",
+                "sequence": 4,
+                "mode": "driving",
+                "origin": {"name": "漯河"},
+                "destination": {"name": "许昌"},
+                "planned_start": "2026-08-24T16:42:00+08:00",
+                "planned_end": "2026-08-24T18:30:00+08:00",
+            },
+        ],
+    }
+
+    scheduled = schedule_tourism_activities(
+        [day],
+        {"attractions": [], "hotels": [], "meals": []},
+    )
+    meals = [item for item in scheduled[0]["activities"] if item["type"] == "meal"]
+
+    assert len(meals) == 3
+    lunch = next(item for item in meals if "午餐" in (item.get("user_note") or ""))
+    dinner = next(item for item in meals if "晚餐" in (item.get("user_note") or ""))
+    assert lunch["in_transit"] is True
+    assert dinner["in_transit"] is True
+    assert lunch["planned_start"].startswith("2026-08-24T11:")
+    assert dinner["planned_start"].startswith(("2026-08-24T17:", "2026-08-24T18:"))
+    assert not any(
+        issue["code"] == "DAILY_MEALS_INCOMPLETE"
+        for issue in verify_tourism_plan(scheduled, {"attractions": [], "hotels": [], "meals": []})
+    )

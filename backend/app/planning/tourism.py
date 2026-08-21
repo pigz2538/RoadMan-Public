@@ -831,6 +831,122 @@ def _apply_confirmed_additions(
         meal["user_note"] = candidate.get("user_note") or "用户已确认的餐饮安排"
 
 
+def _meal_fallback_slot(
+    day_date,
+    window_start: time,
+    window_end: time,
+    preferred_time: time,
+    stages: list[dict[str, Any]],
+    activities: list[dict[str, Any]],
+) -> tuple[datetime, int, str] | None:
+    """Find a truthful meal slot when the normal free-gap search is full.
+
+    Long intercity legs are intentionally split by rest, charging and service
+    stops.  A meal can happen during one of those stops, or as a simple
+    onboard/waypoint meal during a movement stage.  Returning the fallback
+    kind lets the UI explain why no extra route segment was created.
+    """
+    window_start_at = datetime.combine(day_date, window_start, tzinfo=SHANGHAI)
+    window_end_at = datetime.combine(day_date, window_end, tzinfo=SHANGHAI)
+    preferred_at = datetime.combine(day_date, preferred_time, tzinfo=SHANGHAI)
+
+    def overlap(
+        start_at: datetime,
+        end_at: datetime,
+    ) -> tuple[datetime, datetime] | None:
+        clipped_start = max(start_at, window_start_at)
+        clipped_end = min(end_at, window_end_at)
+        if clipped_end <= clipped_start:
+            return None
+        return clipped_start, clipped_end
+
+    def choose(
+        ranges: list[tuple[datetime, datetime]],
+        *,
+        minimum_minutes: int,
+        preferred_duration: int,
+    ) -> tuple[datetime, int] | None:
+        options: list[tuple[float, datetime, int]] = []
+        for start_at, end_at in ranges:
+            available = int((end_at - start_at).total_seconds() // 60)
+            if available < minimum_minutes:
+                continue
+            duration = min(preferred_duration, available)
+            latest_start = end_at - timedelta(minutes=duration)
+            candidate_start = min(max(preferred_at, start_at), latest_start)
+            options.append(
+                (
+                    abs((candidate_start - preferred_at).total_seconds()),
+                    candidate_start,
+                    duration,
+                )
+            )
+        if not options:
+            return None
+        _, start_at, duration = min(options, key=lambda item: item[0])
+        return start_at, duration
+
+    # Prefer an explicitly planned rest/charging/fuelling/service break.  A
+    # 15–20 minute stop is intentionally accepted: it is more honest and
+    # useful than reporting that the day has no lunch at all.
+    stop_ranges: list[tuple[datetime, datetime]] = []
+    for activity in activities:
+        if activity.get("type") not in {
+            "rest",
+            "charging",
+            "fueling",
+            "service",
+            "break",
+        }:
+            continue
+        try:
+            start_at = datetime.fromisoformat(activity["planned_start"])
+            end_at = datetime.fromisoformat(activity["planned_end"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        clipped = overlap(start_at, end_at)
+        if clipped is not None:
+            stop_ranges.append(clipped)
+    selected = choose(stop_ranges, minimum_minutes=15, preferred_duration=30)
+    if selected is not None:
+        return (*selected, "stop")
+
+    # If no break overlaps the meal window, place a short onboard/waypoint
+    # meal inside a movement stage that does.  Include all modes produced by
+    # the transport agents, not only the original driving/train set.
+    movement_modes = {
+        "driving",
+        "car",
+        "train",
+        "flight",
+        "ferry",
+        "transit",
+        "bus",
+        "subway",
+        "metro",
+        "tram",
+        "bike",
+        "cycling",
+        "walking",
+    }
+    movement_ranges: list[tuple[datetime, datetime]] = []
+    for stage in stages:
+        if str(stage.get("mode") or "").lower() not in movement_modes:
+            continue
+        try:
+            start_at = datetime.fromisoformat(stage["planned_start"])
+            end_at = datetime.fromisoformat(stage["planned_end"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        clipped = overlap(start_at, end_at)
+        if clipped is not None:
+            movement_ranges.append(clipped)
+    selected = choose(movement_ranges, minimum_minutes=15, preferred_duration=30)
+    if selected is not None:
+        return (*selected, "movement")
+    return None
+
+
 def _ensure_meals(
     day: dict[str, Any],
     activities: list[dict[str, Any]],
@@ -920,39 +1036,33 @@ def _ensure_meals(
             minimum_minutes=30,
         )
         in_transit = False
+        fallback_kind = None
         if not slot:
-            # A long train/flight/ferry or service-stop stage can legitimately
-            # contain lunch/dinner. Keep that meal visible as an onboard or
-            # waypoint block instead of failing the whole day merely because
-            # the movement stage occupies the clock window. The verifier
-            # treats this explicit marker as part of the movement, not as an
-            # overlapping second route.
-            transit_stage = next(
-                (
-                    stage
-                    for stage in stages
-                    if stage.get("planned_start")
-                    and stage.get("planned_end")
-                    and datetime.fromisoformat(stage["planned_start"]) <= datetime.combine(
-                        day_date,
-                        preferred_time,
-                        tzinfo=SHANGHAI,
-                    ) < datetime.fromisoformat(stage["planned_end"])
-                    and stage.get("mode") in {"driving", "train", "flight", "ferry", "transit"}
-                ),
-                None,
+            # A long drive/train/flight often leaves only a short service or
+            # rest window.  That is still a real meal opportunity: merge the
+            # meal into the existing break first, then into the movement
+            # stage.  Previously the code only looked for a stage containing
+            # the exact preferred minute; a 11:56–12:16 rest or a stage ending
+            # at 18:30 therefore caused lunch/dinner to disappear and made the
+            # repair loop stop at 91%.
+            fallback = _meal_fallback_slot(
+                day_date,
+                window_start,
+                window_end,
+                preferred_time,
+                stages,
+                activities,
             )
-            if transit_stage is None:
-                # A full-day local schedule may still leave no safe gap. Keep
-                # the blocker visible rather than inventing an impossible
-                # time outside the user's day.
+            if fallback is not None:
+                slot_start, slot_duration, fallback_kind = fallback
+                slot = (slot_start, slot_duration)
+                in_transit = True
+            else:
+                # Do not fabricate an activity outside the requested day.  A
+                # day with no executable movement/break is allowed to remain
+                # a genuine free day; days with stages are covered by the
+                # service/movement fallback above.
                 continue
-            transit_start = datetime.fromisoformat(transit_stage["planned_start"])
-            transit_end = datetime.fromisoformat(transit_stage["planned_end"])
-            preferred_at = datetime.combine(day_date, preferred_time, tzinfo=SHANGHAI)
-            transit_at = max(transit_start, min(preferred_at, transit_end - timedelta(minutes=45)))
-            slot = (transit_at, 45)
-            in_transit = True
         start_at, duration = slot
         activity = _activity(
             day=day,
@@ -971,7 +1081,13 @@ def _ensure_meals(
                     if candidate
                     else f"{label}；未返回可靠餐饮候选，可在附近灵活选择"
                 )
-                + ("；途中用餐（不新增路线）" if in_transit else "")
+                + (
+                    "；途中用餐（与驾驶/交通或休息补能合并，不新增路线）"
+                    if fallback_kind == "movement"
+                    else "；途中用餐（与休息/补能合并，不新增路线）"
+                    if fallback_kind == "stop"
+                    else ""
+                )
             ),
             description=candidate.get("description") if candidate else None,
             image_url=candidate.get("image_url") if candidate else None,
