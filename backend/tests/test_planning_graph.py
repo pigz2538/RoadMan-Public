@@ -11,6 +11,7 @@ from app.domain.models import SkillResult, TripCreate, TripRequest, VehicleProfi
 from app.planning.graph import (
     _ensure_coordinates,
     _current_weather_sample,
+    _estimated_driving_arrival_date,
     _movement_stage,
     _return_stage_start,
     _return_deadline_issue,
@@ -50,6 +51,18 @@ def test_return_deadline_allows_small_drift_and_half_day_grace():
     assert blocker is not None
     assert blocker["code"] == "RETURN_DEADLINE_UNACHIEVABLE"
     assert blocker["severity"] == "blocker"
+
+
+def test_long_outbound_drive_arrival_date_respects_daytime_and_daily_budget():
+    start = datetime(2026, 8, 24, 8, 0, tzinfo=ZoneInfo("Asia/Shanghai"))
+
+    # 1,450 minutes of driving at a 9-hour daily budget must occupy three
+    # calendar days (08:00--17:00, 08:00--17:00, then the remaining leg).
+    assert _estimated_driving_arrival_date(start, 1450, 9 * 60) == date(2026, 8, 26)
+
+    # A route that ends inside the first daytime window remains on the
+    # departure date; no extra local-day suppression is needed.
+    assert _estimated_driving_arrival_date(start, 240, 9 * 60) == date(2026, 8, 24)
 
 
 def test_offline_fallback_preserves_only_literal_calendar_constraints():

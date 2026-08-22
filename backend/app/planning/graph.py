@@ -1982,6 +1982,40 @@ def build_planning_graph(
         )
         hotel_place = (hotel_base or {}).get("place") or request["destination"]
 
+        # A long outbound self-drive leg can occupy several calendar days.
+        # Local routes are discovered before this stage builder runs, so the
+        # raw ``local_routes`` list may still contain sightseeing legs for a
+        # day that is actually spent driving toward the destination.  Record
+        # the expected arrival date up front and suppress those stale local
+        # legs; ``enrich_deep_drive_plan`` will distribute the real driving
+        # pieces to the corresponding day plans afterwards.
+        outbound_arrival_date: date | None = None
+        outbound_duration = int(
+            (outbound.get("data") or {}).get("duration_minutes") or 0
+        )
+        outbound_start_date = (
+            date.fromisoformat(day_defs[0]["date"]) if day_defs else None
+        )
+        if outbound_start_date is not None and outbound_duration > 0:
+            outbound_start_at = _request_clock(
+                outbound_start_date,
+                request.get("departure_time"),
+                default=time(8, 0),
+            )
+            if (outbound.get("data") or {}).get("selected_mode") == "driving":
+                outbound_arrival_date = _estimated_driving_arrival_date(
+                    outbound_start_at,
+                    outbound_duration,
+                    int(
+                        request.get("max_daily_drive_minutes")
+                        or 9 * 60
+                    ),
+                )
+            else:
+                outbound_arrival_date = (
+                    outbound_start_at + timedelta(minutes=outbound_duration)
+                ).date()
+
         async def prepare_route(route: dict[str, Any]) -> dict[str, Any]:
             """Attach best-effort terrain gain to walking/riding routes."""
             if not settings.enable_route_elevation:
@@ -2112,6 +2146,18 @@ def build_planning_graph(
                 for item in state.get("local_routes", [])
                 if item["day_index"] == index
             ]
+            if (
+                index > 0
+                and outbound_arrival_date is not None
+                and day_date <= outbound_arrival_date
+                and str((outbound.get("data") or {}).get("selected_mode"))
+                == "driving"
+            ):
+                # Do not teleport from a route-derived overnight stop to a
+                # destination attraction while the outbound leg is still in
+                # progress.  The next usable sightseeing day starts after
+                # the final driving piece arrives.
+                local_items = []
             # A late intercity train can cross midnight.  Do not append local
             # sightseeing transfers to the departure calendar day after the
             # traveller is still on the train; those items belong to the
@@ -2401,6 +2447,7 @@ def build_planning_graph(
                     stages[-1].destination.model_dump(mode="json"),
                     day_base,
                 )
+                and stages[-1].planned_end.date() == day_date
                 # The final sightseeing day also returns to the booked hotel
                 # before the intercity departure, even when a provider did
                 # not return a scheduled departure timestamp.
@@ -2961,6 +3008,95 @@ def build_planning_graph(
                 state["trip_request"].get("max_daily_drive_minutes") or 540
             ),
         )
+
+        # The stage builder creates one raw intercity driving stage and the
+        # deep-drive pass later cuts it into calendar-day pieces.  A connector
+        # to the destination hotel cannot be scheduled reliably before that
+        # cut: the raw stage still ends on the provider's original date.  Add
+        # the connector now, from the actual final outbound piece, so the
+        # first sightseeing stage of the following day never starts from a
+        # city centroid or from a stale local-route origin.
+        request = state["trip_request"]
+        selected_route = state.get("selected_route") or {}
+        if (selected_route.get("data") or {}).get("selected_mode") == "driving":
+            hotel_base = select_primary_hotel(
+                state.get("tourism_candidates", {}).get("hotels", []),
+                request.get("destination"),
+                state.get("tourism_candidates", {}).get("attractions", []),
+                required_names={
+                    str(item.get("name") or "").strip()
+                    for item in request.get("must_visit", [])
+                    if isinstance(item, dict) and str(item.get("name") or "").strip()
+                },
+            )
+            hotel_place = (hotel_base or {}).get("place") or request.get("destination")
+            if hotel_place:
+                for day in plans:
+                    stages = sorted(
+                        day.get("stages", []),
+                        key=lambda item: (item.get("planned_start", ""), item.get("sequence", 0)),
+                    )
+                    final_outbound = next(
+                        (
+                            stage
+                            for stage in reversed(stages)
+                            if "跨天" in str(stage.get("title") or "")
+                            and "城市出发" in str(stage.get("title") or "")
+                            and _same_place(stage.get("destination"), request.get("destination"))
+                        ),
+                        None,
+                    )
+                    if not final_outbound or _same_place(
+                        final_outbound.get("destination"), hotel_place
+                    ):
+                        continue
+                    already_connected = any(
+                        "返回住宿或目的地核心区" in str(stage.get("title") or "")
+                        and _same_place(stage.get("origin"), final_outbound.get("destination"))
+                        and _same_place(stage.get("destination"), hotel_place)
+                        for stage in stages
+                    )
+                    if already_connected:
+                        continue
+                    connector_route = await _route(
+                        registry,
+                        final_outbound["destination"],
+                        hotel_place,
+                        state["trip_id"],
+                        preferred_mode="driving",
+                        fallback_modes=["transit", "riding", "walking"],
+                    )
+                    if not connector_route.get("success"):
+                        connector_route = _fallback_local_route(
+                            final_outbound["destination"],
+                            hotel_place,
+                            "driving",
+                        )
+                    connector_stage = _movement_stage(
+                        day_id=day.get("id") or f"day_{day.get('day_index', 1)}",
+                        sequence=len(stages),
+                        title="返回住宿或目的地核心区",
+                        origin=final_outbound["destination"],
+                        destination=hotel_place,
+                        route=connector_route,
+                        start_at=datetime.fromisoformat(final_outbound["planned_end"])
+                        + timedelta(minutes=15),
+                    )
+                    stages.append(connector_stage.model_dump(mode="json"))
+                    stages = sorted(
+                        stages,
+                        key=lambda item: (item.get("planned_start", ""), item.get("sequence", 0)),
+                    )
+                    for sequence, stage in enumerate(stages):
+                        stage["sequence"] = sequence
+                    day["stages"] = stages
+                    day["items"] = [
+                        *[{"type": "stage", "id": stage["id"]} for stage in stages],
+                        *[
+                            {"type": "activity", "id": activity["id"]}
+                            for activity in day.get("activities", [])
+                        ],
+                    ]
         for day in plans:
             previous_end: datetime | None = None
             for stage in sorted(
@@ -4511,6 +4647,47 @@ def _request_clock(day: date, value: Any, *, default: time) -> datetime:
             except ValueError:
                 selected = default
     return datetime.combine(day, selected, tzinfo=SHANGHAI)
+
+
+def _estimated_driving_arrival_date(
+    start_at: datetime,
+    duration_minutes: int,
+    max_daily_drive_minutes: int,
+) -> date:
+    """Return the calendar day on which a long drive is expected to arrive.
+
+    This mirrors the overnight splitter in ``deep_drive``: driving is kept
+    inside the daytime window (08:00--20:00) and a daily driving budget is
+    respected.  The estimate is intentionally conservative and is used only
+    to decide which locally generated sightseeing legs must be deferred until
+    the outbound leg has actually arrived.
+    """
+    remaining = max(0, int(duration_minutes or 0))
+    daily_budget = max(60, int(max_daily_drive_minutes or 9 * 60))
+    cursor = start_at
+    while remaining > 0:
+        day_end = cursor.replace(hour=20, minute=0, second=0, microsecond=0)
+        if cursor >= day_end:
+            cursor = (cursor + timedelta(days=1)).replace(
+                hour=8, minute=0, second=0, microsecond=0
+            )
+            continue
+        available_window = max(
+            0, int((day_end - cursor).total_seconds() // 60)
+        )
+        available = min(remaining, daily_budget, available_window)
+        if available <= 0:
+            cursor = (cursor + timedelta(days=1)).replace(
+                hour=8, minute=0, second=0, microsecond=0
+            )
+            continue
+        remaining -= available
+        cursor += timedelta(minutes=available)
+        if remaining > 0:
+            cursor = (cursor + timedelta(days=1)).replace(
+                hour=8, minute=0, second=0, microsecond=0
+            )
+    return cursor.date()
 
 
 def _return_stage_start(
