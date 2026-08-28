@@ -12,6 +12,7 @@ for _provider_key in (
     "OPENTRIPMAP_API_KEY",
     "FLYAI_API_KEY",
     "OLLAMA_API_KEY",
+    "DEEPSEEK_API_KEY",
 ):
     os.environ[_provider_key] = ""
 os.environ["UPLOAD_DIR"] = tempfile.mkdtemp(prefix="roadman-test-uploads-")

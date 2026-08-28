@@ -37,13 +37,13 @@ from .deep_drive import (
 from .event_research import event_research_summary, research_special_events
 from .destination_research import research_destination, research_destinations
 from .llm import (
-    OllamaDestinationPlanAgent,
-    OllamaDestinationResearchAgent,
-    OllamaEventResearchAgent,
-    OllamaPoiCurator,
-    OllamaPoiRanker,
-    OllamaPoiSuitabilityAgent,
-    OllamaRequirementExtractor,
+    DeepSeekDestinationPlanAgent,
+    DeepSeekDestinationResearchAgent,
+    DeepSeekEventResearchAgent,
+    DeepSeekPoiCurator,
+    DeepSeekPoiRanker,
+    DeepSeekPoiSuitabilityAgent,
+    DeepSeekRequirementExtractor,
 )
 from .recommendations import (
     apply_agent_ranking,
@@ -171,13 +171,13 @@ def build_planning_graph(
     settings: Settings,
     progress_callback: ProgressCallback | None = None,
 ):
-    extractor = OllamaRequirementExtractor(settings)
-    event_research_agent = OllamaEventResearchAgent(settings)
-    poi_curator = OllamaPoiCurator(settings)
-    poi_ranker = OllamaPoiRanker(settings)
-    poi_suitability_agent = OllamaPoiSuitabilityAgent(settings)
-    destination_research_agent = OllamaDestinationResearchAgent(settings)
-    destination_plan_agent = OllamaDestinationPlanAgent(settings)
+    extractor = DeepSeekRequirementExtractor(settings)
+    event_research_agent = DeepSeekEventResearchAgent(settings)
+    poi_curator = DeepSeekPoiCurator(settings)
+    poi_ranker = DeepSeekPoiRanker(settings)
+    poi_suitability_agent = DeepSeekPoiSuitabilityAgent(settings)
+    destination_research_agent = DeepSeekDestinationResearchAgent(settings)
+    destination_plan_agent = DeepSeekDestinationPlanAgent(settings)
 
     async def emit(
         state: RoadManState,
@@ -736,7 +736,7 @@ def build_planning_graph(
                 if isinstance(item, dict)
             ]
         recommendations: list[dict[str, Any]] = []
-        research_timeout = min(45, max(15, int(settings.ollama_timeout_seconds)))
+        research_timeout = min(45, max(15, int(settings.deepseek_timeout_seconds)))
         try:
             for bundle in research_bundles:
                 bundle_recommendations = await asyncio.wait_for(
@@ -753,7 +753,7 @@ def build_planning_graph(
                             {**item, "research_destination": bundle.get("destination")}
                         )
         except asyncio.TimeoutError:
-            destination_research["agent_error"] = "OLLAMA_DESTINATION_RESEARCH_TIMEOUT"
+            destination_research["agent_error"] = "DEEPSEEK_DESTINATION_RESEARCH_TIMEOUT"
         destination_research["agent_recommendations"] = recommendations[:48]
         destination_research["destination_names"] = destination_names
         try:
@@ -763,7 +763,7 @@ def build_planning_graph(
                 "目的地策划智能体正在根据研究结果生成分区与每日计划单",
                 66,
                 event="tool_started",
-                tool="ollama.destination_plan",
+                tool="deepseek.destination_plan",
             )
             destination_research["agent_plan"] = await asyncio.wait_for(
                 destination_plan_agent.draft(
@@ -775,14 +775,14 @@ def build_planning_graph(
             )
         except asyncio.TimeoutError:
             destination_research["agent_plan"] = {}
-            destination_research["agent_plan_error"] = "OLLAMA_DESTINATION_PLAN_TIMEOUT"
+            destination_research["agent_plan_error"] = "DEEPSEEK_DESTINATION_PLAN_TIMEOUT"
         await emit(
             state,
             "destination_plan",
             "目的地策划智能体已生成分区与每日计划单，交给路线智能体执行",
             67,
             event="tool_completed",
-            tool="ollama.destination_plan",
+            tool="deepseek.destination_plan",
         )
         await emit(
             state,
@@ -1147,7 +1147,7 @@ def build_planning_graph(
                     "Agent 正在比对高德与 OpenStreetMap 景点、合并同地点并生成中文显示名",
                     66,
                     event="tool_started",
-                    tool="ollama.poi_curator",
+                    tool="deepseek.poi_curator",
                 )
                 decisions = await poi_curator.curate(
                     _destination_search_area(destination),
@@ -1230,7 +1230,7 @@ def build_planning_graph(
                     ),
                     67,
                     event="tool_completed",
-                    tool="ollama.poi_curator",
+                    tool="deepseek.poi_curator",
                 )
         if flyai_ticket_items:
             for candidate in candidates["attractions"]:
@@ -1667,14 +1667,14 @@ def build_planning_graph(
                 event="tool_completed",
                 tool="web.poi_research",
             )
-        if settings.ollama_api_key:
+        if settings.deepseek_api_key:
             await emit(
                 state,
                 "rank_tourism_candidates",
                 "POI Agent 正在根据偏好、距离、评分、价格综合排序候选",
                 68,
                 event="tool_started",
-                tool="ollama.poi_ranker",
+                tool="deepseek.poi_ranker",
             )
             agent_decisions = await poi_ranker.rank(
                 candidates,
@@ -1692,7 +1692,7 @@ def build_planning_graph(
                 "POI Agent 已完成候选排序与推荐理由",
                 68,
                 event="tool_completed",
-                tool="ollama.poi_ranker",
+                tool="deepseek.poi_ranker",
             )
         # A deleted activity is a durable user constraint.  Apply it after all
         # provider and Agent ranking passes so a second provider cannot put the
@@ -2852,7 +2852,7 @@ def build_planning_graph(
             "POI Agent 正在逐项结合日期、天气、气温、海拔与用户偏好复核候选",
             87,
             event="tool_started",
-            tool="ollama.poi_suitability",
+            tool="deepseek.poi_suitability",
         )
         candidates = state.get("tourism_candidates", {})
         # A cloud suitability pass can legitimately take longer than a single
@@ -2880,9 +2880,9 @@ def build_planning_graph(
                     f"候选适配 Agent 仍在核验（已等待 {elapsed} 秒），将保留可解释的保守候选",
                     88,
                     event="progress",
-                    tool="ollama.poi_suitability",
+                    tool="deepseek.poi_suitability",
                 )
-                if elapsed >= min(45, max(12, int(settings.ollama_timeout_seconds))):
+                if elapsed >= min(45, max(12, int(settings.deepseek_timeout_seconds))):
                     review_task.cancel()
                     await emit(
                         state,
@@ -2890,7 +2890,7 @@ def build_planning_graph(
                         "候选适配 Agent 超时，已切换到逐候选保守复核",
                         89,
                         event="progress",
-                        tool="ollama.poi_suitability",
+                        tool="deepseek.poi_suitability",
                     )
                     break
             except (Exception, asyncio.CancelledError):
@@ -2907,7 +2907,7 @@ def build_planning_graph(
             "候选适配 Agent 已返回，正在合并每个景点的日期与天气结论",
             89,
             event="progress",
-            tool="ollama.poi_suitability",
+            tool="deepseek.poi_suitability",
         )
         if decisions:
             candidates = apply_agent_suitability(candidates, decisions)
@@ -2925,7 +2925,7 @@ def build_planning_graph(
             ),
             89,
             event="tool_completed",
-            tool="ollama.poi_suitability",
+            tool="deepseek.poi_suitability",
         )
         return {
             "tourism_candidates": candidates,
@@ -3008,19 +3008,28 @@ def build_planning_graph(
                 center = coordinates[len(coordinates) // 2]
                 center_key = (center["longitude"], center["latitude"])
                 stage_services: dict[str, list[dict[str, Any]]] = {}
-                for category, keyword in categories.items():
-                    result = await registry.execute(
-                        "amap.poi",
-                        {
-                            "keywords": keyword,
-                            "location": (
-                                f"{center['longitude']},{center['latitude']}"
-                            ),
-                            "radius": 30000,
-                            "page_size": 3,
-                        },
-                        SkillContext(trip_id=state["trip_id"]),
+                # These category lookups are independent.  Running them as a
+                # bounded fan-out keeps a long-distance plan from spending
+                # the worker's entire timeout on eight sequential map calls.
+                category_items = list(categories.items())
+                lookup_results = await asyncio.gather(
+                    *(
+                        registry.execute(
+                            "amap.poi",
+                            {
+                                "keywords": keyword,
+                                "location": (
+                                    f"{center['longitude']},{center['latitude']}"
+                                ),
+                                "radius": 30000,
+                                "page_size": 3,
+                            },
+                            SkillContext(trip_id=state["trip_id"]),
+                        )
+                        for _, keyword in category_items
                     )
+                )
+                for (category, _), result in zip(category_items, lookup_results, strict=True):
                     if result.success and isinstance(result.data, dict):
                         places = [
                             _poi_place(item)

@@ -8,7 +8,92 @@ import httpx
 from ..core.config import Settings
 
 
-class OllamaRequirementExtractor:
+DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions"
+DEEPSEEK_MODEL = "deepseek-v4-flash"
+
+
+def _deepseek_config(settings: Settings) -> tuple[str, str, str, float, bool, int, str]:
+    """Return the effective DeepSeek connection settings.
+
+    ``OLLAMA_*`` is accepted only as a deprecated input alias.  In
+    particular, an old Ollama URL is never used for runtime requests: every
+    semantic agent goes through DeepSeek's official Chat Completions endpoint.
+    """
+    api_key = str(getattr(settings, "deepseek_api_key", "") or getattr(settings, "ollama_api_key", "") or "").strip()
+    api_url = str(getattr(settings, "deepseek_api_url", "") or DEEPSEEK_API_URL).strip()
+    if not api_url or "ollama.com" in api_url or api_url.rstrip("/").endswith("/api/generate"):
+        api_url = DEEPSEEK_API_URL
+    model = str(getattr(settings, "deepseek_model", "") or getattr(settings, "ollama_model", "") or DEEPSEEK_MODEL).strip()
+    if model in {"v4flash", "deepseek-v4-flash:0731-cloud"} or model.startswith("deepseek-v4-flash:"):
+        model = DEEPSEEK_MODEL
+    timeout = float(getattr(settings, "deepseek_timeout_seconds", 180) or 180)
+    if timeout <= 0:
+        timeout = 180
+    thinking = bool(getattr(settings, "deepseek_thinking", True))
+    max_tokens = int(getattr(settings, "deepseek_max_tokens", 32768) or 32768)
+    if max_tokens < 256:
+        max_tokens = 256
+    effort = str(getattr(settings, "deepseek_reasoning_effort", "max") or "max").strip().lower()
+    if effort not in {"low", "medium", "high", "max"}:
+        effort = "max"
+    return api_key, api_url, model, timeout, thinking, max_tokens, effort
+
+
+async def deepseek_complete(
+    settings: Settings,
+    prompt: str,
+    *,
+    timeout: float | None = None,
+    json_output: bool = True,
+) -> str:
+    """Call DeepSeek once and return only the assistant's visible content.
+
+    The reasoning trace (``reasoning_content``) is intentionally discarded;
+    it is neither persisted nor sent to the UI.  A legacy ``response`` field
+    is accepted solely for deterministic unit-test fakes from the Ollama era.
+    """
+    api_key, api_url, model, configured_timeout, thinking, max_tokens, effort = _deepseek_config(settings)
+    if not api_key:
+        raise ValueError("DEEPSEEK_API_KEY is not configured")
+    payload: dict[str, Any] = {
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}],
+        "stream": False,
+        "thinking": {"type": "enabled" if thinking else "disabled"},
+        "reasoning_effort": effort,
+        "max_tokens": max_tokens,
+    }
+    if json_output:
+        payload["response_format"] = {"type": "json_object"}
+    request_timeout = float(timeout if timeout is not None else configured_timeout)
+    async with httpx.AsyncClient(timeout=request_timeout) as client:
+        response = await client.post(
+            api_url,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+        )
+        response.raise_for_status()
+        body = response.json()
+    content: Any = None
+    if isinstance(body, dict):
+        choices = body.get("choices")
+        if isinstance(choices, list) and choices and isinstance(choices[0], dict):
+            message = choices[0].get("message")
+            if isinstance(message, dict):
+                content = message.get("content")
+        # Compatibility with old local test doubles only; production DeepSeek
+        # responses always use choices[0].message.content.
+        if content is None:
+            content = body.get("response")
+    if not isinstance(content, str) or not content.strip():
+        raise ValueError("DeepSeek response did not contain assistant content")
+    return content
+
+
+class DeepSeekRequirementExtractor:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
 
@@ -21,7 +106,7 @@ class OllamaRequirementExtractor:
         structural = extract_structural_constraints(raw_text, today)
         if (
             not self.settings.enable_llm_requirement_extraction
-            or not self.settings.ollama_api_key
+            or not self.settings.deepseek_api_key
         ):
             return {
                 **structural,
@@ -75,26 +160,19 @@ class OllamaRequirementExtractor:
             + raw_text
         )
         try:
-            async with httpx.AsyncClient(timeout=self.settings.ollama_timeout_seconds) as client:
-                response = await client.post(
-                    self.settings.ollama_api_url,
-                    headers={"Authorization": f"Bearer {self.settings.ollama_api_key}"},
-                    json={
-                        "model": self.settings.ollama_model,
-                        "prompt": prompt,
-                        "stream": False,
-                        "think": False,
-                        "format": "json",
-                    },
+            response_text = await deepseek_complete(
+                self.settings,
+                prompt,
+                timeout=self.settings.deepseek_timeout_seconds,
+            )
+            parsed = _parse_json_object(response_text)
+            if _destination_payload_needs_repair(parsed):
+                parsed = await self._repair_destination_payload(
+                    raw_text,
+                    parsed,
                 )
-                response.raise_for_status()
-                parsed = _parse_json_object(response.json().get("response", ""))
-                if _destination_payload_needs_repair(parsed):
-                    parsed = await self._repair_destination_payload(
-                        raw_text,
-                        parsed,
-                    )
-                merged = _merge_extraction(structural, parsed)
+            merged = _merge_extraction(structural, parsed)
+            if isinstance(parsed, dict):
                 # Literal calendar tokens are hard user constraints. Do not
                 # let the Agent hallucinate another year.
                 for date_field in ("start_date", "end_date"):
@@ -202,9 +280,9 @@ class OllamaRequirementExtractor:
                     merged.get("time_window_minutes")
                 )
                 merged["_intent_status"] = "ok"
-                merged["_intent_source"] = "ollama"
-                merged["_source_raw_text"] = raw_text
-                return merged
+                merged["_intent_source"] = "deepseek"
+            merged["_source_raw_text"] = raw_text
+            return merged
         except (httpx.HTTPError, ValueError, TypeError, json.JSONDecodeError):
             return {
                 **structural,
@@ -236,26 +314,19 @@ class OllamaRequirementExtractor:
             "‘看流星雨’等体验放入 travel_intents，不要变成地点。"
             f"原始需求：{raw_text}；错误回合：{json.dumps(invalid_payload, ensure_ascii=False)}"
         )
-        async with httpx.AsyncClient(timeout=min(self.settings.ollama_timeout_seconds, 45)) as client:
-            response = await client.post(
-                self.settings.ollama_api_url,
-                headers={"Authorization": f"Bearer {self.settings.ollama_api_key}"},
-                json={
-                    "model": self.settings.ollama_model,
-                    "prompt": repair_prompt,
-                    "stream": False,
-                    "think": False,
-                    "format": "json",
-                },
+        repaired = _parse_json_object(
+            await deepseek_complete(
+                self.settings,
+                repair_prompt,
+                timeout=min(self.settings.deepseek_timeout_seconds, 45),
             )
-            response.raise_for_status()
-            repaired = _parse_json_object(response.json().get("response", ""))
+        )
         if _destination_payload_needs_repair(repaired):
             raise ValueError("LLM returned an invalid destination shape after repair")
         return repaired
 
 
-class OllamaRequirementValidator:
+class DeepSeekRequirementValidator:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
 
@@ -264,7 +335,7 @@ class OllamaRequirementValidator:
         raw_text: str,
         extracted: dict[str, Any],
     ) -> list[dict[str, Any]]:
-        if not self.settings.ollama_api_key:
+        if not self.settings.deepseek_api_key:
             return []
         prompt = (
             "你是 RoadMan Requirement Guard，只检查旅行需求是否自相矛盾、"
@@ -276,19 +347,14 @@ class OllamaRequirementValidator:
             f"结构化需求：{json.dumps(extracted, ensure_ascii=False)}；原始需求：{raw_text}"
         )
         try:
-            async with httpx.AsyncClient(timeout=self.settings.ollama_timeout_seconds) as client:
-                response = await client.post(
-                    self.settings.ollama_api_url,
-                    headers={"Authorization": f"Bearer {self.settings.ollama_api_key}"},
-                    json={
-                        "model": self.settings.ollama_model,
-                        "prompt": prompt,
-                        "stream": False,
-                        "think": False,
-                    },
+            payload = _parse_json_object(
+                await deepseek_complete(
+                    self.settings,
+                    prompt,
+                    timeout=self.settings.deepseek_timeout_seconds,
                 )
-                response.raise_for_status()
-                payload = _parse_json_object(response.json().get("response", ""))
+            )
+            if isinstance(payload, dict):
                 issues = payload.get("issues", [])
                 if not isinstance(issues, list):
                     return []
@@ -311,7 +377,7 @@ class OllamaRequirementValidator:
             return []
 
 
-class OllamaTripEditAgent:
+class DeepSeekTripEditAgent:
     """Interpret free-form edits before the deterministic patch builder runs.
 
     The patch builder remains the only component allowed to mutate a trip.  This
@@ -328,7 +394,7 @@ class OllamaTripEditAgent:
         message: str,
         trip_context: dict[str, Any],
     ) -> dict[str, Any] | None:
-        if not self.settings.ollama_api_key:
+        if not self.settings.deepseek_api_key:
             return None
         prompt = (
             "你是 RoadMan 行程修改 Agent。你只能理解用户要如何调整已经存在的行程，"
@@ -355,20 +421,13 @@ class OllamaTripEditAgent:
             f"用户修改请求：{message}"
         )
         try:
-            async with httpx.AsyncClient(timeout=min(self.settings.ollama_timeout_seconds, 45)) as client:
-                response = await client.post(
-                    self.settings.ollama_api_url,
-                    headers={"Authorization": f"Bearer {self.settings.ollama_api_key}"},
-                    json={
-                        "model": self.settings.ollama_model,
-                        "prompt": prompt,
-                        "stream": False,
-                        "think": False,
-                        "format": "json",
-                    },
+            value = _parse_unfiltered_json_object(
+                await deepseek_complete(
+                    self.settings,
+                    prompt,
+                    timeout=min(self.settings.deepseek_timeout_seconds, 45),
                 )
-                response.raise_for_status()
-                value = _parse_unfiltered_json_object(response.json().get("response", ""))
+            )
         except (httpx.HTTPError, ValueError, TypeError, json.JSONDecodeError):
             return None
         intent = str(value.get("intent") or "unknown").strip().lower()
@@ -414,7 +473,7 @@ class OllamaTripEditAgent:
         }
 
 
-class OllamaPoiCurator:
+class DeepSeekPoiCurator:
     """Let the planning agent reconcile AMap and OSM/OpenTripMap POIs."""
 
     def __init__(self, settings: Settings) -> None:
@@ -428,7 +487,7 @@ class OllamaPoiCurator:
     ) -> list[dict[str, Any]]:
         # Merging two POI sources is a semantic decision.  Never guess it from
         # a local substring/keyword table when the curator Agent is unavailable.
-        if not self.settings.ollama_api_key or not osm_items:
+        if not self.settings.deepseek_api_key or not osm_items:
             return []
         local_places = [item.get("place", {}) for item in local_candidates]
         compact_osm = [
@@ -454,20 +513,14 @@ class OllamaPoiCurator:
             f"OSM 候选：{json.dumps(compact_osm, ensure_ascii=False)}"
         )
         try:
-            async with httpx.AsyncClient(timeout=self.settings.ollama_timeout_seconds) as client:
-                response = await client.post(
-                    self.settings.ollama_api_url,
-                    headers={"Authorization": f"Bearer {self.settings.ollama_api_key}"},
-                    json={
-                        "model": self.settings.ollama_model,
-                        "prompt": prompt,
-                        "stream": False,
-                        "think": False,
-                        "format": "json",
-                    },
+            payload = _parse_unfiltered_json_object(
+                await deepseek_complete(
+                    self.settings,
+                    prompt,
+                    timeout=self.settings.deepseek_timeout_seconds,
                 )
-                response.raise_for_status()
-                payload = _parse_unfiltered_json_object(response.json().get("response", ""))
+            )
+            if isinstance(payload, dict):
                 decisions = payload.get("decisions")
                 if not isinstance(decisions, list):
                     return []
@@ -497,7 +550,7 @@ class OllamaPoiCurator:
             return []
 
 
-class OllamaDestinationResearchAgent:
+class DeepSeekDestinationResearchAgent:
     """Turn destination search evidence into source-backed highlights."""
 
     def __init__(self, settings: Settings) -> None:
@@ -509,7 +562,7 @@ class OllamaDestinationResearchAgent:
         research: dict[str, Any],
         trip_request: dict[str, Any],
     ) -> list[dict[str, Any]]:
-        if not self.settings.ollama_api_key:
+        if not self.settings.deepseek_api_key:
             return []
         evidence = [
             {
@@ -554,20 +607,13 @@ class OllamaDestinationResearchAgent:
             f"evidence: {json.dumps(evidence, ensure_ascii=False)}"
         )
         try:
-            async with httpx.AsyncClient(timeout=min(self.settings.ollama_timeout_seconds, 45)) as client:
-                response = await client.post(
-                    self.settings.ollama_api_url,
-                    headers={"Authorization": f"Bearer {self.settings.ollama_api_key}"},
-                    json={
-                        "model": self.settings.ollama_model,
-                        "prompt": prompt,
-                        "stream": False,
-                        "think": False,
-                        "format": "json",
-                    },
+            payload = _parse_unfiltered_json_object(
+                await deepseek_complete(
+                    self.settings,
+                    prompt,
+                    timeout=min(self.settings.deepseek_timeout_seconds, 45),
                 )
-                response.raise_for_status()
-                payload = _parse_unfiltered_json_object(response.json().get("response", ""))
+            )
         except (httpx.HTTPError, ValueError, TypeError, json.JSONDecodeError):
             return []
         raw = payload.get("recommendations")
@@ -614,7 +660,7 @@ class OllamaDestinationResearchAgent:
         return cleaned
 
 
-class OllamaDestinationPlanAgent:
+class DeepSeekDestinationPlanAgent:
     """Turn destination evidence into a high-level, routeable trip brief.
 
     This is intentionally separate from the route adapter.  The Agent first
@@ -633,7 +679,7 @@ class OllamaDestinationPlanAgent:
         research: dict[str, Any],
         trip_request: dict[str, Any],
     ) -> dict[str, Any]:
-        if not self.settings.ollama_api_key:
+        if not self.settings.deepseek_api_key:
             return {}
         recommendations = research.get("agent_recommendations") or []
         if not recommendations and research.get("destinations"):
@@ -660,20 +706,13 @@ class OllamaDestinationPlanAgent:
             f"目的地研究与候选：{json.dumps({**research, 'agent_recommendations': recommendations}, ensure_ascii=False)}"
         )
         try:
-            async with httpx.AsyncClient(timeout=min(self.settings.ollama_timeout_seconds, 45)) as client:
-                response = await client.post(
-                    self.settings.ollama_api_url,
-                    headers={"Authorization": f"Bearer {self.settings.ollama_api_key}"},
-                    json={
-                        "model": self.settings.ollama_model,
-                        "prompt": prompt,
-                        "stream": False,
-                        "think": False,
-                        "format": "json",
-                    },
+            payload = _parse_unfiltered_json_object(
+                await deepseek_complete(
+                    self.settings,
+                    prompt,
+                    timeout=min(self.settings.deepseek_timeout_seconds, 45),
                 )
-                response.raise_for_status()
-                payload = _parse_unfiltered_json_object(response.json().get("response", ""))
+            )
         except (httpx.HTTPError, ValueError, TypeError, json.JSONDecodeError):
             return {}
         selected = []
@@ -719,12 +758,12 @@ class OllamaDestinationPlanAgent:
         }
 
 
-class OllamaPoiRanker:
+class DeepSeekPoiRanker:
     """Rank discovered POIs from the Agent's semantic requirements.
 
     The local scorer is deliberately objective (distance, rating and price).
     Preference words are not interpreted with a Python keyword table; when an
-    Ollama key is available this Agent decides the trade-offs and supplies the
+    DeepSeek key is available this Agent decides the trade-offs and supplies the
     human-readable reason shown in the UI.
     """
 
@@ -741,7 +780,7 @@ class OllamaPoiRanker:
         travel_end: str | None = None,
         destination_research: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
-        if not self.settings.ollama_api_key:
+        if not self.settings.deepseek_api_key:
             return []
         compact: list[dict[str, Any]] = []
         for category, items in candidates.items():
@@ -778,20 +817,13 @@ class OllamaPoiRanker:
             f"候选：{json.dumps(compact, ensure_ascii=False)}"
         )
         try:
-            async with httpx.AsyncClient(timeout=min(self.settings.ollama_timeout_seconds, 45)) as client:
-                response = await client.post(
-                    self.settings.ollama_api_url,
-                    headers={"Authorization": f"Bearer {self.settings.ollama_api_key}"},
-                    json={
-                        "model": self.settings.ollama_model,
-                        "prompt": prompt,
-                        "stream": False,
-                        "think": False,
-                        "format": "json",
-                    },
+            payload = _parse_unfiltered_json_object(
+                await deepseek_complete(
+                    self.settings,
+                    prompt,
+                    timeout=min(self.settings.deepseek_timeout_seconds, 45),
                 )
-                response.raise_for_status()
-                payload = _parse_unfiltered_json_object(response.json().get("response", ""))
+            )
         except (httpx.HTTPError, ValueError, TypeError, json.JSONDecodeError):
             return []
         decisions = payload.get("decisions")
@@ -827,7 +859,7 @@ class OllamaPoiRanker:
         return cleaned
 
 
-class OllamaPoiSuitabilityAgent:
+class DeepSeekPoiSuitabilityAgent:
     """Review every candidate against the actual travel conditions.
 
     Ranking answers "which option is attractive".  This pass answers the
@@ -847,7 +879,7 @@ class OllamaPoiSuitabilityAgent:
         day_plans: list[dict[str, Any]],
         weather_results: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        if not self.settings.ollama_api_key:
+        if not self.settings.deepseek_api_key:
             return []
         compact: list[dict[str, Any]] = []
         for category, items in candidates.items():
@@ -907,20 +939,13 @@ class OllamaPoiSuitabilityAgent:
             f"\n路线地形与阶段天气：{json.dumps(route_context, ensure_ascii=False)}"
         )
         try:
-            async with httpx.AsyncClient(timeout=min(self.settings.ollama_timeout_seconds, 45)) as client:
-                response = await client.post(
-                    self.settings.ollama_api_url,
-                    headers={"Authorization": f"Bearer {self.settings.ollama_api_key}"},
-                    json={
-                        "model": self.settings.ollama_model,
-                        "prompt": prompt,
-                        "stream": False,
-                        "think": False,
-                        "format": "json",
-                    },
+            payload = _parse_unfiltered_json_object(
+                await deepseek_complete(
+                    self.settings,
+                    prompt,
+                    timeout=min(self.settings.deepseek_timeout_seconds, 45),
                 )
-                response.raise_for_status()
-                payload = _parse_unfiltered_json_object(response.json().get("response", ""))
+            )
         except (httpx.HTTPError, ValueError, TypeError, json.JSONDecodeError):
             return []
         decisions = payload.get("decisions")
@@ -1011,7 +1036,7 @@ def _match_candidate_weather(
     return matched
 
 
-class OllamaEventResearchAgent:
+class DeepSeekEventResearchAgent:
     """Extract source-backed facts for a user-requested seasonal event.
 
     Web search only supplies evidence.  This Agent turns the snippets into a
@@ -1029,7 +1054,7 @@ class OllamaEventResearchAgent:
         year: int,
         sources: list[dict[str, Any]],
     ) -> dict[str, Any]:
-        if not self.settings.ollama_api_key or not sources:
+        if not self.settings.deepseek_api_key or not sources:
             return {}
         compact = [
             {
@@ -1056,20 +1081,13 @@ class OllamaEventResearchAgent:
             f"来源：{json.dumps(compact, ensure_ascii=False)}"
         )
         try:
-            async with httpx.AsyncClient(timeout=min(self.settings.ollama_timeout_seconds, 45)) as client:
-                response = await client.post(
-                    self.settings.ollama_api_url,
-                    headers={"Authorization": f"Bearer {self.settings.ollama_api_key}"},
-                    json={
-                        "model": self.settings.ollama_model,
-                        "prompt": prompt,
-                        "stream": False,
-                        "think": False,
-                        "format": "json",
-                    },
+            payload = _parse_unfiltered_json_object(
+                await deepseek_complete(
+                    self.settings,
+                    prompt,
+                    timeout=min(self.settings.deepseek_timeout_seconds, 45),
                 )
-                response.raise_for_status()
-                payload = _parse_unfiltered_json_object(response.json().get("response", ""))
+            )
         except (httpx.HTTPError, ValueError, TypeError, json.JSONDecodeError):
             return {}
         return _clean_event_facts(payload, year, len(compact))
@@ -1108,6 +1126,20 @@ def _clean_event_facts(value: dict[str, Any], year: int, source_count: int) -> d
     if isinstance(zhr, (int, float)) and not isinstance(zhr, bool) and 0 <= zhr <= 10000:
         facts["zhr"] = zhr
     return facts
+
+
+# Backward-compatible import names for integrations written before the
+# provider migration.  The implementations above are DeepSeek-backed; these
+# aliases do not retain an Ollama transport.
+OllamaRequirementExtractor = DeepSeekRequirementExtractor
+OllamaRequirementValidator = DeepSeekRequirementValidator
+OllamaTripEditAgent = DeepSeekTripEditAgent
+OllamaPoiCurator = DeepSeekPoiCurator
+OllamaDestinationResearchAgent = DeepSeekDestinationResearchAgent
+OllamaDestinationPlanAgent = DeepSeekDestinationPlanAgent
+OllamaPoiRanker = DeepSeekPoiRanker
+OllamaPoiSuitabilityAgent = DeepSeekPoiSuitabilityAgent
+OllamaEventResearchAgent = DeepSeekEventResearchAgent
 
 
 def _parse_json_object(text: str) -> dict[str, Any]:

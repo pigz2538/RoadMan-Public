@@ -461,6 +461,10 @@ function planningAgentName(event: { tool?: string; node?: string }) {
     'flyai.hotel': '住宿搜索智能体',
     'amap.poi/amap.route': '地图路线智能体',
     'web.poi_research': '公开信息检索智能体',
+    'deepseek.destination_plan': '目的地分区计划智能体',
+    'deepseek.poi_ranker': '候选排序智能体',
+    'deepseek.poi_suitability': '候选适配智能体',
+    'deepseek.poi_curator': '地点策展智能体',
     'ollama.poi_curator': '地点策展智能体',
     'open_meteo.forecast': '天气智能体',
   }

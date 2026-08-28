@@ -32,7 +32,7 @@ Docker：backend/worker/frontend/postgres/redis 均已重建并健康
 3. **大型前端 chunk**：`model-viewer` 当前是独立的大 chunk，生产构建会给出体积提示但不影响运行；若继续优化首屏，再考虑动态加载或按路由拆包。
 4. **外部服务波动**：旅行搜索、班次、天气和实时地图可能超时或无结果。系统必须保留“未知/待核验”状态，不得把缓存或示意地图伪装成实时数据；发布前可用 `deploy/api_smoke.py` 检查当前配额和凭据。
 
-5. **云端智能体授权诊断**：`OLLAMA_API_KEY` 必须同时能访问 `https://ollama.com/api/tags` 和一个最小 `/api/generate` 请求。仅能列出模型但生成请求返回 401/403 时，需求预检、语义编辑和目的地研究会按设计暂停；更换有效 Key 后再运行真实智能体回归，不要打开关键词兜底。
+5. **云端智能体授权诊断**：`DEEPSEEK_API_KEY` 通过官方 `https://api.deepseek.com/chat/completions` 做最小 JSON 请求；模型固定为 `deepseek-v4-flash`，思考模式与 `reasoning_effort=max` 开启。请求失败时需求预检、语义编辑和目的地研究按设计暂停，不打开关键词兜底。
 
 ## 复现命令
 

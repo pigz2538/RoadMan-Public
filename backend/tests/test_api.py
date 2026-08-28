@@ -266,10 +266,10 @@ async def test_candidate_patch_requires_preview_before_apply(client, monkeypatch
         }
 
     # Keep this API test deterministic and credential-free.  Live semantic
-    # interpretation is covered by the Ollama contract tests; this endpoint
+    # interpretation is covered by the DeepSeek contract tests; this endpoint
     # test only verifies preview/apply/rollback orchestration.
     monkeypatch.setattr(
-        "app.api.trips.OllamaTripEditAgent.interpret",
+        "app.api.trips.DeepSeekTripEditAgent.interpret",
         fake_edit_interpret,
     )
     delete_intent = await client.post(

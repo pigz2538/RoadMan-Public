@@ -154,7 +154,7 @@ Skills/         provider skill 指南与本地开发参考（不放密钥）
 | 旅行信息搜索 | 旅行信息服务 Adapter | `FLYAI_API_KEY` 和 CLI；失败降级为其他来源，不伪造结果 |
 | 景点补充 | `opentripmap.nearby` | `OPENTRIPMAP_API_KEY`；结果需来源追溯 |
 | 车型目录 | `carinfo.catalog` | 远端目录失败时返回可解释的空结果 |
-| 语义智能体 | 云端模型 API | `OLLAMA_API_KEY`、`OLLAMA_MODEL`；未配置或 401/403 时暂停语义步骤，离线逻辑只补显式日历结构，不猜地点 |
+| 语义智能体 | DeepSeek 官方 Chat Completions | `DEEPSEEK_API_KEY`、`DEEPSEEK_MODEL=deepseek-v4-flash`、`DEEPSEEK_REASONING_EFFORT=max`、`DEEPSEEK_THINKING=true`；未配置或请求失败时暂停语义步骤，离线逻辑只补显式日历结构，不猜地点 |
 
 所有凭据通过环境变量注入；`.env`、本地凭据文件、数据库、上传与验收产物均被 Git 忽略。日志和 SSE 不记录密钥、附件原文或模型私有输出；调用审计只保存 adapter、耗时、成功、缓存、错误码和来源摘要。
 

@@ -10,7 +10,7 @@ from app.services.registry_factory import build_skill_registry
 
 pytestmark = pytest.mark.skipif(
     os.getenv("ROADMAN_LIVE_TESTS") != "1",
-    reason="set ROADMAN_LIVE_TESTS=1 to call Ollama Cloud, AMap and Open-Meteo",
+    reason="set ROADMAN_LIVE_TESTS=1 to call DeepSeek, AMap and Open-Meteo",
 )
 
 
@@ -24,7 +24,7 @@ async def test_live_five_day_multimodal_planning():
         load_local_skill_credentials=False,
         enable_job_queue=False,
     )
-    assert settings.ollama_api_key, "OLLAMA_API_KEY is required"
+    assert settings.deepseek_api_key, "DEEPSEEK_API_KEY is required"
     assert settings.amap_webservice_key, "AMAP_WEBSERVICE_KEY is required"
 
     registry = build_skill_registry(settings)

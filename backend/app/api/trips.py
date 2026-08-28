@@ -25,10 +25,10 @@ from ..domain.models import (
 )
 from ..core.config import get_settings
 from ..planning.llm import (
-    OllamaEventResearchAgent,
-    OllamaTripEditAgent,
-    OllamaRequirementExtractor,
-    OllamaRequirementValidator,
+    DeepSeekEventResearchAgent,
+    DeepSeekTripEditAgent,
+    DeepSeekRequirementExtractor,
+    DeepSeekRequirementValidator,
     extract_structural_constraints,
 )
 from ..planning.event_research import research_special_events
@@ -212,8 +212,8 @@ async def preflight_trip(
         or previous_source_text != payload.raw_text
         or extracted.get("_intent_status") != "ok"
     )
-    if settings.enable_llm_requirement_extraction and settings.ollama_api_key and should_extract:
-        extracted = await OllamaRequirementExtractor(settings).extract(
+    if settings.enable_llm_requirement_extraction and settings.deepseek_api_key and should_extract:
+        extracted = await DeepSeekRequirementExtractor(settings).extract(
             payload.raw_text,
             today,
         )
@@ -314,7 +314,7 @@ async def preflight_trip(
             special_events,
             year=research_year,
             destination=str(extracted.get("destination_name") or "") or None,
-            fact_agent=OllamaEventResearchAgent(settings).extract,
+            fact_agent=DeepSeekEventResearchAgent(settings).extract,
         )
 
     def answered(code: str, field: str | None = None) -> bool:
@@ -483,7 +483,7 @@ async def preflight_trip(
                 if value.strip()
             ]]
         )
-        semantic_issues = await OllamaRequirementValidator(get_settings()).validate(
+        semantic_issues = await DeepSeekRequirementValidator(get_settings()).validate(
             clarified_text,
             extracted,
         )
@@ -626,7 +626,7 @@ async def interpret_trip_edit(
     state, markdown = await repo.get_planning_snapshot(trip_id)
     state = state or {}
     settings = get_settings()
-    agent_intent = await OllamaTripEditAgent(settings).interpret(
+    agent_intent = await DeepSeekTripEditAgent(settings).interpret(
         payload.message,
         _edit_agent_context(trip, state, payload),
     )

@@ -22,7 +22,10 @@ Copy-Item .env.example .env
 用编辑器打开 `.env`，至少填入两项（其余按需，完整说明见下方配置表）：
 
 ```text
-OLLAMA_API_KEY=你的云端模型 Key
+DEEPSEEK_API_KEY=你的 DeepSeek API Key
+DEEPSEEK_MODEL=deepseek-v4-flash
+DEEPSEEK_REASONING_EFFORT=max
+DEEPSEEK_THINKING=true
 AMAP_WEBSERVICE_KEY=你的高德 WebService Key
 ```
 
@@ -42,15 +45,15 @@ docker compose up -d --build
 python deploy/api_smoke.py
 ```
 
-冒烟脚本通过即表示容器、数据库、队列、接口契约和当前能访问的外部能力已完成逐项检查。它不会把“旅行信息服务合法无库存”误判成故障；需求理解/语义编辑仍必须用有效的 Ollama Key 单独验证。
+冒烟脚本通过即表示容器、数据库、队列、接口契约和当前能访问的外部能力已完成逐项检查。它不会把“旅行信息服务合法无库存”误判成故障；需求理解/语义编辑会用有效的 DeepSeek Key 单独验证。
 
 模型 Key 的最小验证（只检查状态，不打印 Key）：
 
 ```powershell
-Invoke-WebRequest https://ollama.com/api/tags -Headers @{ Authorization = "Bearer $env:OLLAMA_API_KEY" }
+Invoke-RestMethod https://api.deepseek.com/chat/completions -Method Post -Headers @{ Authorization = "Bearer $env:DEEPSEEK_API_KEY"; "Content-Type" = "application/json" } -Body (@{ model = "deepseek-v4-flash"; messages = @(@{ role = "user"; content = "return JSON: { ok: true }" }); response_format = @{ type = "json_object" }; thinking = @{ type = "enabled" }; reasoning_effort = "max" } | ConvertTo-Json -Depth 5)
 ```
 
-如果模型列表请求成功但 `/api/generate` 返回 401/403，说明账号授权或额度仍不可用；RoadMan 会明确暂停语义步骤，不会用关键词猜地点。
+如果 Chat Completions 请求返回 401/403，说明账号授权或额度不可用；RoadMan 会明确暂停语义步骤，不会用关键词猜地点。
 
 **第四步：使用**
 
@@ -75,16 +78,25 @@ docker compose up -d --build      # 更新代码后重新构建
 
 | 变量 | 用途 | 是否必需 |
 | --- | --- | --- |
-| `OLLAMA_API_KEY` | 需求理解、目的地研究、语义编辑等云端智能体 | 是 |
+| `DEEPSEEK_API_KEY` | 需求理解、目的地研究、语义编辑等云端智能体 | 是 |
 | `AMAP_WEBSERVICE_KEY` | 地理编码、POI、真实路线查询 | 是 |
 | `VITE_AMAP_JSAPI_KEY` | 浏览器端真实地图（构建时注入，改动后需重新构建） | 推荐 |
 | `VITE_AMAP_SECURITY_JS_CODE` | 浏览器地图安全密钥 | 推荐 |
 | `FLYAI_API_KEY` | 旅行搜索、住宿、餐饮补充 | 推荐 |
 | `OPENTRIPMAP_API_KEY` | 国际/开放景点数据补充 | 可选 |
-| `OLLAMA_MODEL` | 云端模型，默认 `deepseek-v4-flash:0731-cloud` | 可选 |
+| `DEEPSEEK_MODEL` | 官方模型，默认 `deepseek-v4-flash` | 可选 |
+| `DEEPSEEK_REASONING_EFFORT` | 思考深度，默认 `max` | 可选 |
+| `DEEPSEEK_THINKING` | 是否启用思考模式，默认 `true` | 可选 |
+| `DEEPSEEK_API_URL` | 官方 Chat Completions 地址 | 可选 |
 | `ROADMAN_HTTP_PROXY` | 容器访问外网所需的宿主机代理，如 `http://host.docker.internal:7890` | 可选 |
 
 缺少非必需 Key 时对应能力自动降级（例如无浏览器地图 Key 时使用简化地图视图），不影响主流程。
+
+DeepSeek 接口采用官方 OpenAI 兼容 Chat Completions 协议：请求使用
+`messages`、`response_format=json_object`、`thinking=enabled` 与
+`reasoning_effort=max`，响应读取 `choices[0].message.content`；模型私有思维链不保存。
+详见 [Chat Completions API](https://api-docs.deepseek.com/api/create-chat-completion/) 与
+[思考模式](https://api-docs.deepseek.com/guides/thinking_mode/) 官方文档。
 
 ## 本地开发（Conda）
 

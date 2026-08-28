@@ -7,7 +7,7 @@ test('正常需求预检后进入最终确认而不是空阻塞', async ({ page 
   // setting ROADMAN_RUN_LIVE_AGENT_E2E=1 opts into this live check.
   test.skip(
     process.env.ROADMAN_RUN_LIVE_AGENT_E2E !== '1',
-    '需要有效的 Ollama 云端凭据；设置 ROADMAN_RUN_LIVE_AGENT_E2E=1 运行真实智能体验收',
+    '需要有效的 DeepSeek 云端凭据；设置 ROADMAN_RUN_LIVE_AGENT_E2E=1 运行真实智能体验收',
   )
   test.setTimeout(60_000)
   await page.goto('http://127.0.0.1:8080/home')
@@ -72,7 +72,7 @@ test('阶段 D 真实 Agent 行程可展示地图、阶段和 Markdown', async (
 test('首页在规划前集中询问矛盾与缺失信息', async ({ page }) => {
   test.skip(
     process.env.ROADMAN_RUN_LIVE_AGENT_E2E !== '1',
-    '需要有效的 Ollama 云端凭据；设置 ROADMAN_RUN_LIVE_AGENT_E2E=1 运行真实智能体预检验收',
+    '需要有效的 DeepSeek 云端凭据；设置 ROADMAN_RUN_LIVE_AGENT_E2E=1 运行真实智能体预检验收',
   )
   test.setTimeout(60_000)
   await page.goto('http://127.0.0.1:8080/home')

@@ -8,7 +8,7 @@
 
 ```powershell
 Copy-Item .env.example .env
-# 编辑 .env，至少填写 OLLAMA_API_KEY 与 AMAP_WEBSERVICE_KEY
+# 编辑 .env，至少填写 DEEPSEEK_API_KEY 与 AMAP_WEBSERVICE_KEY
 docker compose up -d --build
 docker compose ps
 ```
@@ -105,7 +105,7 @@ docker compose up -d postgres redis worker
 
 ## Provider 配置与验证
 
-后端环境变量：`AMAP_WEBSERVICE_KEY`、`OPENTRIPMAP_API_KEY`、`FLYAI_API_KEY`、`OLLAMA_API_KEY`、`OLLAMA_MODEL`。前端构建变量：`VITE_AMAP_JSAPI_KEY`、`VITE_AMAP_SECURITY_JS_CODE`、`VITE_AMAP_SERVICE_HOST`。
+后端环境变量：`AMAP_WEBSERVICE_KEY`、`OPENTRIPMAP_API_KEY`、`FLYAI_API_KEY`、`DEEPSEEK_API_KEY`、`DEEPSEEK_MODEL`、`DEEPSEEK_REASONING_EFFORT`、`DEEPSEEK_THINKING`。前端构建变量：`VITE_AMAP_JSAPI_KEY`、`VITE_AMAP_SECURITY_JS_CODE`、`VITE_AMAP_SERVICE_HOST`。
 
 可用 `deploy/sync-local-secrets.ps1` 把本地位于 `Skills/**/apikey.txt`、`secretkey.txt`、`apipkey.txt` 的本地凭据同步进被 git 忽略的 `.env`（脚本不打印值）。若让 `LOAD_LOCAL_SKILL_CREDENTIALS=true`，后端会读取本地 Skill 凭据文件；Docker Compose 默认设为 `false`，数据一律走注入的环境变量。
 

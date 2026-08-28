@@ -203,7 +203,7 @@ def semantic_replacement(
         raise JourneyFailure("confirmed edit did not mark the route chain for recalculation")
     call(session, "POST", f"{base_url}/api/v1/trips/{trip_id}/planning/start", timeout=120)
     updated, replanned_snapshot = wait_for_completion(
-        session, base_url, trip_id, timeout_seconds=300
+        session, base_url, trip_id, timeout_seconds=600
     )
     if replanned_snapshot.get("route_replan_required"):
         raise JourneyFailure("route recalculation did not clear the pending-edit state")

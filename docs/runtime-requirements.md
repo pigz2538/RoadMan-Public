@@ -29,7 +29,10 @@ RoadMan 支持两种运行方式：Docker Compose（推荐，生产风格）与�
 
 | 变量 | 用途 | 说明 |
 | --- | --- | --- |
-| `OLLAMA_API_KEY` | 需求理解、目的地研究、语义编辑等云端智能体 | 必需；默认模型 `OLLAMA_MODEL=deepseek-v4-flash:0731-cloud` |
+| `DEEPSEEK_API_KEY` | 需求理解、目的地研究、语义编辑等云端智能体 | 必需；默认模型 `DEEPSEEK_MODEL=deepseek-v4-flash` |
+| `DEEPSEEK_REASONING_EFFORT` | 云端智能体思考深度 | 默认 `max` |
+| `DEEPSEEK_THINKING` | 是否启用思考模式 | 默认 `true` |
+| `DEEPSEEK_API_URL` | DeepSeek 官方 Chat Completions 地址 | 默认 `https://api.deepseek.com/chat/completions` |
 | `AMAP_WEBSERVICE_KEY` | 真实驾车/步行/骑行/公交路线、地理编码、POI | 必需；缺失则上述能力降级 |
 | `FLYAI_API_KEY` | 旅行搜索、住宿、餐饮补充 | 推荐 |
 | `OPENTRIPMAP_API_KEY` | 国际/开放景点数据补充 | 可选 |
@@ -55,7 +58,7 @@ RoadMan 支持两种运行方式：Docker Compose（推荐，生产风格）与�
 服务依赖关系保证顺序启动并健康后才拉起下游：backend 依赖 postgres+redis，worker 依赖 backend+postgres+redis，frontend 依赖 backend。后端与 worker 共享 `UPLOAD_DIR=/app/data/uploads` 卷与 `FILE_RETENTION_DAYS`。
 
 ```powershell
-Copy-Item .env.example .env   # 至少填入 OLLAMA_API_KEY 与 AMAP_WEBSERVICE_KEY
+Copy-Item .env.example .env   # 至少填入 DEEPSEEK_API_KEY 与 AMAP_WEBSERVICE_KEY
 docker compose up -d --build
 docker compose ps
 ```

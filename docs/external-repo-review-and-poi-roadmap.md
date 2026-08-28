@@ -17,10 +17,10 @@
 
 - **地图/POI**：`amap.geocode`、`amap.poi`（`backend/app/skills/amap.py`）提供地理编码与 POI，是地点身份的权威来源。
 - **目的地研究**：`destination_research.py` 的 `research_destination` 并行发起公开网页搜索（DuckDuckGo HTML）与 FlyAI 的 `keyword_search`/`ai_search`，产出 `web_sources` 与 `flyai_items`，保留查询（`queries`）、来源（`sources`）与各 provider 成功/失败状态（`providers`）。搜索层不下决定，只收集带来源的本地亮点。
-- **行政区与多目的地流程**：需求理解智能体返回 `destination_names`、`destination_scope` 和一个规范路线锚点；省份/城市/多目的地会分别建立证据包。目的地研究智能体先从来源中筛选著名地标/代表性美食，随后 `OllamaDestinationPlanAgent` 输出分区、每日主轴、三餐和住宿区域的计划单，路线工具只执行这份经过语义筛选的计划。数组字符串、餐馆/校园误替代等非法形态会再次交给需求智能体修复。
+- **行政区与多目的地流程**：需求理解智能体返回 `destination_names`、`destination_scope` 和一个规范路线锚点；省份/城市/多目的地会分别建立证据包。目的地研究智能体先从来源中筛选著名地标/代表性美食，随后 `DeepSeekDestinationPlanAgent` 输出分区、每日主轴、三餐和住宿区域的计划单，路线工具只执行这份经过语义筛选的计划。数组字符串、餐馆/校园误替代等非法形态会再次交给需求智能体修复。
 - **开放地点**：`opentripmap.nearby`（`backend/app/skills/opentripmap.py`）在坐标半径内召回开放位置，保留 `xid`、名称、坐标、`detail_url` 与距离。
 - **旅行候选**：FlyAI 的各适配器提供交通、酒店、餐饮与搜索候选。
-- **模型研究建议**：`llm.py` 的 `OllamaDestinationResearchAgent` 产出 `agent_recommendations`，经 `recommendations.py` 的 `_research_recommendations` 提取，作为对既有候选的来源背书，而非新增无来源地点。
+- **模型研究建议**：`llm.py` 的 `DeepSeekDestinationResearchAgent` 产出 `agent_recommendations`，经 `recommendations.py` 的 `_research_recommendations` 提取，作为对既有候选的来源背书，而非新增无来源地点。
 
 来源为空时 `research_destination` 返回 `status="needs_review"`，规划不因研究失败而中断。
 
@@ -61,9 +61,9 @@
 
 `llm.py` 的 POI 系列智能体在证据之上做决策，不新增无来源事实：
 
-- `OllamaPoiCurator`（`OllamaPoiCurator`）负责候选策展与说明。
-- `OllamaPoiRanker` 通过 `apply_agent_ranking`（`recommendations.py`）只按已验证的 `candidate_id` 回写 `score`/`agent_reason`，未知 ID 不改动数据。
-- `OllamaPoiSuitabilityAgent` 通过 `apply_agent_suitability` 附着 `suitable`、`confidence` 与 `weather/terrain/personal` 三向理由，不删除备选。
+- `DeepSeekPoiCurator`（`DeepSeekPoiCurator`）负责候选策展与说明。
+- `DeepSeekPoiRanker` 通过 `apply_agent_ranking`（`recommendations.py`）只按已验证的 `candidate_id` 回写 `score`/`agent_reason`，未知 ID 不改动数据。
+- `DeepSeekPoiSuitabilityAgent` 通过 `apply_agent_suitability` 附着 `suitable`、`confidence` 与 `weather/terrain/personal` 三向理由，不删除备选。
 - 排序在来源算法（`rank_tourism_candidates`）与 Agent 评分之间分层：先给每个候选算来源/距离/评分/价格/研究优先级的基础分，再用 `apply_agent_ranking` 叠加 Agent 分，二者都保留独立字段。
 
 `plan_attraction_coverage` 按研究智能体的 `area` 标签或坐标网格把来源背书的高优先级候选分到各天，保持地理集群在单日，避免酒店边界成为观光边界。

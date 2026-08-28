@@ -467,8 +467,8 @@ RoadMan 展示了汽车服务智能体不必控制车辆，也能在车主生命
 
 | 变量 | 用途 | 提交注意 |
 | --- | --- | --- |
-| `OLLAMA_API_KEY` | 云端需求、研究、复核、编辑等智能体 | 只在本地 `.env` 配置，不提交 |
-| `OLLAMA_MODEL` | 默认模型标识 | 默认 `deepseek-v4-flash:0731-cloud` |
+| `DEEPSEEK_API_KEY` | 云端需求、研究、复核、编辑等智能体 | 只在本地 `.env` 或用户环境变量配置，不提交 |
+| `DEEPSEEK_MODEL` | 默认模型标识 | 默认 `deepseek-v4-flash` |
 | `AMAP_WEBSERVICE_KEY` | 地理编码、POI 与路线 | 不出现在前端截图和日志 |
 | `VITE_AMAP_JSAPI_KEY` | 浏览器地图 | 按平台配置域名白名单 |
 | `VITE_AMAP_SECURITY_JS_CODE` | 浏览器地图安全配置 | 不写入公开文档实际值 |

@@ -221,7 +221,7 @@ async def test_requirement_agent_decides_semantic_party_size(monkeypatch):
             return None
 
         async def post(self, _url, **kwargs):
-            FakeClient.prompt = kwargs["json"]["prompt"]
+            FakeClient.prompt = kwargs["json"]["messages"][0]["content"]
             return FakeResponse()
 
     monkeypatch.setattr("app.planning.llm.httpx.AsyncClient", FakeClient)

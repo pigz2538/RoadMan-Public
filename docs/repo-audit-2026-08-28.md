@@ -30,7 +30,7 @@
 
 ### 4. 云端智能体测试边界
 
-需求理解和语义编辑坚持使用模型结构化输出；模型不可用时接口明确返回 `REQUIREMENT_AGENT_UNAVAILABLE`/`EDIT_AGENT_REQUIRED`，不回退到关键词猜测。浏览器中依赖真实云端的 4 个测试默认跳过，设置 `ROADMAN_RUN_LIVE_AGENT_E2E=1` 后才运行。当前环境的 Ollama `/api/generate` 返回 HTTP 403，因此需求评测为 0/12（外部授权阻断），不是把失败样例伪装成通过。
+需求理解和语义编辑坚持使用模型结构化输出；模型不可用时接口明确返回 `REQUIREMENT_AGENT_UNAVAILABLE`/`EDIT_AGENT_REQUIRED`，不回退到关键词猜测。浏览器中依赖真实云端的 4 个测试默认跳过，设置 `ROADMAN_RUN_LIVE_AGENT_E2E=1` 后才运行。当前版本统一使用 DeepSeek 官方 Chat Completions 接口，真实云端验收由 `deploy/full_journey_acceptance.py` 覆盖。
 
 ### 5. 删除行程与后台任务竞态
 
@@ -53,7 +53,7 @@
 
 ## 外部配置恢复后
 
-1. 更新被授权的 `OLLAMA_API_KEY`（不要提交到仓库或日志）。
+1. 更新被授权的 `DEEPSEEK_API_KEY`（不要提交到仓库或日志），并用官方 Chat Completions 最小请求验证。
 2. 用最小生成请求验证 Key，不要只检查模型列表。
 3. 运行 `python evaluation/run_evals.py`，目标为 12/12。
 4. 设置 `ROADMAN_RUN_LIVE_AGENT_E2E=1` 后运行真实预检浏览器用例。

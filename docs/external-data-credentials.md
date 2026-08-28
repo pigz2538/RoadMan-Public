@@ -60,12 +60,12 @@
 - 是否必需：否；只导入目录身份信息，续航/能耗由用户确认。
 - 失败降级：目录服务不可用时车辆数据降级，行程以已有车辆上下文继续。
 
-### Ollama 兼容云 API（`OLLAMA_API_KEY`）
+### DeepSeek 官方 Chat Completions（`DEEPSEEK_API_KEY`）
 
 - 落地位置：`backend/app/planning/llm.py` 各智能体（需求提取、需求校验、编辑、POI 策展、目的地研究、POI 排序、POI 适配、特殊事件研究）。
 - 用途：语义理解、目的地研究、候选排序/策展/适配、自然语言编辑与附件理解。
-- 环境变量：`OLLAMA_API_KEY`、`OLLAMA_MODEL`（默认 `deepseek-v4-flash:0731-cloud`）、`OLLAMA_API_URL`（默认 `https://ollama.com/api/generate`）。
-- 是否必需：Agent 能力建议配置；未配置 `OLLAMA_API_KEY` 时需求提取回退到离线结构化解析，只保留硬性结构字段，不做语义猜测。
+- 环境变量：`DEEPSEEK_API_KEY`、`DEEPSEEK_MODEL`（默认 `deepseek-v4-flash`）、`DEEPSEEK_API_URL`（默认 `https://api.deepseek.com/chat/completions`）、`DEEPSEEK_REASONING_EFFORT`（默认 `max`）、`DEEPSEEK_THINKING`（默认 `true`）。
+- 是否必需：Agent 能力建议配置；未配置 `DEEPSEEK_API_KEY` 时需求提取回退到离线结构化解析，只保留硬性结构字段，不做语义猜测。
 - 失败降级：模型服务不可达时，需求提取走 `extract_structural_constraints` 与 `extract_explicit_location_constraints` 的确定性兜底；各智能体结构化失败时由下游校验拦截。模型私有思维链不落库、不入日志。
 
 ## 凭据验证
