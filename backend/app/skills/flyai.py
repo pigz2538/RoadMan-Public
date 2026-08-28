@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import math
 import os
 import re
 import shutil
@@ -24,6 +25,14 @@ class FlyAIHotelInput(BaseModel):
     check_out_date: date
     max_price: int | None = Field(default=None, ge=1, le=100000)
     sort: str = "rate_desc"
+    # Optional planner-supplied anchor.  The upstream hotel search can
+    # occasionally return stale or cross-city cards for a broad destination
+    # query; when an anchor is supplied we keep only hotels within the
+    # requested radius and let the planner fall back to another source if the
+    # filtered list is empty.
+    center_longitude: float | None = Field(default=None, ge=-180, le=180)
+    center_latitude: float | None = Field(default=None, ge=-90, le=90)
+    max_distance_km: float | None = Field(default=None, gt=0, le=500)
 
 
 class FlyAIPoiInput(BaseModel):
@@ -157,6 +166,27 @@ def _place_variants(value: object) -> set[str]:
 def _place_in_text(place: object, text: object) -> bool:
     haystack = str(text or "").strip().casefold()
     return any(token in haystack for token in _place_variants(place))
+
+
+def _haversine_km(
+    longitude_a: float,
+    latitude_a: float,
+    longitude_b: float,
+    latitude_b: float,
+) -> float:
+    """Return great-circle distance between two WGS84 coordinates."""
+    radius_km = 6371.0088
+    lon_a, lat_a, lon_b, lat_b = map(
+        math.radians,
+        (longitude_a, latitude_a, longitude_b, latitude_b),
+    )
+    delta_lon = lon_b - lon_a
+    delta_lat = lat_b - lat_a
+    haversine = (
+        math.sin(delta_lat / 2) ** 2
+        + math.cos(lat_a) * math.cos(lat_b) * math.sin(delta_lon / 2) ** 2
+    )
+    return radius_km * 2 * math.asin(math.sqrt(min(1.0, max(0.0, haversine))))
 
 
 def _flyai_process_env() -> dict[str, str]:
@@ -722,11 +752,26 @@ class FlyAIHotelAdapter(SkillAdapter):
             )
         raw_items = body.get("data", {}).get("itemList", [])
         items = []
+        filtered_out_of_area = 0
         for item in raw_items:
             try:
                 longitude = float(item["longitude"])
                 latitude = float(item["latitude"])
             except (KeyError, TypeError, ValueError):
+                continue
+            if (
+                request.center_longitude is not None
+                and request.center_latitude is not None
+                and request.max_distance_km is not None
+                and _haversine_km(
+                    request.center_longitude,
+                    request.center_latitude,
+                    longitude,
+                    latitude,
+                )
+                > request.max_distance_km
+            ):
+                filtered_out_of_area += 1
                 continue
             price = _parse_price(item.get("price"))
             items.append(
@@ -751,13 +796,24 @@ class FlyAIHotelAdapter(SkillAdapter):
             return SkillResult(
                 success=False,
                 provider="FlyAI / 飞猪",
-                warnings=["FlyAI 未返回可用酒店"],
+                warnings=[
+                    (
+                        "FlyAI 返回的酒店均不在目的地范围内"
+                        if filtered_out_of_area
+                        else "FlyAI 未返回可用酒店"
+                    )
+                ],
                 error_code="FLYAI_NO_RESULTS",
             )
         return SkillResult(
             success=True,
             provider="FlyAI / 飞猪",
             data={"items": items, "count": len(items)},
+            warnings=(
+                [f"已过滤 {filtered_out_of_area} 个超出目的地范围的酒店结果"]
+                if filtered_out_of_area
+                else []
+            ),
             sources=[
                 SourceRecord(
                     provider="FlyAI / 飞猪",

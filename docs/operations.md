@@ -49,7 +49,7 @@ Invoke-RestMethod http://127.0.0.1:8000/api/v1/ops/metrics
 
 `deploy/` 下提供三档验证脚本（均运行在宿主机 Python，需 `requests`）：
 
-- `python deploy/api_smoke.py`：对运行中容器做 API 冒烟。覆盖健康检查、Skills 各 provider（含 `require_success`，200 但 `success=false` 的 provider 失败会计为失败）、创建临时行程/车辆做增删改、上传文件抽取、Job 队列，以及 completed fixture 的五格式导出（Markdown/PDF/PPTX/PNG/HTML）。脚本只打印状态/汇总字段，绝不打印凭据或响应 payload，并在结束时清理临时 trip 与 vehicle。
+- `python deploy/api_smoke.py`：对运行中容器做 API 冒烟。覆盖健康检查、各外部能力、创建临时行程/车辆做增删改、上传文件抽取、Job 队列，以及 completed fixture 的五格式导出（Markdown/PDF/PPTX/PNG/HTML）。对地理编码、路线、POI、天气、车型等必须有成功结果的探针使用 `require_success`；住宿/轮船等允许合法“无库存/无班次”，脚本仍检查响应契约但不会误报。脚本只打印状态/汇总字段，绝不打印凭据或响应 payload，并在结束时清理临时 trip 与 vehicle。
 - `python deploy/full_journey_acceptance.py`：完整旅程验收，比冒烟更强。等待新行程规划完成，检查面向旅客的完整性，请行程助手做一次语义替换并确认预览，核对重算后的快照，并下载全部导出格式。支持 `--base-url` 指向远程 API。
 - `python deploy/edit_replan_acceptance.py`：语义编辑与重规划验收，覆盖编辑预览→确认/驳回→重算链路。
 

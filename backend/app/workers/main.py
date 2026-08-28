@@ -68,6 +68,20 @@ async def execute_job(_: dict, job_id: str) -> dict:
                 clarification_answer=payload.get("clarification_answer"),
                 job_id=job_id,
             )
+            # A trip can be deleted while a queued planning job is starting
+            # (the UI deliberately allows deleting a history item at any
+            # time).  ``run_planning`` reports this as a structured result;
+            # do not let the worker mark that job completed with an error
+            # payload or replay it as a failed planning run.
+            if (
+                isinstance(result, dict)
+                and isinstance(result.get("error"), dict)
+                and result["error"].get("code") == "TRIP_NOT_FOUND"
+            ):
+                return await _discard_deleted_trip_job(
+                    job_id,
+                    payload.get("trip_id"),
+                )
         else:
             result = {"accepted": True, "kind": kind, "payload": payload}
     except Exception as exc:
@@ -87,6 +101,40 @@ async def execute_job(_: dict, job_id: str) -> dict:
                 await session.commit()
             if kind == "planning" and payload.get("trip_id"):
                 trip = await TripRepository(session).get(payload["trip_id"])
+                if not trip:
+                    # The only durable record left is the job itself.  A
+                    # deleted trip is an expected cancellation, not an
+                    # application failure, and should not produce a noisy
+                    # traceback or a stale failure event in the UI.
+                    if row:
+                        row.status = JobStatus.cancelled
+                        row.result_json = json.dumps(
+                            {
+                                "cancelled": True,
+                                "reason": "TRIP_DELETED",
+                                "trip_id": payload["trip_id"],
+                            },
+                            ensure_ascii=False,
+                        )
+                        row.error_json = json.dumps(
+                            {
+                                "code": "TRIP_DELETED",
+                                "message": "行程已删除，未继续执行规划任务",
+                            },
+                            ensure_ascii=False,
+                        )
+                        row.updated_at = datetime.now(timezone.utc)
+                        await session.commit()
+                    logger.info(
+                        "planning_job_discarded_trip_deleted",
+                        job_id=job_id,
+                        trip_id=payload["trip_id"],
+                    )
+                    return {
+                        "cancelled": True,
+                        "reason": "TRIP_DELETED",
+                        "trip_id": payload["trip_id"],
+                    }
                 if trip:
                     state, markdown = await TripRepository(session).get_planning_snapshot(trip.id)
                     state = state or {}
@@ -124,6 +172,38 @@ async def execute_job(_: dict, job_id: str) -> dict:
         row.updated_at = datetime.now(timezone.utc)
         await session.commit()
         return result
+
+
+async def _discard_deleted_trip_job(job_id: str, trip_id: str | None) -> dict:
+    """Cancel a planning job whose trip was removed before it could run."""
+    async with SessionLocal() as session:
+        row = await session.get(JobRow, job_id)
+        if row:
+            row.status = JobStatus.cancelled
+            row.progress = 100
+            row.result_json = json.dumps(
+                {
+                    "cancelled": True,
+                    "reason": "TRIP_DELETED",
+                    "trip_id": trip_id,
+                },
+                ensure_ascii=False,
+            )
+            row.error_json = json.dumps(
+                {
+                    "code": "TRIP_DELETED",
+                    "message": "行程已删除，未继续执行规划任务",
+                },
+                ensure_ascii=False,
+            )
+            row.updated_at = datetime.now(timezone.utc)
+            await session.commit()
+    logger.info(
+        "planning_job_discarded_trip_deleted",
+        job_id=job_id,
+        trip_id=trip_id,
+    )
+    return {"cancelled": True, "reason": "TRIP_DELETED", "trip_id": trip_id}
 
 
 class WorkerSettings:

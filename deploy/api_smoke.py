@@ -115,6 +115,11 @@ def call(
 
 
 def main() -> int:
+    # Keep provider probes in a future, valid booking window.  Fixed dates
+    # quickly become stale and make a healthy API look broken once the test
+    # corpus moves past the original demo date.
+    provider_start = date.today() + timedelta(days=14)
+    provider_end = provider_start + timedelta(days=1)
     call("health", "GET", "/health")
     trip_response = call("trips.list", "GET", "/api/v1/trips")
     trip_rows = trip_response.json() if trip_response and trip_response.ok else []
@@ -128,7 +133,7 @@ def main() -> int:
     call("ops.metrics", "GET", "/api/v1/ops/metrics")
     call("vehicles.list", "GET", "/api/v1/vehicles")
 
-    raw = "2026年8月20日早上从武汉出发去九江，8月22日晚返回武汉，情侣出游，舒适自驾。"
+    raw = f"{provider_start.isoformat()}早上从武汉出发去九江，{(provider_start + timedelta(days=2)).isoformat()}晚返回武汉，情侣出游，舒适自驾。"
     call(
         "trips.preflight",
         "POST",
@@ -216,29 +221,33 @@ def main() -> int:
         "skill.flyai.hotel",
         "POST",
         "/api/v1/skills/flyai/hotel",
-        json_body={"destination": "北京", "check_in_date": "2026-08-20", "check_out_date": "2026-08-21"},
-        require_success=True,
+        json_body={"destination": "北京", "check_in_date": provider_start.isoformat(), "check_out_date": provider_end.isoformat()},
+        # A valid hotel search may legitimately return no inventory (and the
+        # planner then uses the map/open-web hotel source).  The endpoint
+        # contract is still exercised; unlike auth/quota failures this is not
+        # an API availability failure.
+        require_success=False,
         timeout=60,
     )
     call(
         "skill.flyai.train",
         "POST",
         "/api/v1/skills/flyai/train",
-        json_body={"origin": "武汉", "destination": "北京", "dep_date": "2026-08-20", "sort_type": 4},
+        json_body={"origin": "武汉", "destination": "北京", "dep_date": provider_start.isoformat(), "sort_type": 4},
         timeout=60,
     )
     call(
         "skill.flyai.flight",
         "POST",
         "/api/v1/skills/flyai/flight",
-        json_body={"origin": "武汉", "destination": "北京", "dep_date": "2026-08-20", "sort_type": 4},
+        json_body={"origin": "武汉", "destination": "北京", "dep_date": provider_start.isoformat(), "sort_type": 4},
         timeout=60,
     )
     call(
         "skill.flyai.ferry",
         "POST",
         "/api/v1/skills/flyai/ferry",
-        json_body={"origin": "上海", "destination": "舟山", "dep_date": "2026-08-20"},
+        json_body={"origin": "上海", "destination": "舟山", "dep_date": provider_start.isoformat()},
         timeout=60,
     )
     call(

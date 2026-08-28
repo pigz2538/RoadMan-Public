@@ -17,7 +17,7 @@
 | [mobility-and-poi-data-contract.md](mobility-and-poi-data-contract.md) | 景点事实、票务预约、停车、图片、公共交通与跨城班次的数据契约和未知状态 |
 | [README.md](README.md) | 本文档索引 |
 
-## 评审与规划文档（4 份）
+## 评审与规划文档（5 份）
 
 | 文档 | 用途 |
 | --- | --- |
@@ -25,6 +25,7 @@
 | [current-repair-plan.md](current-repair-plan.md) | 当前仍存在的问题与改进清单（P0/P1/P2），附代码位置与建议动作 |
 | [external-data-credentials.md](external-data-credentials.md) | 外部能力标识、环境变量、必需性、降级策略与凭据存放规则 |
 | [external-repo-review-and-poi-roadmap.md](external-repo-review-and-poi-roadmap.md) | POI 研究、候选聚合、身份校验、证据留存与图片补全的设计与边界 |
+| [repo-audit-2026-08-28.md](repo-audit-2026-08-28.md) | 2026-08-28 全仓库审计、修复、测试结果与当前外部阻断 |
 
 ## 阅读指引
 
@@ -32,3 +33,4 @@
 - 理解数据与接口结构，读 [domain-model.md](domain-model.md)、[api-contract.md](api-contract.md)。
 - 涉及路线/地图/交通降级，读 [routing-fallback-design.md](routing-fallback-design.md)。
 - 提交参赛或对外交付前，用 [competition-readiness.md](competition-readiness.md) 核对能力，并按 [current-repair-plan.md](current-repair-plan.md) 处理已知差距。
+- 需要确认当前代码是否真的可发布时，查看 [repo-audit-2026-08-28.md](repo-audit-2026-08-28.md) 的实测结果，不要只看历史截图或旧日志。

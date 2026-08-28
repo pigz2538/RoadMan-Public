@@ -664,7 +664,7 @@ function activate(label: string) {
     <section class="planner-area">
       <div class="section-title">
         <span>从一句话开始</span>
-        <h1>我是您的自驾游规划 <em>Agent</em></h1>
+        <h1>我是您的自驾游规划 <em>智能体</em></h1>
       </div>
       <section
         v-if="preflight && !preflight.ready"
@@ -676,7 +676,7 @@ function activate(label: string) {
       >
         <template v-if="activeClarification">
           <div class="preflight-heading">
-            <span>Agent 需要向您确认</span>
+          <span>智能体需要向您确认</span>
             <b>{{ clarificationIndex + 1 }} / {{ preflight.issues.length }}</b>
           </div>
           <strong>{{ activeClarification.message }}</strong>
@@ -761,7 +761,7 @@ function activate(label: string) {
             </div>
           </template>
           <section v-if="preflight.special_event_research?.length" class="preflight-event-research" aria-label="特殊活动检索结果">
-            <header><strong>Agent 已核对特殊活动</strong><small>请根据来源中的窗口选择日期</small></header>
+            <header><strong>智能体已核对特殊活动</strong><small>请根据来源中的窗口选择日期</small></header>
             <article v-for="item in preflight.special_event_research" :key="item.event">
               <strong>{{ item.event }}</strong>
               <span v-if="item.facts?.peak_start_date">极大期：{{ item.facts.peak_start_date }}{{ item.facts.peak_end_date && item.facts.peak_end_date !== item.facts.peak_start_date ? ` 至 ${item.facts.peak_end_date}` : '' }}</span>

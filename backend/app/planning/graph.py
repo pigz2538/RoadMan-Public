@@ -6,6 +6,7 @@ import time as monotonic_time
 from collections.abc import Awaitable, Callable
 from copy import deepcopy
 from datetime import date, datetime, time, timedelta
+from math import ceil
 from typing import Any, Literal
 from urllib.parse import quote
 from zoneinfo import ZoneInfo
@@ -943,15 +944,38 @@ def build_planning_graph(
             event="tool_started",
             tool="flyai.hotel",
         )
+        hotel_payload: dict[str, Any] = {
+            "destination": _destination_search_area(destination),
+            "poi_name": destination["name"],
+            "check_in_date": state["trip_request"]["start_date"],
+            "check_out_date": state["trip_request"]["end_date"],
+            "sort": "rate_desc",
+        }
+        # Keep provider cards anchored to the resolved destination.  A broad
+        # hotel search can otherwise return stale cards from an unrelated
+        # city (or even another country), which then makes the hotel selector
+        # place the whole itinerary beside an airport or a random centroid.
+        # The radius is deliberately wider for province/region requests and
+        # is not used as a hidden sightseeing radius.
+        if coordinates:
+            try:
+                hotel_payload.update(
+                    {
+                        "center_longitude": float(coordinates["longitude"]),
+                        "center_latitude": float(coordinates["latitude"]),
+                        "max_distance_km": (
+                            260.0
+                            if str(destination.get("destination_scope") or "")
+                            in {"province", "region", "multi_destination"}
+                            else 100.0
+                        ),
+                    }
+                )
+            except (KeyError, TypeError, ValueError):
+                pass
         flyai_hotels = await registry.execute(
             "flyai.hotel",
-            {
-                "destination": _destination_search_area(destination),
-                "poi_name": destination["name"],
-                "check_in_date": state["trip_request"]["start_date"],
-                "check_out_date": state["trip_request"]["end_date"],
-                "sort": "rate_desc",
-            },
+            hotel_payload,
             SkillContext(trip_id=state["trip_id"]),
         )
         if flyai_hotels.success and isinstance(flyai_hotels.data, dict):
@@ -2141,6 +2165,57 @@ def build_planning_graph(
                             (return_route.get("data") or {}).get("selected_mode")
                         )
                     )
+                elif request.get("return_time"):
+                    # For a road/local return there is no provider departure
+                    # timestamp to act as the terminal cutoff.  The explicit
+                    # return clock is an *arrival* deadline, so reserve the
+                    # whole return-leg duration before it.  Without this
+                    # cutoff the sightseeing scheduler fills the day until
+                    # the deadline and ``_return_stage_start`` subsequently
+                    # pushes a long drive into the next calendar day (for
+                    # example a route ending at 00:30 on the following day).
+                    # Treating the latest feasible departure as the cutoff
+                    # lets the existing connector logic trim the last local
+                    # activities and keep the final stage on the requested
+                    # day.
+                    deadline = _request_clock(
+                        day_date,
+                        request.get("return_time"),
+                        default=time(23, 59),
+                    )
+                    try:
+                        return_duration = int(
+                            (return_route.get("data") or {}).get(
+                                "duration_minutes"
+                            )
+                            or 0
+                        )
+                    except (TypeError, ValueError):
+                        return_duration = 0
+                    return_buffer = 0
+                    if str(
+                        (return_route.get("data") or {}).get("selected_mode")
+                    ) == "driving":
+                        # ``enrich_deep_drive_plan`` adds real rest/charging
+                        # stops after stages are built. Reserve that buffer
+                        # now, otherwise a route that appears to end exactly
+                        # at the user's deadline can drift past it during the
+                        # safety pass and be split into the next day.
+                        max_continuous = max(
+                            60,
+                            int(
+                                request.get("max_continuous_drive_minutes")
+                                or 120
+                            ),
+                        )
+                        rest_count = max(
+                            0,
+                            ceil(return_duration / max_continuous) - 1,
+                        )
+                        return_buffer = 30 + (rest_count * 20)
+                    return_cutoff = deadline - timedelta(
+                        minutes=max(0, return_duration + return_buffer)
+                    )
             local_items = [
                 item
                 for item in state.get("local_routes", [])
@@ -2615,6 +2690,24 @@ def build_planning_graph(
                     local_start,
                     return_route,
                 )
+                # A road return with an explicit arrival clock also carries
+                # the deep-drive safety buffer reserved above.  The generic
+                # helper only knows the provider movement duration, so its
+                # latest start would still be ``deadline - movement`` and
+                # the later energy/rest pass could push arrival past the
+                # requested clock.  Honour the effective cutoff when the
+                # local chain still fits; this keeps the final stage on the
+                # same day while preserving all existing provider-timetable
+                # handling for trains/flights/ferries.
+                if (
+                    return_cutoff
+                    and request.get("return_time")
+                    and str((return_route.get("data") or {}).get("selected_mode"))
+                    == "driving"
+                    and return_start > return_cutoff
+                    and local_start <= return_cutoff
+                ):
+                    return_start = return_cutoff
                 return_origin = return_route.get("origin_place") or request["destination"]
                 return_destination = return_route.get("destination_place") or request["origin"]
                 stages.append(
@@ -3314,7 +3407,18 @@ def build_planning_graph(
         # chained local routes; merely rescheduling activities cannot repair a
         # disconnected stage pair.
         rebuild_route = any(
-            code in {"ROUTE_DISCONTINUITY", "ROUTE_NOT_CLOSED", "EMPTY_DAY_STAGES"}
+            code
+            in {
+                "ROUTE_DISCONTINUITY",
+                "ROUTE_NOT_CLOSED",
+                "EMPTY_DAY_STAGES",
+                # A late return is often caused by the route stage being
+                # built after the day's activities were already filled.  A
+                # fresh stage build applies the arrival-deadline cutoff above
+                # and trims/reconnects the final day instead of replaying the
+                # same impossible timeline four times.
+                "RETURN_DEADLINE_UNACHIEVABLE",
+            }
             for code in issue_codes
         )
         repair_drive_constraints = rebuild_route or any(

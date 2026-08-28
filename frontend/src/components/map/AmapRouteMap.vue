@@ -287,6 +287,23 @@ function normalizedMarkerName(name: string): string {
     .trim()
 }
 
+const SAME_NAMED_PLACE_DISTANCE = 0.015 // roughly 1.5 km at mainland-China latitudes
+const SAME_COORDINATE_DISTANCE = 0.001 // roughly 100 m; names may differ by provider
+
+function compatibleMarkerNames(left: string, right: string): boolean {
+  const a = normalizedMarkerName(left)
+  const b = normalizedMarkerName(right)
+  if (!a || !b) return false
+  if (a === b) return true
+  // Providers often decorate one record with a gate, road or district while
+  // another returns the short landmark name. Treat a clear prefix/suffix
+  // relationship as the same place, but require at least three characters so
+  // generic names such as “湖” do not swallow nearby POIs.
+  const shorter = a.length <= b.length ? a : b
+  const longer = a.length <= b.length ? b : a
+  return shorter.length >= 3 && (longer.startsWith(shorter) || longer.endsWith(shorter))
+}
+
 function mergeMarkerCandidates(candidates: MarkerCandidate[]): MarkerCandidate[] {
   const merged: MarkerCandidate[] = []
   for (const candidate of candidates) {
@@ -325,11 +342,16 @@ function groupMarkerCandidates(candidates: MarkerCandidate[]): MarkerGroup[] {
     const nameKey = normalizedMarkerName(candidate.place.name)
     const existing = groups.find((item) =>
       nameKey
-      && normalizedMarkerName(item.place.name) === nameKey
+      && (
+        compatibleMarkerNames(item.place.name, candidate.place.name)
+        || markerDistance(item.place, candidate.place) <= SAME_COORDINATE_DISTANCE
+      )
       // Route endpoints and activity records for the same named place can
-      // differ by a few hundred metres. Keep one shared name with multiple
-      // category badges instead of repeating the name for every record.
-      && markerDistance(item.place, candidate.place) <= 0.003,
+      // differ by a few hundred metres (or more when a provider geocodes a
+      // district entrance). Keep one shared name with multiple category
+      // badges instead of repeating the name for every record. A very close
+      // coordinate is sufficient even when providers use different labels.
+      && markerDistance(item.place, candidate.place) <= SAME_NAMED_PLACE_DISTANCE,
     )
     if (existing) {
       if (!existing.kinds.includes(candidate.kind)) existing.kinds.push(candidate.kind)

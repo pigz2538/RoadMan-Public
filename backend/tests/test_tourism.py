@@ -633,6 +633,63 @@ async def test_flyai_hotel_adapter_degrades_when_cli_is_missing(monkeypatch):
     assert result.error_code == "SKILL_NOT_CONFIGURED"
 
 
+@pytest.mark.asyncio
+async def test_flyai_hotel_adapter_filters_cross_city_results(monkeypatch):
+    class FakeProcess:
+        async def communicate(self):
+            return (
+                json.dumps(
+                    {
+                        "data": {
+                            "itemList": [
+                                {
+                                    "shId": "near",
+                                    "name": "北京测试酒店",
+                                    "address": "北京",
+                                    "longitude": 116.40,
+                                    "latitude": 39.90,
+                                    "rate": "4.8",
+                                },
+                                {
+                                    "shId": "far",
+                                    "name": "异地测试酒店",
+                                    "address": "海外",
+                                    "longitude": 2.35,
+                                    "latitude": 48.86,
+                                    "rate": "4.9",
+                                },
+                            ]
+                        }
+                    }
+                ).encode("utf-8"),
+                b"",
+            )
+
+    monkeypatch.setattr("app.skills.flyai.shutil.which", lambda _: "flyai")
+    async def fake_create_subprocess_exec(*args, **kwargs):
+        return FakeProcess()
+
+    monkeypatch.setattr(
+        "app.skills.flyai.asyncio.create_subprocess_exec",
+        fake_create_subprocess_exec,
+    )
+    result = await FlyAIHotelAdapter().execute(
+        {
+            "destination": "北京",
+            "check_in_date": "2026-09-01",
+            "check_out_date": "2026-09-03",
+            "center_longitude": 116.40,
+            "center_latitude": 39.90,
+            "max_distance_km": 100,
+        },
+        SkillContext(),
+    )
+
+    assert result.success is True
+    assert [item["name"] for item in result.data["items"]] == ["北京测试酒店"]
+    assert result.warnings and "过滤" in result.warnings[0]
+
+
 def test_flyai_masked_price_is_a_range_not_a_fake_exact_amount():
     assert _parse_price("¥3xx") == (300.0, 399.0, True)
     assert _parse_price("¥618") == (618.0, 618.0, False)

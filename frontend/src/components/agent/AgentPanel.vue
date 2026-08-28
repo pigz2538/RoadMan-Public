@@ -229,7 +229,7 @@ watch(() => store.pendingPatch?.id, (patchId) => {
 
 <template>
   <aside class="agent-panel glass-card">
-    <header><Bot /><strong>Agent 行程助理</strong><span class="online-dot" /></header>
+    <header><Bot /><strong>行程助理</strong><span class="online-dot" /></header>
     <div class="context-chip">{{ contextText }}</div>
 
     <section v-if="store.routeReplanRequired" class="route-replan-notice glass-card">

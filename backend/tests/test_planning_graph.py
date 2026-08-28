@@ -855,6 +855,46 @@ async def test_graph_builds_two_day_markdown_plan():
 
 
 @pytest.mark.asyncio
+async def test_return_deadline_trims_last_day_before_long_drive():
+    graph = build_planning_graph(
+        fake_registry(),
+        Settings(
+            load_local_skill_credentials=False,
+            enable_llm_requirement_extraction=False,
+        ),
+    )
+    result = await graph.ainvoke(
+        {
+            "trip_id": "trip_return_deadline",
+            "raw_input": "8月8日从武汉自驾去庐山，8月9日20点前返回武汉",
+            "trip_request": {
+                "raw_text": "8月8日从武汉自驾去庐山，8月9日20点前返回武汉",
+                "origin": {"name": "武汉"},
+                "destination": {"name": "庐山"},
+                "start_date": "2026-08-08",
+                "end_date": "2026-08-09",
+                "departure_time": "08:00:00",
+                "return_time": "20:00:00",
+                "transport_modes": ["driving"],
+                "max_days": 2,
+            },
+            "clarification_round": 0,
+        }
+    )
+
+    assert result["verification_result"]["passed"] is True
+    final_stage = result["day_plans"][-1]["stages"][-1]
+    assert final_stage["title"].startswith("返程")
+    assert final_stage["planned_end"] <= "2026-08-09T20:00:00+08:00"
+    assert all(
+        stage["planned_start"][:10] == stage["planned_end"][:10]
+        for day in result["day_plans"]
+        for stage in day["stages"]
+        if stage["mode"] == "driving"
+    )
+
+
+@pytest.mark.asyncio
 async def test_tourism_discovery_keeps_flyai_meal_and_hotel_candidates():
     progress_events = []
 

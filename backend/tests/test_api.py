@@ -410,6 +410,8 @@ async def test_preflight_requires_semantic_agent_for_locations_but_keeps_calenda
 @pytest.mark.asyncio
 async def test_preflight_replaces_stale_end_date_for_relative_duration(client):
     """A duration-only request must not inherit an invalid date from a prior round."""
+    today = date.today()
+    expected_start = today - timedelta(days=today.weekday()) + timedelta(days=9)
     response = await client.post(
         "/api/v1/trips/preflight",
         json={
@@ -429,8 +431,8 @@ async def test_preflight_replaces_stale_end_date_for_relative_duration(client):
 
     assert response.status_code == 200
     body = response.json()
-    assert body["extracted"]["start_date"] == "2026-08-26"
-    assert body["extracted"]["end_date"] == "2026-08-28"
+    assert body["extracted"]["start_date"] == expected_start.isoformat()
+    assert body["extracted"]["end_date"] == (expected_start + timedelta(days=2)).isoformat()
     assert "INVALID_DATE_ORDER" not in {item["code"] for item in body["issues"]}
 
 
@@ -788,3 +790,43 @@ async def test_cancelled_planning_job_pauses_trip(client):
     assert result["cancelled"] is True
     trip = await client.get(f"/api/v1/trips/{trip_id}")
     assert trip.json()["status"] == "paused"
+
+
+@pytest.mark.asyncio
+async def test_deleted_trip_planning_job_is_discarded(monkeypatch, client):
+    """Deleting a trip while its worker is starting must not leave a failed job."""
+    from app.workers import main as worker_main
+
+    trip_response = await client.post(
+        "/api/v1/trips",
+        json={
+            "title": "删除中的规划",
+            "request": {"raw_text": "武汉到庐山两天"},
+        },
+    )
+    trip_id = trip_response.json()["id"]
+    job_response = await client.post(
+        "/api/v1/jobs",
+        json={
+            "kind": "planning",
+            "trip_id": trip_id,
+            "payload": {"trip_id": trip_id},
+        },
+    )
+    job_id = job_response.json()["id"]
+    assert (await client.delete(f"/api/v1/trips/{trip_id}")).status_code == 204
+
+    async def fake_run_planning(*args, **kwargs):
+        raise KeyError(trip_id)
+
+    monkeypatch.setattr(worker_main, "run_planning", fake_run_planning)
+    result = await worker_main.execute_job({}, job_id)
+
+    assert result == {
+        "cancelled": True,
+        "reason": "TRIP_DELETED",
+        "trip_id": trip_id,
+    }
+    fetched = await client.get(f"/api/v1/jobs/{job_id}")
+    assert fetched.json()["status"] == "cancelled"
+    assert fetched.json()["error"]["code"] == "TRIP_DELETED"

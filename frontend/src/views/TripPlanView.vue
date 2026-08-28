@@ -331,7 +331,7 @@ async function handleMapPoint(point: { name: string; address?: string; longitude
     })
     store.selectedNodeId = store.currentStageId
     mapPickMode.value = false
-    mapPickMessage.value = `已选中“${point.name}”，请在右侧 Agent 面板确认是否加入行程。`
+    mapPickMessage.value = `已选中“${point.name}”，请在右侧行程助理确认是否加入行程。`
   } catch (error) {
     mapPickMessage.value = error instanceof Error ? error.message : '地图选点暂时无法生成修改预览'
   }
@@ -684,7 +684,7 @@ watch(
       <div v-if="planningBusy" class="planning-overlay" role="status" aria-live="polite">
         <section class="planning-wait-dialog glass-card">
           <span class="planning-spinner" aria-hidden="true" />
-          <strong>{{ planningRestarting ? '正在重新规划整段行程…' : 'Agent 正在完善行程…' }}</strong>
+          <strong>{{ planningRestarting ? '正在重新规划整段行程…' : '智能体正在完善行程…' }}</strong>
           <small>路线、景点、餐饮、住宿与补能安排会逐项复核，请稍候</small>
           <div class="planning-overlay-meter" aria-hidden="true"><i :style="{ width: `${planningProgress}%` }" /></div>
           <b>{{ planningProgress }}%</b>
@@ -724,7 +724,7 @@ watch(
 
     <section v-if="planningSnapshot?.special_event_research?.length" class="special-event-research glass-card">
       <div class="special-event-heading">
-        <div><span class="eyebrow">EVENT RESEARCH AGENT</span><strong>已核对的特殊活动</strong></div>
+        <div><span class="eyebrow">活动核验智能体</span><strong>已核对的特殊活动</strong></div>
         <small>事实来自公开来源，日期未确定时不会擅自代填</small>
       </div>
       <article v-for="item in planningSnapshot.special_event_research" :key="item.event" class="special-event-item">
@@ -743,7 +743,7 @@ watch(
     <div v-if="loading" class="page-state">正在加载武汉—庐山行程…</div>
     <section v-else-if="planningSnapshot && !store.currentDay" class="planning-live-layout">
       <section class="planning-state glass-card">
-      <span class="eyebrow">ROADMAN AGENTS 正在协作</span>
+      <span class="eyebrow">RoadMan 智能体正在协作</span>
       <h2>{{ planningSnapshot.status === 'failed' ? '这次行程需要调整后再规划' : planningSnapshot.clarification_question || '正在把行程一项一项加入详情页' }}</h2>
       <TransitionGroup v-if="planningSnapshot.status !== 'failed' && visiblePlanningEvents.length" name="planning-event" tag="div" class="planning-event-list">
         <article v-for="(event, index) in visiblePlanningEvents" :key="planningEventKey(event)">
@@ -753,7 +753,7 @@ watch(
       </TransitionGroup>
       <div v-else-if="planningSnapshot.status !== 'failed'" class="planning-event-list">
         <article>
-          <i class="active" /><div><strong>正在建立行程上下文</strong><span>需求 Agent</span></div>
+          <i class="active" /><div><strong>正在建立行程上下文</strong><span>需求理解智能体</span></div>
         </article>
       </div>
       <div v-if="planningSnapshot.defaults_applied.length" class="visible-defaults">
@@ -786,7 +786,7 @@ watch(
       <section v-if="!planningComplete" class="planning-live-strip glass-card">
         <span class="planning-pulse" />
         <div class="planning-live-copy">
-          <strong>{{ store.planningEvent?.label || 'Agent 正在继续完善行程' }}</strong>
+          <strong>{{ store.planningEvent?.label || '智能体正在继续完善行程' }}</strong>
           <small>地图、阶段、景点、用餐、住宿和补能安排会继续逐项出现</small>
           <div
             class="planning-meter"
@@ -820,7 +820,7 @@ watch(
                 <span><b>{{ item.label }}</b><small>{{ item.title }}</small></span>
               </button>
             </div>
-            <p v-else>Agent 正在补齐当天安排…</p>
+            <p v-else>智能体正在补齐当天安排…</p>
           </section>
           <div class="category-tabs">
             <button

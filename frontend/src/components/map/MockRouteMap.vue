@@ -4,10 +4,13 @@ import type { DayPlan } from '../../types/trip'
 
 const props = defineProps<{ day?: DayPlan; activeStageId?: string }>()
 const activeIndex = computed(() => props.day?.stages.findIndex((item) => item.id === props.activeStageId) ?? 0)
+const originLabel = computed(() => props.day?.stages[0]?.origin.name || '出发地')
+const destinationLabel = computed(() => props.day?.stages.at(-1)?.destination.name || '目的地')
+const middleLabel = computed(() => props.day?.stages[Math.min(1, Math.max(0, (props.day?.stages.length || 1) - 1))]?.destination.name || '沿途')
 </script>
 
 <template>
-  <div class="mock-map" aria-label="武汉至庐山示例路线地图">
+  <div class="mock-map" aria-label="当前行程示例路线地图">
     <svg viewBox="0 0 800 600" role="img">
       <defs>
         <linearGradient id="land" x1="0" y1="0" x2="1" y2="1">
@@ -27,9 +30,9 @@ const activeIndex = computed(() => props.day?.stages.findIndex((item) => item.id
         <path d="M-20 260C170 280 290 240 430 290S700 350 830 310"/>
       </g>
       <g class="labels">
-        <text x="95" y="500">武汉</text><text x="315" y="360">黄石</text>
-        <text x="510" y="265">九江</text><text x="650" y="150">庐山</text>
-        <text x="185" y="185">长江</text>
+        <text x="95" y="500">{{ originLabel }}</text><text x="315" y="360">沿途</text>
+        <text x="510" y="265">{{ middleLabel }}</text><text x="650" y="150">{{ destinationLabel }}</text>
+        <text x="185" y="185">路线示意</text>
       </g>
       <path class="route-shadow" d="M110 490C175 435 230 420 302 386S410 325 478 298S570 240 628 198C663 170 648 136 690 112"/>
       <path

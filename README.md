@@ -42,7 +42,15 @@ docker compose up -d --build
 python deploy/api_smoke.py
 ```
 
-冒烟脚本通过即表示后端、数据库、队列和各外部能力工作正常。
+冒烟脚本通过即表示容器、数据库、队列、接口契约和当前能访问的外部能力已完成逐项检查。它不会把“旅行信息服务合法无库存”误判成故障；需求理解/语义编辑仍必须用有效的 Ollama Key 单独验证。
+
+模型 Key 的最小验证（只检查状态，不打印 Key）：
+
+```powershell
+Invoke-WebRequest https://ollama.com/api/tags -Headers @{ Authorization = "Bearer $env:OLLAMA_API_KEY" }
+```
+
+如果模型列表请求成功但 `/api/generate` 返回 401/403，说明账号授权或额度仍不可用；RoadMan 会明确暂停语义步骤，不会用关键词猜地点。
 
 **第四步：使用**
 
@@ -121,6 +129,13 @@ python deploy/full_journey_acceptance.py # 完整旅程验收（建行程→规�
 python evaluation/run_evals.py           # 需求理解评测（12 条场景）
 ```
 
+真实云端智能体的浏览器验收默认不阻断离线回归；配置有效 Key 后显式开启：
+
+```powershell
+$env:ROADMAN_RUN_LIVE_AGENT_E2E = '1'
+npm run test:e2e --prefix frontend -- tests/e2e/planning-agent.spec.ts
+```
+
 ## 项目结构
 
 ```text
@@ -142,6 +157,7 @@ submission/  参赛方案书与生成审计工具
 - [docs/mobility-and-poi-data-contract.md](docs/mobility-and-poi-data-contract.md)：地点事实、票务预约、停车、公共交通与跨城班次的数据契约
 - [docs/operations.md](docs/operations.md)：部署运维、备份恢复与排障
 - [submission/GOAI_Boundless_Agents/RoadMan_赛道二参赛方案书.md](submission/GOAI_Boundless_Agents/RoadMan_赛道二参赛方案书.md)：参赛方案书
+- [docs/repo-audit-2026-08-28.md](docs/repo-audit-2026-08-28.md)：本次全仓库审计与可复现实测记录
 
 ## 使用边界
 
