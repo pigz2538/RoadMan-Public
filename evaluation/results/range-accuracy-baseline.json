@@ -1,0 +1,169 @@
+{
+  "dataset_id": "roadman-range-simulation-v1",
+  "data_kind": "simulation_sensor_replay",
+  "claim_boundary": "用于验证误差计算、SOC 连续性与评测流程，不代表真实道路续航承诺；真实车辆数据可按相同字段替换。",
+  "metrics": {
+    "sample_count": 12,
+    "energy_mape_percent": 8.442,
+    "energy_mae_kwh": 2.295,
+    "range_mape_percent": 9.302,
+    "soc_mae_percentage_points": 2.799
+  },
+  "thresholds": {
+    "energy_mape_percent": 12.0,
+    "range_mape_percent": 12.0,
+    "soc_mae_percentage_points": 5.0
+  },
+  "checks": {
+    "energy_mape_percent": true,
+    "range_mape_percent": true,
+    "soc_mae_percentage_points": true
+  },
+  "passed": true,
+  "cases": [
+    {
+      "id": "mild-flat-120",
+      "condition": "常温平路",
+      "energy_error_percent": 3.571,
+      "energy_error_kwh": 0.8,
+      "soc_error_percentage_points": 0.976,
+      "predicted_remaining_soc_percent": 63.66,
+      "observed_remaining_soc_percent": 62.68,
+      "predicted_range_km": 455.6,
+      "observed_range_km": 439.3,
+      "range_error_percent": 3.704
+    },
+    {
+      "id": "highway-240",
+      "condition": "常温高速",
+      "energy_error_percent": 6.087,
+      "energy_error_kwh": 2.8,
+      "soc_error_percentage_points": 3.415,
+      "predicted_remaining_soc_percent": 42.32,
+      "observed_remaining_soc_percent": 38.9,
+      "predicted_range_km": 455.6,
+      "observed_range_km": 427.8,
+      "range_error_percent": 6.481
+    },
+    {
+      "id": "urban-80",
+      "condition": "城市低速与动能回收",
+      "energy_error_percent": 4.348,
+      "energy_error_kwh": 0.6,
+      "soc_error_percentage_points": 0.732,
+      "predicted_remaining_soc_percent": 62.44,
+      "observed_remaining_soc_percent": 63.17,
+      "predicted_range_km": 455.6,
+      "observed_range_km": 475.4,
+      "range_error_percent": 4.167
+    },
+    {
+      "id": "mountain-160",
+      "condition": "累计爬升超过300米",
+      "energy_error_percent": 6.504,
+      "energy_error_kwh": 2.244,
+      "soc_error_percentage_points": 2.737,
+      "predicted_remaining_soc_percent": 55.66,
+      "observed_remaining_soc_percent": 52.93,
+      "predicted_range_km": 406.7,
+      "observed_range_km": 380.3,
+      "range_error_percent": 6.957
+    },
+    {
+      "id": "cold-100",
+      "condition": "低温空调与电池效率下降",
+      "energy_error_percent": 20.0,
+      "energy_error_kwh": 4.5,
+      "soc_error_percentage_points": 5.488,
+      "predicted_remaining_soc_percent": 63.05,
+      "observed_remaining_soc_percent": 57.56,
+      "predicted_range_km": 455.6,
+      "observed_range_km": 364.4,
+      "range_error_percent": 25.0
+    },
+    {
+      "id": "hot-100",
+      "condition": "高温制冷",
+      "energy_error_percent": 9.091,
+      "energy_error_kwh": 1.8,
+      "soc_error_percentage_points": 2.195,
+      "predicted_remaining_soc_percent": 63.05,
+      "observed_remaining_soc_percent": 60.85,
+      "predicted_range_km": 455.6,
+      "observed_range_km": 414.1,
+      "range_error_percent": 10.0
+    },
+    {
+      "id": "rain-180",
+      "condition": "持续降水与湿滑路面",
+      "energy_error_percent": 10.0,
+      "energy_error_kwh": 3.6,
+      "soc_error_percentage_points": 4.39,
+      "predicted_remaining_soc_percent": 55.49,
+      "observed_remaining_soc_percent": 51.1,
+      "predicted_range_km": 455.6,
+      "observed_range_km": 410.0,
+      "range_error_percent": 11.111
+    },
+    {
+      "id": "congestion-60",
+      "condition": "拥堵与频繁启停",
+      "energy_error_percent": 12.195,
+      "energy_error_kwh": 1.5,
+      "soc_error_percentage_points": 1.829,
+      "predicted_remaining_soc_percent": 56.83,
+      "observed_remaining_soc_percent": 55.0,
+      "predicted_range_km": 455.6,
+      "observed_range_km": 400.0,
+      "range_error_percent": 13.889
+    },
+    {
+      "id": "mixed-200",
+      "condition": "城市高速混合",
+      "energy_error_percent": 3.743,
+      "energy_error_kwh": 1.4,
+      "soc_error_percentage_points": 1.707,
+      "predicted_remaining_soc_percent": 51.1,
+      "observed_remaining_soc_percent": 49.39,
+      "predicted_range_km": 455.6,
+      "observed_range_km": 438.5,
+      "range_error_percent": 3.889
+    },
+    {
+      "id": "full-load-150",
+      "condition": "满载与行李",
+      "energy_error_percent": 9.091,
+      "energy_error_kwh": 2.7,
+      "soc_error_percentage_points": 3.293,
+      "predicted_remaining_soc_percent": 57.07,
+      "observed_remaining_soc_percent": 53.78,
+      "predicted_range_km": 455.6,
+      "observed_range_km": 414.1,
+      "range_error_percent": 10.0
+    },
+    {
+      "id": "downhill-90",
+      "condition": "以下坡和动能回收为主",
+      "energy_error_percent": 9.459,
+      "energy_error_kwh": 1.4,
+      "soc_error_percentage_points": 1.707,
+      "predicted_remaining_soc_percent": 50.24,
+      "observed_remaining_soc_percent": 51.95,
+      "predicted_range_km": 455.6,
+      "observed_range_km": 498.6,
+      "range_error_percent": 8.642
+    },
+    {
+      "id": "long-mixed-300",
+      "condition": "长途混合路况",
+      "energy_error_percent": 7.216,
+      "energy_error_kwh": 4.2,
+      "soc_error_percentage_points": 5.122,
+      "predicted_remaining_soc_percent": 34.15,
+      "observed_remaining_soc_percent": 29.02,
+      "predicted_range_km": 455.6,
+      "observed_range_km": 422.7,
+      "range_error_percent": 7.778
+    }
+  ]
+}

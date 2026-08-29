@@ -1,0 +1,25 @@
+{
+  "dataset_id": "roadman-range-simulation-v1",
+  "data_kind": "simulation_sensor_replay",
+  "claim_boundary": "用于验证误差计算、SOC 连续性与评测流程，不代表真实道路续航承诺；真实车辆数据可按相同字段替换。",
+  "thresholds": {
+    "energy_mape_percent": 12.0,
+    "range_mape_percent": 12.0,
+    "soc_mae_percentage_points": 5.0
+  },
+  "generation_logic": "预测值来自 82kWh 电池、基础 18kWh/100km 及山路 1.12 修正；观测值模拟温度、降水、拥堵、载荷和下坡回收造成的传感器差异。",
+  "records": [
+    {"id": "mild-flat-120", "condition": "常温平路", "battery_kwh": 82, "distance_km": 120, "initial_soc_percent": 90, "predicted_energy_kwh": 21.6, "observed_energy_kwh": 22.4},
+    {"id": "highway-240", "condition": "常温高速", "battery_kwh": 82, "distance_km": 240, "initial_soc_percent": 95, "predicted_energy_kwh": 43.2, "observed_energy_kwh": 46.0},
+    {"id": "urban-80", "condition": "城市低速与动能回收", "battery_kwh": 82, "distance_km": 80, "initial_soc_percent": 80, "predicted_energy_kwh": 14.4, "observed_energy_kwh": 13.8},
+    {"id": "mountain-160", "condition": "累计爬升超过300米", "battery_kwh": 82, "distance_km": 160, "initial_soc_percent": 95, "predicted_energy_kwh": 32.256, "observed_energy_kwh": 34.5},
+    {"id": "cold-100", "condition": "低温空调与电池效率下降", "battery_kwh": 82, "distance_km": 100, "initial_soc_percent": 85, "predicted_energy_kwh": 18.0, "observed_energy_kwh": 22.5},
+    {"id": "hot-100", "condition": "高温制冷", "battery_kwh": 82, "distance_km": 100, "initial_soc_percent": 85, "predicted_energy_kwh": 18.0, "observed_energy_kwh": 19.8},
+    {"id": "rain-180", "condition": "持续降水与湿滑路面", "battery_kwh": 82, "distance_km": 180, "initial_soc_percent": 95, "predicted_energy_kwh": 32.4, "observed_energy_kwh": 36.0},
+    {"id": "congestion-60", "condition": "拥堵与频繁启停", "battery_kwh": 82, "distance_km": 60, "initial_soc_percent": 70, "predicted_energy_kwh": 10.8, "observed_energy_kwh": 12.3},
+    {"id": "mixed-200", "condition": "城市高速混合", "battery_kwh": 82, "distance_km": 200, "initial_soc_percent": 95, "predicted_energy_kwh": 36.0, "observed_energy_kwh": 37.4},
+    {"id": "full-load-150", "condition": "满载与行李", "battery_kwh": 82, "distance_km": 150, "initial_soc_percent": 90, "predicted_energy_kwh": 27.0, "observed_energy_kwh": 29.7},
+    {"id": "downhill-90", "condition": "以下坡和动能回收为主", "battery_kwh": 82, "distance_km": 90, "initial_soc_percent": 70, "predicted_energy_kwh": 16.2, "observed_energy_kwh": 14.8},
+    {"id": "long-mixed-300", "condition": "长途混合路况", "battery_kwh": 82, "distance_km": 300, "initial_soc_percent": 100, "predicted_energy_kwh": 54.0, "observed_energy_kwh": 58.2}
+  ]
+}
