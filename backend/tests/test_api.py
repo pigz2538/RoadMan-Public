@@ -659,10 +659,10 @@ async def test_attachment_requires_preview_and_confirmation_before_trip_update(c
         }
 
     monkeypatch.setattr(
-        "app.services.attachments._extract_with_ollama",
+        "app.services.attachments._extract_with_deepseek",
         fake_attachment_extract,
     )
-    monkeypatch.setattr("app.api.files.settings.ollama_api_key", "test-key")
+    monkeypatch.setattr("app.api.files.settings.deepseek_api_key", "test-key")
     created = await client.post(
         "/api/v1/trips",
         json={"title": "附件测试", "request": {"raw_text": "武汉出发"}},
@@ -854,8 +854,8 @@ async def test_cancelled_planning_job_pauses_trip(client):
 
 
 @pytest.mark.asyncio
-async def test_deleted_trip_planning_job_is_discarded(monkeypatch, client):
-    """Deleting a trip while its worker is starting must not leave a failed job."""
+async def test_deleted_trip_purges_queued_planning_job(client):
+    """Hard deletion removes a queued job before a worker can execute it."""
     from app.workers import main as worker_main
 
     trip_response = await client.post(
@@ -877,17 +877,8 @@ async def test_deleted_trip_planning_job_is_discarded(monkeypatch, client):
     job_id = job_response.json()["id"]
     assert (await client.delete(f"/api/v1/trips/{trip_id}")).status_code == 204
 
-    async def fake_run_planning(*args, **kwargs):
-        raise KeyError(trip_id)
-
-    monkeypatch.setattr(worker_main, "run_planning", fake_run_planning)
     result = await worker_main.execute_job({}, job_id)
 
-    assert result == {
-        "cancelled": True,
-        "reason": "TRIP_DELETED",
-        "trip_id": trip_id,
-    }
+    assert result == {"error": "JOB_NOT_FOUND"}
     fetched = await client.get(f"/api/v1/jobs/{job_id}")
-    assert fetched.json()["status"] == "cancelled"
-    assert fetched.json()["error"]["code"] == "TRIP_DELETED"
+    assert fetched.status_code == 404

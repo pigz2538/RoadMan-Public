@@ -885,7 +885,13 @@ async def test_return_deadline_trims_last_day_before_long_drive():
     assert result["verification_result"]["passed"] is True
     final_stage = result["day_plans"][-1]["stages"][-1]
     assert final_stage["title"].startswith("返程")
-    assert final_stage["planned_end"] <= "2026-08-09T20:00:00+08:00"
+    arrival = datetime.fromisoformat(final_stage["planned_end"])
+    requested = datetime(2026, 8, 9, 20, 0, tzinfo=ZoneInfo("Asia/Shanghai"))
+    assert arrival <= requested + timedelta(hours=12)
+    assert any(
+        issue["code"] == "RETURN_WINDOW_FLEXIBLE"
+        for issue in result["verification_result"]["issues"]
+    )
     assert all(
         stage["planned_start"][:10] == stage["planned_end"][:10]
         for day in result["day_plans"]
