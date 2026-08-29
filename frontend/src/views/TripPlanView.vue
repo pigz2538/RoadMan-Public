@@ -933,7 +933,9 @@ watch(
                   <span>{{ item.stage.distance_km }} km</span>
                   <span>{{ formatDuration(item.stage.duration_minutes) }}</span>
                   <span v-if="item.stage.toll_fee">路费约 ¥{{ item.stage.toll_fee.minimum }}–{{ item.stage.toll_fee.maximum }}</span>
-                  <span v-if="item.stage.energy_estimate">预计 {{ item.stage.energy_estimate.amount }} {{ item.stage.energy_estimate.unit }}</span>
+                  <span v-if="item.stage.energy_estimate">预计消耗 {{ item.stage.energy_estimate.amount }} {{ item.stage.energy_estimate.unit }}</span>
+                  <span v-if="item.stage.energy_estimate?.replenished_amount">补能 {{ item.stage.energy_estimate.replenished_amount }} {{ item.stage.energy_estimate.replenished_unit }}</span>
+                  <span v-if="item.stage.energy_estimate?.remaining_percent !== undefined">预计剩余 {{ item.stage.energy_estimate.remaining_percent }}%</span>
                 </footer>
                 <small v-if="item.stage.warnings[0]">⚠ {{ item.stage.warnings[0].message }}</small>
               </button>

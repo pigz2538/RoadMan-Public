@@ -114,7 +114,21 @@ export interface Stage {
   transit_fare_cny?: number
   weather_summary?: string
   toll_fee?: { currency: string; minimum: number; maximum: number; estimated: boolean }
-  energy_estimate?: { amount: number; unit: string; remaining_percent?: number; estimated: boolean }
+  energy_estimate?: {
+    amount: number
+    unit: 'kWh' | 'L'
+    starting_percent?: number
+    consumed_percent?: number
+    before_replenishment_percent?: number
+    replenished_amount?: number
+    replenished_unit?: 'kWh' | 'L'
+    replenishment_minutes?: number
+    charging_power_kw?: number
+    after_replenishment_percent?: number
+    remaining_percent?: number
+    calculation_basis?: 'consumption_model' | 'measured_energy' | 'charger_power' | 'conservative_fallback' | 'fuel_service_estimate'
+    estimated: boolean
+  }
   weather_samples?: Array<{
     sampled_at: string
     temperature_c?: number

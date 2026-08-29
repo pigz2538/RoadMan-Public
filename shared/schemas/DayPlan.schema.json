@@ -397,6 +397,117 @@
           "title": "Unit",
           "type": "string"
         },
+        "starting_percent": {
+          "anyOf": [
+            {
+              "maximum": 100,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Starting Percent"
+        },
+        "consumed_percent": {
+          "anyOf": [
+            {
+              "maximum": 100,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Consumed Percent"
+        },
+        "before_replenishment_percent": {
+          "anyOf": [
+            {
+              "maximum": 100,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Before Replenishment Percent"
+        },
+        "replenished_amount": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Replenished Amount"
+        },
+        "replenished_unit": {
+          "anyOf": [
+            {
+              "enum": [
+                "kWh",
+                "L"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Replenished Unit"
+        },
+        "replenishment_minutes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Replenishment Minutes"
+        },
+        "charging_power_kw": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Charging Power Kw"
+        },
+        "after_replenishment_percent": {
+          "anyOf": [
+            {
+              "maximum": 100,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "After Replenishment Percent"
+        },
         "remaining_percent": {
           "anyOf": [
             {
@@ -410,6 +521,18 @@
           ],
           "default": null,
           "title": "Remaining Percent"
+        },
+        "calculation_basis": {
+          "default": "consumption_model",
+          "enum": [
+            "consumption_model",
+            "measured_energy",
+            "charger_power",
+            "conservative_fallback",
+            "fuel_service_estimate"
+          ],
+          "title": "Calculation Basis",
+          "type": "string"
         },
         "estimated": {
           "default": true,

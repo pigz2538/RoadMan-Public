@@ -102,7 +102,79 @@ def test_vehicle_weather_and_schedule_agents_insert_required_stops_and_risks():
     )
     assert stage["risk_level"] == "high"
     assert any(item["code"] == "ENERGY_STOP_SCHEDULED" for item in warnings)
+    estimates = [item["energy_estimate"] for item in driving_stages]
+    assert all(
+        estimates[index]["remaining_percent"]
+        == estimates[index + 1]["starting_percent"]
+        for index in range(len(estimates) - 1)
+    )
+    assert sum(item["replenished_amount"] is not None for item in estimates) == 1
     assert verify_deep_drive_plan(enriched, _vehicle(), 120) == []
+
+
+def test_measured_charge_energy_updates_soc_without_fixed_reset():
+    stage = _stage()
+    stage["distance_km"] = 100
+    stage["duration_minutes"] = 60
+    stage["elevation_gain_m"] = 0
+    stage["planned_end"] = datetime(2026, 8, 1, 10, 0, tzinfo=SHANGHAI).isoformat()
+    stage["route_segments"][0].update(distance_km=100, duration_minutes=60)
+    plans = [{"id": "day_1", "day_index": 1, "date": "2026-08-01", "title": "第 1 天", "stages": [stage], "activities": [], "items": []}]
+    charger = {
+        **_place("实测补能站", 115.15),
+        "actual_energy_added_kwh": 16,
+        "charging_power_kw": 80,
+        "charging_minutes": 15,
+    }
+    vehicle = {
+        **_vehicle(),
+        "current_energy_percent": 60,
+        "battery_kwh": 80,
+        "consumption_per_100km": 20,
+        "safe_energy_reserve_percent": 50,
+        "max_charge_kw": 120,
+    }
+
+    enriched, _ = enrich_deep_drive_plan(plans, vehicle, {"stage_long": {"charging": [charger]}}, 120)
+    estimate = enriched[0]["stages"][0]["energy_estimate"]
+
+    assert estimate["calculation_basis"] == "measured_energy"
+    assert estimate["estimated"] is False
+    assert estimate["replenished_amount"] == 16.0
+    assert estimate["after_replenishment_percent"] != 80.0
+    assert estimate["remaining_percent"] == 55.0
+
+
+def test_charger_power_and_duration_drive_replenishment_estimate():
+    stage = _stage()
+    stage["distance_km"] = 100
+    stage["duration_minutes"] = 60
+    stage["elevation_gain_m"] = 0
+    stage["planned_end"] = datetime(2026, 8, 1, 10, 0, tzinfo=SHANGHAI).isoformat()
+    stage["route_segments"][0].update(distance_km=100, duration_minutes=60)
+    plans = [{"id": "day_1", "day_index": 1, "date": "2026-08-01", "title": "第 1 天", "stages": [stage], "activities": [], "items": []}]
+    charger = {
+        **_place("50kW 充电站", 115.15),
+        "charging_power_kw": 50,
+        "planned_charge_minutes": 30,
+    }
+    vehicle = {
+        **_vehicle(),
+        "current_energy_percent": 50,
+        "battery_kwh": 80,
+        "consumption_per_100km": 20,
+        "safe_energy_reserve_percent": 45,
+        "max_charge_kw": 120,
+    }
+
+    enriched, _ = enrich_deep_drive_plan(plans, vehicle, {"stage_long": {"charging": [charger]}}, 120)
+    estimate = enriched[0]["stages"][0]["energy_estimate"]
+
+    assert estimate["calculation_basis"] == "charger_power"
+    assert estimate["charging_power_kw"] == 50.0
+    assert estimate["replenishment_minutes"] == 30
+    assert estimate["replenished_amount"] == 22.5
+    assert estimate["remaining_percent"] == 53.1
 
 
 def test_missing_energy_provider_degrades_to_an_estimated_route_stop():

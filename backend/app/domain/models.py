@@ -278,7 +278,22 @@ class RouteSegment(BaseModel):
 class EnergyEstimate(BaseModel):
     amount: float = Field(ge=0)
     unit: Literal["kWh", "L"]
+    starting_percent: float | None = Field(default=None, ge=0, le=100)
+    consumed_percent: float | None = Field(default=None, ge=0, le=100)
+    before_replenishment_percent: float | None = Field(default=None, ge=0, le=100)
+    replenished_amount: float | None = Field(default=None, ge=0)
+    replenished_unit: Literal["kWh", "L"] | None = None
+    replenishment_minutes: int | None = Field(default=None, ge=0)
+    charging_power_kw: float | None = Field(default=None, gt=0)
+    after_replenishment_percent: float | None = Field(default=None, ge=0, le=100)
     remaining_percent: float | None = Field(default=None, ge=0, le=100)
+    calculation_basis: Literal[
+        "consumption_model",
+        "measured_energy",
+        "charger_power",
+        "conservative_fallback",
+        "fuel_service_estimate",
+    ] = "consumption_model"
     estimated: bool = True
 
 

@@ -44,7 +44,8 @@ def enrich_deep_drive_plan(
     max_continuous_drive_minutes: int,
     max_daily_drive_minutes: int = DEFAULT_DAILY_DRIVING_MINUTES,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    current_percent = float(vehicle.get("current_energy_percent") or 80)
+    raw_current_percent = vehicle.get("current_energy_percent")
+    current_percent = float(80 if raw_current_percent is None else raw_current_percent)
     reserve = float(vehicle.get("safe_energy_reserve_percent") or 15)
     power_type = vehicle.get("power_type", "electric")
     warnings: list[dict[str, Any]] = []
@@ -68,11 +69,15 @@ def enrich_deep_drive_plan(
             risk_tags: list[str] = list(stage.get("risk_tags", []))
             if stage["mode"] == "driving":
                 amount, unit, used_percent = _energy_use(stage, vehicle)
+                starting_percent = current_percent
                 projected = max(0.0, current_percent - used_percent)
                 stage["energy_estimate"] = EnergyEstimate(
                     amount=round(amount, 1),
                     unit=unit,
+                    starting_percent=round(starting_percent, 1),
+                    consumed_percent=round(used_percent, 1),
                     remaining_percent=round(projected, 1),
+                    calculation_basis="consumption_model",
                     estimated=True,
                 ).model_dump(mode="json")
 
@@ -110,14 +115,27 @@ def enrich_deep_drive_plan(
                             for item in stage_warnings
                             if item.get("code") != "ENERGY_STOP_UNAVAILABLE"
                         ]
-                        stop_minutes = 30 if power_type == "electric" else 15
                         stage["waypoints"].append(stop_place)
-                        current_percent = 80.0
-                        projected = max(
-                            reserve,
-                            current_percent - used_percent / 2,
+                        replenishment = _calculate_replenishment(
+                            stage,
+                            vehicle,
+                            stop_place,
+                            starting_percent=starting_percent,
+                            consumed_percent=used_percent,
+                            reserve_percent=reserve,
                         )
-                        stage["energy_estimate"]["remaining_percent"] = round(projected, 1)
+                        stop_minutes = replenishment["replenishment_minutes"]
+                        projected = replenishment["remaining_percent"]
+                        stage["energy_estimate"].update(replenishment)
+                        if replenishment["calculation_basis"] == "conservative_fallback":
+                            stage_warnings.append(
+                                _warning(
+                                    "CHARGING_POWER_ESTIMATED",
+                                    "充电站功率未返回，已按车辆与公共快充保守功率估算补能时长",
+                                    "warning",
+                                    True,
+                                )
+                            )
                         stage_warnings.append(
                             _warning(
                                 "ENERGY_STOP_ESTIMATED"
@@ -676,6 +694,152 @@ def _energy_use(stage: dict[str, Any], vehicle: dict[str, Any]) -> tuple[float, 
     return amount, "L", distance / rated_range * 100 * factor
 
 
+def _calculate_replenishment(
+    stage: dict[str, Any],
+    vehicle: dict[str, Any],
+    stop_place: dict[str, Any],
+    *,
+    starting_percent: float,
+    consumed_percent: float,
+    reserve_percent: float,
+) -> dict[str, Any]:
+    """Calculate a continuous energy balance around one en-route stop.
+
+    Provider-reported delivered energy wins. Otherwise EV replenishment is
+    derived from station/vehicle power and duration; when the provider omits
+    power, a deliberately conservative public-fast-charge value is used and
+    exposed through ``calculation_basis``. No branch resets SOC to a fixed
+    percentage.
+    """
+    stop_fraction = _energy_stop_fraction(stage, stop_place)
+    consumed_before = consumed_percent * stop_fraction
+    consumed_after = max(0.0, consumed_percent - consumed_before)
+    before = max(0.0, starting_percent - consumed_before)
+    power_type = vehicle.get("power_type", "electric")
+
+    if power_type == "electric":
+        capacity = float(vehicle.get("battery_kwh") or 75)
+        reported_energy = _first_positive_number(
+            stop_place,
+            "actual_energy_added_kwh",
+            "delivered_energy_kwh",
+            "energy_added_kwh",
+        )
+        reported_power = _first_positive_number(
+            stop_place,
+            "charging_power_kw",
+            "charger_power_kw",
+            "power_kw",
+            "max_power_kw",
+        )
+        vehicle_power = _positive_number(vehicle.get("max_charge_kw"))
+        reported_minutes = _first_positive_number(
+            stop_place,
+            "charging_minutes",
+            "planned_charge_minutes",
+            "duration_minutes",
+        )
+        target_after_stop = min(
+            90.0,
+            max(before, reserve_percent + consumed_after + 5.0),
+        )
+        room_kwh = max(0.0, capacity * (100.0 - before) / 100.0)
+
+        if reported_energy is not None:
+            added = min(reported_energy, room_kwh)
+            effective_power = (
+                min(reported_power, vehicle_power)
+                if reported_power is not None and vehicle_power is not None
+                else reported_power or vehicle_power
+            )
+            minutes = int(round(reported_minutes or 0))
+            if not minutes and effective_power:
+                minutes = max(1, ceil(added / (effective_power * 0.9) * 60))
+            elif not minutes:
+                minutes = 30
+            basis = "measured_energy"
+            estimated = False
+        else:
+            if reported_power is not None:
+                effective_power = min(reported_power, vehicle_power or reported_power)
+                basis = "charger_power"
+            else:
+                effective_power = min(vehicle_power or 60.0, 60.0)
+                basis = "conservative_fallback"
+            required_kwh = max(0.0, capacity * (target_after_stop - before) / 100.0)
+            if reported_minutes is not None:
+                minutes = max(1, int(round(reported_minutes)))
+                added = min(room_kwh, effective_power * minutes / 60.0 * 0.9)
+            else:
+                minutes = max(1, min(90, ceil(required_kwh / (effective_power * 0.9) * 60)))
+                added = min(room_kwh, effective_power * minutes / 60.0 * 0.9)
+            estimated = True
+
+        after = min(100.0, before + added / capacity * 100.0)
+        remaining = max(0.0, after - consumed_after)
+        return {
+            "before_replenishment_percent": round(before, 1),
+            "replenished_amount": round(added, 1),
+            "replenished_unit": "kWh",
+            "replenishment_minutes": minutes,
+            "charging_power_kw": round(effective_power, 1) if effective_power else None,
+            "after_replenishment_percent": round(after, 1),
+            "remaining_percent": round(remaining, 1),
+            "calculation_basis": basis,
+            "estimated": estimated,
+        }
+
+    consumption_l_per_100km = float(vehicle.get("consumption_per_100km") or 7.5)
+    rated_range = float(vehicle.get("rated_range_km") or 650)
+    tank_liters = max(1.0, rated_range * consumption_l_per_100km / 100.0)
+    reported_liters = _first_positive_number(
+        stop_place,
+        "actual_fuel_added_liters",
+        "fuel_added_liters",
+    )
+    desired_after = min(100.0, max(before, reserve_percent + consumed_after + 10.0))
+    added_liters = min(
+        reported_liters if reported_liters is not None else tank_liters * (desired_after - before) / 100.0,
+        tank_liters * (100.0 - before) / 100.0,
+    )
+    after = min(100.0, before + added_liters / tank_liters * 100.0)
+    return {
+        "before_replenishment_percent": round(before, 1),
+        "replenished_amount": round(added_liters, 1),
+        "replenished_unit": "L",
+        "replenishment_minutes": int(round(_first_positive_number(stop_place, "fueling_minutes") or 15)),
+        "charging_power_kw": None,
+        "after_replenishment_percent": round(after, 1),
+        "remaining_percent": round(max(0.0, after - consumed_after), 1),
+        "calculation_basis": "measured_energy" if reported_liters is not None else "fuel_service_estimate",
+        "estimated": reported_liters is None,
+    }
+
+
+def _positive_number(value: Any) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number > 0 else None
+
+
+def _first_positive_number(item: dict[str, Any], *keys: str) -> float | None:
+    for key in keys:
+        if (number := _positive_number(item.get(key))) is not None:
+            return number
+    return None
+
+
+def _energy_stop_fraction(stage: dict[str, Any], stop_place: dict[str, Any]) -> float:
+    geometry = _stage_geometry(stage, minimum_points=21)
+    coordinates = _coordinate_pair(stop_place.get("coordinates"))
+    if not geometry or coordinates is None:
+        return 0.5
+    index = _nearest_geometry_index(geometry, coordinates)
+    return max(0.05, min(0.95, index / max(1, len(geometry) - 1)))
+
+
 def _apply_weather_risk(
     stage: dict[str, Any],
     warnings: list[dict[str, Any]],
@@ -853,6 +1017,20 @@ def _split_long_driving_stages(
         remaining_duration = movement_duration
         remaining_distance = float(stage["distance_km"])
         target_duration = ceil(movement_duration / part_count)
+        base_energy = deepcopy(stage.get("energy_estimate") or {})
+        split_energy_percent = float(
+            base_energy.get("starting_percent")
+            if base_energy.get("starting_percent") is not None
+            else 0.0
+        )
+        total_energy_amount = float(base_energy.get("amount") or 0.0)
+        total_consumed_percent = float(base_energy.get("consumed_percent") or 0.0)
+        replenished_percent = max(
+            0.0,
+            float(base_energy.get("after_replenishment_percent") or 0.0)
+            - float(base_energy.get("before_replenishment_percent") or 0.0),
+        )
+        replenishment_applied = False
         for index in range(part_count):
             fraction = (boundaries[index + 1] - boundaries[index]) / (len(geometry) - 1)
             if index == part_count - 1:
@@ -884,10 +1062,57 @@ def _split_long_driving_stages(
             segment["duration_minutes"] = duration
             piece["route_segments"] = [segment]
             if piece.get("energy_estimate"):
-                piece["energy_estimate"]["amount"] = round(
-                    float(piece["energy_estimate"]["amount"]) / part_count,
-                    1,
+                distance_fraction = (
+                    float(distance) / float(stage["distance_km"])
+                    if float(stage["distance_km"]) > 0
+                    else 1.0 / part_count
                 )
+                piece_consumed = total_consumed_percent * distance_fraction
+                piece_starting = split_energy_percent
+                before_stop = max(0.0, piece_starting - piece_consumed)
+                is_energy_boundary = (
+                    index < part_count - 1
+                    and selected[index][0] in {"charging", "fueling"}
+                    and replenished_percent > 0
+                    and not replenishment_applied
+                )
+                piece_energy = {
+                    **base_energy,
+                    "amount": round(total_energy_amount * distance_fraction, 1),
+                    "starting_percent": round(piece_starting, 1),
+                    "consumed_percent": round(piece_consumed, 1),
+                    "before_replenishment_percent": None,
+                    "replenished_amount": None,
+                    "replenished_unit": None,
+                    "replenishment_minutes": None,
+                    "charging_power_kw": None,
+                    "after_replenishment_percent": None,
+                    "remaining_percent": round(before_stop, 1),
+                    "calculation_basis": "consumption_model",
+                    "estimated": True,
+                }
+                if is_energy_boundary:
+                    after_stop = min(100.0, before_stop + replenished_percent)
+                    piece_energy.update(
+                        {
+                            "before_replenishment_percent": round(before_stop, 1),
+                            "replenished_amount": base_energy.get("replenished_amount"),
+                            "replenished_unit": base_energy.get("replenished_unit"),
+                            "replenishment_minutes": base_energy.get("replenishment_minutes"),
+                            "charging_power_kw": base_energy.get("charging_power_kw"),
+                            "after_replenishment_percent": round(after_stop, 1),
+                            "remaining_percent": round(after_stop, 1),
+                            "calculation_basis": base_energy.get(
+                                "calculation_basis", "consumption_model"
+                            ),
+                            "estimated": bool(base_energy.get("estimated", True)),
+                        }
+                    )
+                    split_energy_percent = after_stop
+                    replenishment_applied = True
+                else:
+                    split_energy_percent = before_stop
+                piece["energy_estimate"] = piece_energy
             if index < part_count - 1:
                 piece_warnings = list(piece.get("warnings", []))
                 piece_warnings.append(
@@ -905,7 +1130,12 @@ def _split_long_driving_stages(
             expanded.append(piece)
             if index < part_count - 1:
                 kind, place = selected[index]
-                break_minutes = 30 if kind == "charging" else 20
+                energy_minutes = (
+                    piece.get("energy_estimate", {}).get("replenishment_minutes")
+                    if kind in {"charging", "fueling"}
+                    else None
+                )
+                break_minutes = int(energy_minutes or (30 if kind == "charging" else 20))
                 breaks.append(
                     _activity(
                         stage["day_id"],
