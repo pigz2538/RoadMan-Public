@@ -1,20 +1,32 @@
-# RoadMan 项目说明
+<div align="center">
 
-## 近期数据链路完善
+# RoadMan · 项目说明
 
-景点、餐饮和住宿在排入行程后会再次进行精确核验：地图 POI 详情、旅行门票服务和公开网页分别提供事实、票务和描述来源，并在 `Activity` 中保留来源数、核验时间、营业时间确认状态、门票/预约状态、票价区间、停车费区间、官网与详情链接。公共交通阶段保留线路与上下车站；火车/飞机阶段保留真实车次号或航班号、站场/机场、时间、座席、价格和详情链接。无返回值时显示明确的未知状态，不使用“高铁/航班”充当虚构编号。接口清单和失败边界见 [docs/mobility-and-poi-data-contract.md](docs/mobility-and-poi-data-contract.md)。
+多智能体自驾行程工作台 — 代码仓库维护入口
 
-本文是代码仓库的维护入口，描述当前实现与维护边界。安装、密钥与验证命令见 [README.md](README.md)。
+</div>
+
+[![Python](https://img.shields.io/badge/Python-3.11-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![LangGraph](https://img.shields.io/badge/LangGraph-1.0-1C3C3C?style=flat-square&logo=langchain&logoColor=white)](https://langchain-ai.github.io/langgraph/)
+[![Vue](https://img.shields.io/badge/Vue-3.5-4FC08D?style=flat-square&logo=vuedotjs&logoColor=white)](https://vuejs.org/)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-17-4169E1?style=flat-square&logo=postgresql&logoColor=white)](https://www.postgresql.org/)
+[![Redis](https://img.shields.io/badge/Redis-7.4-DC382D?style=flat-square&logo=redis&logoColor=white)](https://redis.io/)
+[![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?style=flat-square&logo=docker&logoColor=white)](https://docs.docker.com/compose/)
+
+> 本文是代码仓库的维护入口，描述当前实现与维护边界。安装、密钥与验证命令见 [README.md](README.md)；详细接口契约见 [docs/api-contract.md](docs/api-contract.md)。
+
+> **近期数据链路完善**：景点、餐饮和住宿在排入行程后会再次精确核验——地图 POI 详情、旅行门票服务和公开网页分别提供事实、票务和描述来源，并在 `Activity` 中保留来源数、核验时间、营业时间确认状态、门票/预约状态、票价区间、停车费区间、官网与详情链接。公共交通阶段保留线路与上下车站；火车/飞机阶段保留真实车次号或航班号、站场/机场、时间、座席、价格和详情链接。无返回值时显示明确的未知状态，不使用「高铁/航班」充当虚构编号。接口清单和失败边界见 [docs/mobility-and-poi-data-contract.md](docs/mobility-and-poi-data-contract.md)。
 
 ## 1. 当前状态
 
-RoadMan 已形成从“自然语言需求”到“可确认、可追踪、可编辑、可导出的行程”的完整闭环：后端 LangGraph 规划工作流经 ARQ + Redis 异步执行，前端提供首页、规划进度、详情地图、阶段卡片、候选推荐和 Agent 编辑面板。
+RoadMan 已形成从「自然语言需求」到「可确认、可追踪、可编辑、可导出的行程」的完整闭环：后端 LangGraph 规划工作流经 ARQ + Redis 异步执行，前端提供首页、规划进度、详情地图、阶段卡片、候选推荐和 Agent 编辑面板。
 
 已落地的主线能力：
 
 - Trip 数据按 `天 → MovementStage / Activity` 组织，使用 PostgreSQL（生产/Docker）或 SQLite（本地/测试）和 Alembic 迁移。
 - `preflight` 先由需求理解智能体提取语义需求、日期/地点/交通约束并进行必要追问；用户确认前不会开始规划。地点意图不再使用字符串/城市关键词兜底：智能体不可用或返回非法地点结构时明确暂停，不向地图发送猜测值。离线逻辑只负责显式日期格式、相对日历结构和数值边界，不负责猜地点或意图。
-- 明确的“出发—抵达”时钟窗口作为硬约束复核；返程目标允许 15 分钟静默误差、半天内只给 warning，超过半天才阻断。
+- 明确的「出发—抵达」时钟窗口作为硬约束复核；返程目标允许 15 分钟静默误差、半天内只给 warning，超过半天才阻断。
 - 跨海只在用户明确写出跨海语义时保留安全约束；轮渡/飞机/桥梁方式不由模型凭空猜定，需用户确认或明示。
 - LangGraph 规划工作流执行需求抽取、目的地研究、目的地策划单、路线、POI、天气、补能/服务、每日复核和持久化节点。省份/城市/多目的地先由研究智能体检索必去地标与代表性美食，再由目的地策划智能体按地理片区生成每日主轴，最后交给路线智能体执行。
 - Skill Registry 统一接入地图、天气、旅行信息、开放数据、车型目录和语义模型；每次调用可审计、可缓存并可降级。旅行信息服务的住宿结果会按目的地坐标过滤异地卡片；无库存时保留未知状态。
@@ -26,20 +38,42 @@ RoadMan 已形成从“自然语言需求”到“可确认、可追踪、可编
 - 车辆管理支持 CRUD，并提供 `carinfo.catalog` 真实车型搜索；本地车型字段由用户确认后保存。
 - 请求 ID、追踪 ID、速率限制、Skill 调用记录、服务指标和 Docker 健康检查已接入。
 
+> 长途自驾场景（武汉 → 哈尔滨 6 天）：每日驾驶上限拆分、沿途休息与补能、跨天过夜住宿编排。
+
+![哈尔滨 6 天 · 跨天驾驶拆分段视图](docs/screenshots/plan_harbin.png)
+
 ## 2. 系统架构
 
-```text
-浏览器 Vue 3
-  ├─ 首页：需求录入、预检问答、历史行程、车型管理、3D 车辆、天气
-  └─ 规划页：SSE 进度、地图、阶段卡片、活动列表、Agent 面板、导出
-             │ HTTP / SSE
-FastAPI API ─┼─ PostgreSQL/SQLite：Trip、版本、任务、调用审计
-             ├─ Redis + ARQ：异步规划任务
-             └─ Skill Registry：地图、天气、旅行搜索、开放数据、车型目录
-                         │
-LangGraph 规划工作流 ── 语义智能体 + 确定性调度/复核/修复
-                         │
-统一冻结 Trip 快照 ── Markdown / HTML / PDF / PPTX / PNG
+```mermaid
+flowchart LR
+    subgraph FE["浏览器 · Vue 3"]
+        A["首页：需求录入 / 预检问答 / 历史行程 / 车型管理 / 3D 车辆 / 天气"]
+        B["规划页：SSE 进度 / 地图 / 阶段卡片 / 活动列表 / Agent 面板 / 导出"]
+    end
+
+    subgraph API["FastAPI 后端"]
+        C["HTTP / SSE 路由"]
+        D[("PostgreSQL / SQLite<br/>Trip / 版本 / 任务 / 调用审计")]
+        E["Redis + ARQ · 异步规划任务"]
+        F["Skill Registry：地图 / 天气 / 旅行搜索 / 开放数据 / 车型目录"]
+    end
+
+    subgraph WF["LangGraph 规划工作流"]
+        G["语义智能体"]
+        H["确定性调度 / 复核 / 修复"]
+    end
+
+    I["统一冻结 Trip 快照"] --> J["Markdown / HTML / PDF / PPTX / PNG"]
+
+    A --> C
+    B --> C
+    C --> D
+    C --> E
+    C --> F
+    E --> WF
+    F --> WF
+    G <--> H
+    WF --> I
 ```
 
 状态所有权：
@@ -52,7 +86,7 @@ LangGraph 规划工作流 ── 语义智能体 + 确定性调度/复核/修复
 
 ## 3. 规划工作流
 
-主图节点（`backend/app/planning/graph.py`）按以下顺序执行：
+主图节点（`backend/app/planning/graph.py`，22 个节点）按以下顺序执行：
 
 ```text
 load_context
@@ -97,7 +131,7 @@ load_context
 
 ### 4.2 编辑到重算
 
-自然语言编辑先由编辑智能体解释为候选操作。后端创建 PlanPatch 预览并计算影响日期/阶段、时间变化和路线重算范围。只有用户确认 `apply` 才写入 canonical Trip；失败不写入，并保留可回滚版本。多次局部增删改可累积，用户点击“重新规划路线”后统一重建本地阶段、跨天衔接与返程闭环，再运行完整校验；重排完成前禁止导出。
+自然语言编辑先由编辑智能体解释为候选操作。后端创建 PlanPatch 预览并计算影响日期/阶段、时间变化和路线重算范围。只有用户确认 `apply` 才写入 canonical Trip；失败不写入，并保留可回滚版本。多次局部增删改可累积，用户点击「重新规划路线」后统一重建本地阶段、跨天衔接与返程闭环，再运行完整校验；重排完成前禁止导出。
 
 ### 4.3 路线降级
 

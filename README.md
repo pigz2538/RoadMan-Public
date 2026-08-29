@@ -1,65 +1,159 @@
+<div align="center">
+
 # RoadMan
 
-RoadMan 是面向自驾与中短途旅行的多智能体行程工作台。用自然语言描述出发地、目的地、日期、同行人和偏好，系统会自动完成需求核对、目的地研究、分区计划单、真实路线查询、每日食宿行编排、车辆补能与驾驶休息安排、自动复核修复，并输出可导出的完整路书。
+**多智能体自驾行程工作台** — 用一句话生成可执行、可编辑、可导出的完整路书
 
-地点理解由云端需求智能体负责。它会把“新疆”“南京”“西藏和新疆”等行政区/城市/多目的地保留为结构化范围，先检索目的地的著名地标与代表性美食，再由目的地策划智能体生成每日计划单，最后才调用地图和交通工具。模型不可用或返回数组字符串等非法地点结构时，系统会暂停并提示重试，不会用关键词把目的地猜成餐馆、校园或酒店。
+自然语言 → 需求预检 → 目的地研究 → 每日排程 → 确定性复核 → 可编辑路书
 
-- 规划在后台持续执行，地图、阶段、景点、餐饮、住宿和进度实时逐步呈现
-- 支持自然语言修改和地图选点，先预览影响、确认后重算，可回滚
-- 行程可导出为 HTML、PDF、PPTX、长图和 Markdown
-- 长途自驾自动按每日驾驶上限拆分，安排服务区休息、充电/加油和沿途过夜住宿，次日早晨继续行驶
+</div>
 
-## 部署（Docker，推荐）
+---
 
-前置要求：安装 [Docker Desktop](https://www.docker.com/products/docker-desktop/) 并启动。
+## 技术栈
 
-**第一步：准备配置**
+**后端 · 编排**
+
+[![Python](https://img.shields.io/badge/Python-3.11-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![LangGraph](https://img.shields.io/badge/LangGraph-1.0-1C3C3C?style=flat-square&logo=langchain&logoColor=white)](https://langchain-ai.github.io/langgraph/)
+[![Pydantic](https://img.shields.io/badge/Pydantic-2.x-E92063?style=flat-square&logo=pydantic&logoColor=white)](https://docs.pydantic.dev/)
+[![SQLAlchemy](https://img.shields.io/badge/SQLAlchemy-2.0-D71F00?style=flat-square&logo=sqlalchemy&logoColor=white)](https://www.sqlalchemy.org/)
+[![Alembic](https://img.shields.io/badge/Alembic-1.14-2A2EEC?style=flat-square&logo=alembic&logoColor=white)](https://alembic.sqlalchemy.org/)
+[![ARQ](https://img.shields.io/badge/ARQ-0.26-5275E9?style=flat-square&logo=redis&logoColor=white)](https://arq-docs.helpmanual.io/)
+[![Uvicorn](https://img.shields.io/badge/Uvicorn-0.34-499848?style=flat-square&logo=uvicorn&logoColor=white)](https://www.uvicorn.org/)
+
+**数据 · 基础设施**
+
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-17-4169E1?style=flat-square&logo=postgresql&logoColor=white)](https://www.postgresql.org/)
+[![Redis](https://img.shields.io/badge/Redis-7.4-DC382D?style=flat-square&logo=redis&logoColor=white)](https://redis.io/)
+[![Docker Compose](https://img.shields.io/badge/Docker%20Compose-2.x-2496ED?style=flat-square&logo=docker&logoColor=white)](https://docs.docker.com/compose/)
+[![Nginx](https://img.shields.io/badge/Nginx-1.27-009639?style=flat-square&logo=nginx&logoColor=white)](https://nginx.org/)
+[![Node.js](https://img.shields.io/badge/Node.js-22-5FA04E?style=flat-square&logo=nodedotjs&logoColor=white)](https://nodejs.org/)
+[![SSE](https://img.shields.io/badge/SSE-Event%20Stream-4169E1?style=flat-square&logo=wifi&logoColor=white)](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events)
+[![OpenAPI](https://img.shields.io/badge/OpenAPI-3-6BA539?style=flat-square&logo=swagger&logoColor=white)](https://swagger.io/)
+
+**前端 · 交互**
+
+[![Vue](https://img.shields.io/badge/Vue-3.5-4FC08D?style=flat-square&logo=vuedotjs&logoColor=white)](https://vuejs.org/)
+[![Vite](https://img.shields.io/badge/Vite-8-646CFF?style=flat-square&logo=vite&logoColor=white)](https://vitejs.dev/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.9-3178C6?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![Pinia](https://img.shields.io/badge/Pinia-3-FFD859?style=flat-square&logo=pinia&logoColor=black)](https://pinia.vuejs.org/)
+[![Vue Router](https://img.shields.io/badge/Vue%20Router-4.5-42B883?style=flat-square&logo=vuedotjs&logoColor=white)](https://router.vuejs.org/)
+[![TanStack Query](https://img.shields.io/badge/TanStack%20Query-5.66-FF4154?style=flat-square&logo=reactquery&logoColor=white)](https://tanstack.com/query/latest)
+[![AMap JSAPI](https://img.shields.io/badge/AMap%20JSAPI-1.x-2899F5?style=flat-square&logo=baidumap&logoColor=white)](https://lbs.amap.com/api/javascript-api-v2/summary)
+[![Model Viewer](https://img.shields.io/badge/Model%20Viewer-4.3-60C0EB?style=flat-square&logo=google&logoColor=white)](https://modelviewer.dev/)
+
+**质量 · 测试**
+
+[![Playwright](https://img.shields.io/badge/Playwright-1.62-2EAD33?style=flat-square&logo=playwright&logoColor=white)](https://playwright.dev/)
+[![Vitest](https://img.shields.io/badge/Vitest-4.1-6E9F18?style=flat-square&logo=vitest&logoColor=white)](https://vitest.dev/)
+[![pytest](https://img.shields.io/badge/pytest-8.3-0A9EDC?style=flat-square&logo=pytest&logoColor=white)](https://docs.pytest.org/)
+[![vue-tsc](https://img.shields.io/badge/vue--tsc-3.3-4FC08D?style=flat-square&logo=vuedotjs&logoColor=white)](https://github.com/vuejs/language-tools)
+[![SQLite](https://img.shields.io/badge/SQLite-dev-003B57?style=flat-square&logo=sqlite&logoColor=white)](https://www.sqlite.org/)
+
+**外部能力**
+
+[![DeepSeek](https://img.shields.io/badge/DeepSeek-V4-4D6BFE?style=flat-square&logo=deepseek&logoColor=white)](https://www.deepseek.com/)
+[![Open-Meteo](https://img.shields.io/badge/Open--Meteo-Free-14A0A5?style=flat-square&logo=sun&logoColor=white)](https://open-meteo.com/)
+[![OpenTripMap](https://img.shields.io/badge/OpenTripMap-POI-5B8DEF?style=flat-square&logo=map&logoColor=white)](https://opentripmap.io/)
+[![FlyAI](https://img.shields.io/badge/FlyAI-Travel-FF5A5F?style=flat-square&logo=airbnb&logoColor=white)](https://www.flyai.com/)
+
+---
+
+## 界面预览
+
+| 首页 · 需求录入 | 规划详情 · 地图与阶段编排 |
+| :---: | :---: |
+| ![首页](docs/screenshots/home.png) | ![规划详情](docs/screenshots/plan_lushan.png) |
+
+> 长途自驾自动按每日驾驶上限拆分，沿途安排休息与补能，次日继续行驶：
+
+![哈尔滨 6 天 · 跨天驾驶拆分](docs/screenshots/plan_harbin.png)
+
+---
+
+## 特性
+
+- **一句话生成行程**：用自然语言描述出发地、目的地、日期、同行人和偏好，系统自动完成需求核对、目的地研究、分区计划单、真实路线查询、每日食宿行编排、车辆补能与驾驶休息安排、自动复核修复，最终输出完整路书。
+- **语义-确定性双层架构**：地点理解由云端需求智能体负责，把「新疆」「南京」「西藏和新疆」等行政区/城市/多目的地保留为结构化范围；模型不可用或返回非法地点结构时明确暂停，**不会用关键词把目的地猜成餐馆、校园或酒店**。
+- **22 节点 LangGraph 状态机**：需求抽取 → 目的地研究 → 目的地策划 → 路线 → POI → 天气 → 补能/服务 → 每日复核 → 确定性校验，发现可修复问题时自动重排并循环复核（最多 4 轮）。
+- **真实道路轨迹**：高德路线优先使用真实 geometry；不可用时按策略降级，全部失败返回 `ROUTE_UNAVAILABLE`，前端灰色虚线只表示不可用提示。
+- **PlanPatch 可信编辑**：自然语言修改与地图选点均走 `preview → apply/reject → rollback` 两阶段流程，确认前不改变 canonical Trip，支持回滚。
+- **多格式导出**：Markdown、HTML、PDF、PPTX、长图；历史行程从数据库恢复，不重新播放规划动画。
+- **可观测与降级**：请求 ID、追踪 ID、速率限制、Skill 调用记录、服务指标与 Docker 健康检查；外部服务失败显示可解释降级，**不伪造成功**。
+
+## 架构总览
+
+```mermaid
+flowchart TB
+    subgraph Browser["浏览器 Vue 3"]
+        H["首页：需求录入 / 预检问答 / 历史行程 / 车型管理 / 3D 车辆 / 天气"]
+        P["规划页：SSE 进度 / 地图 / 阶段卡片 / 活动列表 / Agent 面板 / 导出"]
+    end
+
+    subgraph API["FastAPI API"]
+        R["HTTP / SSE 路由"]
+        DB[("PostgreSQL / SQLite<br/>Trip · 版本 · 任务 · 调用审计")]
+        Q["Redis + ARQ<br/>异步规划任务"]
+        SK["Skill Registry<br/>地图 / 天气 / 旅行搜索 / 开放数据 / 车型目录"]
+    end
+
+    subgraph Workflow["LangGraph 规划工作流"]
+        S["语义智能体"]
+        D["确定性调度 / 复核 / 修复"]
+    end
+
+    subgraph Export["统一冻结 Trip 快照"]
+        E["Markdown / HTML / PDF / PPTX / PNG"]
+    end
+
+    H --> R
+    P --> R
+    R --> DB
+    R --> Q
+    R --> SK
+    Q --> Workflow
+    SK --> Workflow
+    Workflow --> Export
+```
+
+状态所有权：`Trip` 是用户可见的 canonical 行程（整份 JSON 存于 `trips.document`）；`RoadManState` 保存图执行中的候选、来源与修复次数；ARQ job 在后台执行规划，API 不在请求线程内跑完整规划；SSE 只传递可展示的阶段进度，不暴露密钥或模型原始输出。
+
+## 快速开始（Docker Compose）
+
+> 前置要求：安装并启动 [Docker Desktop](https://www.docker.com/products/docker-desktop/)。
 
 ```powershell
+# 1. 准备配置
 Copy-Item .env.example .env
-```
 
-用编辑器打开 `.env`，至少填入两项（其余按需，完整说明见下方配置表）：
+# 2. 修改 .env，至少填入两项（其余按需，见下方配置表）
+#    DEEPSEEK_API_KEY=你的 DeepSeek API Key
+#    AMAP_WEBSERVICE_KEY=你的高德 WebService Key
 
-```text
-DEEPSEEK_API_KEY=你的 DeepSeek API Key
-DEEPSEEK_MODEL=deepseek-v4-flash
-DEEPSEEK_REASONING_EFFORT=max
-DEEPSEEK_THINKING=true
-AMAP_WEBSERVICE_KEY=你的高德 WebService Key
-```
-
-如需浏览器内显示真实地图，再填入 `VITE_AMAP_JSAPI_KEY` 和 `VITE_AMAP_SECURITY_JS_CODE`。
-
-**第二步：启动**
-
-```powershell
+# 3. 启动（首次构建镜像并初始化数据库，耗时几分钟）
 docker compose up -d --build
-```
 
-首次启动会构建镜像并初始化数据库，耗时几分钟。
-
-**第三步：验证**
-
-```powershell
+# 4. 验证
 python deploy/api_smoke.py
 ```
 
-冒烟脚本通过即表示容器、数据库、队列、接口契约和当前能访问的外部能力已完成逐项检查。它不会把“旅行信息服务合法无库存”误判成故障；需求理解/语义编辑会用有效的 DeepSeek Key 单独验证。
+冒烟脚本通过即表示容器、数据库、队列、接口契约和当前可访问的外部能力已完成逐项检查。它不会把「旅行信息服务合法无库存」误判成故障；需求理解/语义编辑会用有效的 DeepSeek Key 单独验证。
 
-模型 Key 的最小验证（只检查状态，不打印 Key）：
+**使用入口**
+
+- Web 工作台：<http://localhost:8080>
+- 局域网内其他设备：`http://本机局域网IP:8080`
+- 后端接口文档：<http://localhost:8000/docs>
+
+**模型 Key 最小验证**（只检查状态，不打印 Key）：
 
 ```powershell
 Invoke-RestMethod https://api.deepseek.com/chat/completions -Method Post -Headers @{ Authorization = "Bearer $env:DEEPSEEK_API_KEY"; "Content-Type" = "application/json" } -Body (@{ model = "deepseek-v4-flash"; messages = @(@{ role = "user"; content = "return JSON: { ok: true }" }); response_format = @{ type = "json_object" }; thinking = @{ type = "enabled" }; reasoning_effort = "max" } | ConvertTo-Json -Depth 5)
 ```
 
-如果 Chat Completions 请求返回 401/403，说明账号授权或额度不可用；RoadMan 会明确暂停语义步骤，不会用关键词猜地点。
-
-**第四步：使用**
-
-- Web 工作台：<http://localhost:8080>
-- 局域网内其他设备：`http://本机局域网IP:8080`
-- 后端接口文档：<http://localhost:8000/docs>
+返回 401/403 说明账号授权或额度不可用；RoadMan 会明确暂停语义步骤，不会用关键词猜地点。
 
 **常用运维命令**
 
@@ -84,23 +178,19 @@ docker compose up -d --build      # 更新代码后重新构建
 | `VITE_AMAP_SECURITY_JS_CODE` | 浏览器地图安全密钥 | 推荐 |
 | `FLYAI_API_KEY` | 旅行搜索、住宿、餐饮补充 | 推荐 |
 | `OPENTRIPMAP_API_KEY` | 国际/开放景点数据补充 | 可选 |
-| `DEEPSEEK_MODEL` | 官方模型，默认 `deepseek-v4-flash` | 可选 |
+| `DEEPSEEK_MODEL` | 模型名，默认 `deepseek-v4-flash` | 可选 |
 | `DEEPSEEK_REASONING_EFFORT` | 思考深度，默认 `max` | 可选 |
 | `DEEPSEEK_THINKING` | 是否启用思考模式，默认 `true` | 可选 |
-| `DEEPSEEK_API_URL` | 官方 Chat Completions 地址 | 可选 |
+| `DEEPSEEK_API_URL` | Chat Completions 地址 | 可选 |
 | `ROADMAN_HTTP_PROXY` | 容器访问外网所需的宿主机代理，如 `http://host.docker.internal:7890` | 可选 |
 
 缺少非必需 Key 时对应能力自动降级（例如无浏览器地图 Key 时使用简化地图视图），不影响主流程。
 
-DeepSeek 接口采用官方 OpenAI 兼容 Chat Completions 协议：请求使用
-`messages`、`response_format=json_object`、`thinking=enabled` 与
-`reasoning_effort=max`，响应读取 `choices[0].message.content`；模型私有思维链不保存。
-详见 [Chat Completions API](https://api-docs.deepseek.com/api/create-chat-completion/) 与
-[思考模式](https://api-docs.deepseek.com/guides/thinking_mode/) 官方文档。
+DeepSeek 接口采用 OpenAI 兼容 Chat Completions 协议：请求使用 `messages`、`response_format=json_object`、`thinking=enabled` 与 `reasoning_effort=max`，响应读取 `choices[0].message.content`；模型私有思维链不保存。详见 [Chat Completions API](https://api-docs.deepseek.com/api/create-chat-completion/) 与 [思考模式](https://api-docs.deepseek.com/guides/thinking_mode/)。
 
-## 本地开发（Conda）
+## 本地开发
 
-后端：
+后端（Conda）：
 
 ```powershell
 conda env create -f environment.yml
@@ -119,7 +209,7 @@ npm install
 npm run dev
 ```
 
-本地开发默认使用 SQLite。异步规划依赖 Redis 与 worker，建议用 Compose 跑 PostgreSQL、Redis 和 worker，只在宿主机启动需要调试的服务：
+本地开发默认使用 SQLite。异步规划依赖 Redis 与 worker，建议用 Compose 跑基础设施，只在宿主机启动需要调试的服务：
 
 ```powershell
 docker compose up -d postgres redis worker
@@ -166,13 +256,12 @@ submission/  参赛方案书与生成审计工具
 - [project.md](project.md)：系统架构、规划工作流、接口与数据边界
 - [docs/README.md](docs/README.md)：全部维护文档索引
 - [docs/api-contract.md](docs/api-contract.md)：HTTP/SSE 接口契约
-- [docs/mobility-and-poi-data-contract.md](docs/mobility-and-poi-data-contract.md)：地点事实、票务预约、停车、公共交通与跨城班次的数据契约
+- [docs/mobility-and-poi-data-contract.md](docs/mobility-and-poi-data-contract.md)：地点事实、票务预约、停车、公共交通与跨城班次数据契约
 - [docs/operations.md](docs/operations.md)：部署运维、备份恢复与排障
-- [submission/GOAI_Boundless_Agents/RoadMan_赛道二参赛方案书.md](submission/GOAI_Boundless_Agents/RoadMan_赛道二参赛方案书.md)：参赛方案书
-- [docs/repo-audit-2026-08-28.md](docs/repo-audit-2026-08-28.md)：本次全仓库审计与可复现实测记录
+- [docs/safety-and-data-boundary.md](docs/safety-and-data-boundary.md)：安全、降级与数据边界
 
 ## 使用边界
 
 路线、天气、开放时间、票务、班次、路况与价格可能变化。RoadMan 会记录来源、时间和降级状态，但导出结果不能替代景区、交通运营方、道路管理部门或车辆厂商的实时信息。出发前请再次核对预约、封路、恶劣天气、补能可用性及交通班次。
 
-RoadMan 不连接或控制车辆。天气、补能与路线服务失败时会显示可解释降级，不把估算点或示意路线冒充实时事实；数据收集、30 天附件保留和行程级联删除范围见 [安全、降级与数据边界](docs/safety-and-data-boundary.md)。
+RoadMan 不连接或控制车辆。天气、补能与路线服务失败时会显示可解释降级，不把估算点或示意路线冒充实时事实；数据收集、30 天附件保留和行程级联删除范围见 [docs/safety-and-data-boundary.md](docs/safety-and-data-boundary.md)。
