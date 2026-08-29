@@ -2,9 +2,9 @@
 
 # RoadMan
 
-**多智能体自驾行程工作台** — 用一句话生成可执行、可编辑、可导出的完整路书
+**把一句「我想去哪」，变成一本可执行的自驾路书**
 
-自然语言 → 需求预检 → 目的地研究 → 每日排程 → 确定性复核 → 可编辑路书
+> 多智能体自驾与中短途旅行规划工作台 —— 需求理解 · 目的地研究 · 真实路线 · 逐日编排 · 自动复核修复 · 可编辑可导出
 
 </div>
 
@@ -30,7 +30,7 @@
 [![Docker Compose](https://img.shields.io/badge/Docker%20Compose-2.x-2496ED?style=flat-square&logo=docker&logoColor=white)](https://docs.docker.com/compose/)
 [![Nginx](https://img.shields.io/badge/Nginx-1.27-009639?style=flat-square&logo=nginx&logoColor=white)](https://nginx.org/)
 [![Node.js](https://img.shields.io/badge/Node.js-22-5FA04E?style=flat-square&logo=nodedotjs&logoColor=white)](https://nodejs.org/)
-[![SSE](https://img.shields.io/badge/SSE-Event%20Stream-4169E1?style=flat-square&logo=wifi&logoColor=white)](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events)
+[![SSE](https://img.shields.io/badge/SSE-Event%20Stream-4169E1?style=flat-square)](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events)
 [![OpenAPI](https://img.shields.io/badge/OpenAPI-3-6BA539?style=flat-square&logo=swagger&logoColor=white)](https://swagger.io/)
 
 **前端 · 交互**
@@ -41,7 +41,7 @@
 [![Pinia](https://img.shields.io/badge/Pinia-3-FFD859?style=flat-square&logo=pinia&logoColor=black)](https://pinia.vuejs.org/)
 [![Vue Router](https://img.shields.io/badge/Vue%20Router-4.5-42B883?style=flat-square&logo=vuedotjs&logoColor=white)](https://router.vuejs.org/)
 [![TanStack Query](https://img.shields.io/badge/TanStack%20Query-5.66-FF4154?style=flat-square&logo=reactquery&logoColor=white)](https://tanstack.com/query/latest)
-[![AMap JSAPI](https://img.shields.io/badge/AMap%20JSAPI-1.x-2899F5?style=flat-square&logo=baidumap&logoColor=white)](https://lbs.amap.com/api/javascript-api-v2/summary)
+[![AMap JSAPI](https://img.shields.io/badge/AMap%20JSAPI-1.x-2899F5?style=flat-square)](https://lbs.amap.com/api/javascript-api-v2/summary)
 [![Model Viewer](https://img.shields.io/badge/Model%20Viewer-4.3-60C0EB?style=flat-square&logo=google&logoColor=white)](https://modelviewer.dev/)
 
 **质量 · 测试**
@@ -56,32 +56,82 @@
 
 [![DeepSeek](https://img.shields.io/badge/DeepSeek-V4-4D6BFE?style=flat-square&logo=deepseek&logoColor=white)](https://www.deepseek.com/)
 [![Open-Meteo](https://img.shields.io/badge/Open--Meteo-Free-14A0A5?style=flat-square&logo=sun&logoColor=white)](https://open-meteo.com/)
-[![OpenTripMap](https://img.shields.io/badge/OpenTripMap-POI-5B8DEF?style=flat-square&logo=map&logoColor=white)](https://opentripmap.io/)
-[![FlyAI](https://img.shields.io/badge/FlyAI-Travel-FF5A5F?style=flat-square&logo=airbnb&logoColor=white)](https://www.flyai.com/)
+[![OpenTripMap](https://img.shields.io/badge/OpenTripMap-POI-5B8DEF?style=flat-square)](https://opentripmap.io/)
+[![FlyAI](https://img.shields.io/badge/FlyAI-Travel-FF5A5F?style=flat-square)](https://www.flyai.com/)
 
 ---
 
-## 界面预览
+## RoadMan 在解决什么问题
 
-| 首页 · 需求录入 | 规划详情 · 地图与阶段编排 |
-| :---: | :---: |
-| ![首页](docs/screenshots/home.png) | ![规划详情](docs/screenshots/plan_lushan.png) |
+规划一次自驾旅行，通常要在地图、攻略、天气、酒店、充电桩和班次表之间来回切换，手动拼出一条「能走」的行程。真正恶心的是：拼完之后它可能 **根本走不了** —— 凌晨三点参观、全天空白、三餐缺失、酒店天天换、一天 18 小时车程、电量到不了下一个充电站。这些「好看但不可执行」的行程，正是大模型一次性生成的老毛病。
 
-> 长途自驾自动按每日驾驶上限拆分，沿途安排休息与补能，次日继续行驶：
+RoadMan 的做法是：**把「内容建议」放进可执行工作流**。一句话需求交给一群分工明确的智能体去理解、研究、取舍、编排，而路线坐标、时间窗口、连续驾驶、电量余量、三餐住宿、返程闭环这些硬规则由确定性程序兜底；确认、复核不通过就自动重排修复；用户改一句「把第二天换成更安静的地方」，系统先给出影响预览，确认后统一重算，再校验一遍才允许导出。
 
-![哈尔滨 6 天 · 跨天驾驶拆分](docs/screenshots/plan_harbin.png)
+它不是实时导航，也不是车辆控制 —— 而是出发前与途中调整的**规划助手**：懂车、懂路、懂天气，也懂你。
+
+## 完整旅程，一次看完
+
+从「自然语言需求」到「可执行、可修改、可验证的行程」，再落到 Markdown / HTML / PDF / PPTX / 长图多格式交付：
+
+<!--
+  ██ 预留位置：Agent 规划过程动态 GIF ██
+  1) 录制需求输入 → 预检确认 → 后台渐进规划（地图逐段出现、阶段卡片逐项生成）
+     → 复核修复提示 → 完成后的语义编辑预览与导出过程；
+  2) 将 gif 文件保存为 docs/screenshots/agent-planning.gif；
+  3) 取消下方两行注释（去掉 <div align="center"> 与 </div> 行首的 HTML 注释标记）即可显示。
+  建议宽度 width="85%"，保持与页面其他截图比例一致。
+-->
+<!--
+<div align="center">
+  <img src="docs/screenshots/agent-planning.gif" alt="RoadMan Agent 规划过程" width="85%"/>
+</div>
+-->
+
+## 功能亮点
+
+### 一句话，开始出发
+
+用自然语言说出「**周六早上从武汉出发，去庐山两天一夜，周日晚八点前回来，喜欢自然景观**」。系统先做需求核对与逐项追问，确认后才启动后台规划；也可以附加图片、PDF、DOCX、Markdown 或 XLSX 作为上下文。理解「新疆」「南京」「西藏和新疆」这类行政区、城市与多目的地，不会把目的地猜成同名餐馆或校园。
+
+![一句话出发与快捷入口](docs/screenshots/home.png)
+
+### 后台渐进规划，实时可见
+
+规划是持续数分钟的长任务：Redis + ARQ 执行 LangGraph 工作流，SSE 把每个节点的进度实时推送到详情页——顶部进度条、地图逐段出现路线、阶段卡与活动逐项生成、右侧智能体协作消息实时滚动。前端动画节奏与后台速度分离，历史行程直接从数据库恢复，不重播「生成中」。
+
+![渐进规划进度视图](docs/screenshots/plan_planning.png)
+
+### 地图与逐日编排，看起来就懂
+
+每一天是一条完整时间线：早餐、出发、沿途服务区休息与充电、景点停留、餐饮、住宿，附带路况、天气、路费与能耗估算。当前阶段路线高亮、其他灰显，支持平移缩放、阶段切换与地图选点。
+
+![规划详情 · 地图与阶段编排](docs/screenshots/plan_lushan.png)
+
+### 长途自驾，自动拆成从容的跨天
+
+新能源长途最考验「能不能顺利到达下一个充电站」。RoadMan 按每日驾驶上限拆分跨天路段，沿途插入服务区休息、加油/充电补能与过夜住宿，次日再继续，不会把 24 小时以上驾驶压在第一天。补能不足、连续驾驶过久、强降水等风险会以警告与修复建议的形式出现在行程里。
+
+![跨天驾驶拆分与补能安排](docs/screenshots/plan_harbin.png)
+
+### 历史规划，随时接着用
+
+所有行程自动保存为历史规划，秒开恢复，支持批量删除与全选操作；进行中的行程可继续追踪，失败或待继续的会明确标注。
+
+![历史规划面板](docs/screenshots/home_history.png)
+
+### 车辆与能源上下文
+
+车型管理支持从真实车型目录搜索并保存车辆（续航、电量、座位数等），规划时按车辆上下文计算可用续航与补能节点——纯电、燃油、混动的规划策略各不相同。
+
+![车型管理与续航估算](docs/screenshots/home_vehicle.png)
+
+### 可观测、可追溯
+
+每一次外部能力调用都记录来源、时间与降级状态；运行监控页给出请求量、延迟、Skill 调用与缓存命中，以及全部外部服务健康状况。不把估算点冒充实时事实，不伪造成功。
+
+![运行监控与外部服务健康](docs/screenshots/ops.png)
 
 ---
-
-## 特性
-
-- **一句话生成行程**：用自然语言描述出发地、目的地、日期、同行人和偏好，系统自动完成需求核对、目的地研究、分区计划单、真实路线查询、每日食宿行编排、车辆补能与驾驶休息安排、自动复核修复，最终输出完整路书。
-- **语义-确定性双层架构**：地点理解由云端需求智能体负责，把「新疆」「南京」「西藏和新疆」等行政区/城市/多目的地保留为结构化范围；模型不可用或返回非法地点结构时明确暂停，**不会用关键词把目的地猜成餐馆、校园或酒店**。
-- **22 节点 LangGraph 状态机**：需求抽取 → 目的地研究 → 目的地策划 → 路线 → POI → 天气 → 补能/服务 → 每日复核 → 确定性校验，发现可修复问题时自动重排并循环复核（最多 4 轮）。
-- **真实道路轨迹**：高德路线优先使用真实 geometry；不可用时按策略降级，全部失败返回 `ROUTE_UNAVAILABLE`，前端灰色虚线只表示不可用提示。
-- **PlanPatch 可信编辑**：自然语言修改与地图选点均走 `preview → apply/reject → rollback` 两阶段流程，确认前不改变 canonical Trip，支持回滚。
-- **多格式导出**：Markdown、HTML、PDF、PPTX、长图；历史行程从数据库恢复，不重新播放规划动画。
-- **可观测与降级**：请求 ID、追踪 ID、速率限制、Skill 调用记录、服务指标与 Docker 健康检查；外部服务失败显示可解释降级，**不伪造成功**。
 
 ## 架构总览
 
@@ -99,7 +149,7 @@ flowchart TB
         SK["Skill Registry<br/>地图 / 天气 / 旅行搜索 / 开放数据 / 车型目录"]
     end
 
-    subgraph Workflow["LangGraph 规划工作流"]
+    subgraph Workflow["LangGraph 规划工作流（22 节点）"]
         S["语义智能体"]
         D["确定性调度 / 复核 / 修复"]
     end
@@ -118,7 +168,9 @@ flowchart TB
     Workflow --> Export
 ```
 
-状态所有权：`Trip` 是用户可见的 canonical 行程（整份 JSON 存于 `trips.document`）；`RoadManState` 保存图执行中的候选、来源与修复次数；ARQ job 在后台执行规划，API 不在请求线程内跑完整规划；SSE 只传递可展示的阶段进度，不暴露密钥或模型原始输出。
+**双层架构**：语义智能体负责理解、研究、取舍与协作（需求抽取、目的地研究、POI 策展、适配复核、行程编辑、事件研究）；确定性程序负责坐标、路线、时间、能耗、冲突与硬安全规则。模型可以提建议，但不能覆盖路线闭环与车辆安全结论。
+
+**状态所有权**：`Trip` 是 canonical 行程；`RoadManState` 保存图执行中的候选与修复轮次；ARQ job 在后台执行，API 不在请求线程内跑完整规划；SSE 只推送可展示状态，不暴露密钥或模型原始输出。
 
 ## 快速开始（Docker Compose）
 

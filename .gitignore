@@ -4,6 +4,9 @@
 Skills/**/apikey.txt
 Skills/**/secretkey.txt
 Skills/**/apipkey.txt
+# Local demo screenshots kept out of the repository
+前端1.png
+前端2.png
 .venv/
 .omo/
 .codegraph/
