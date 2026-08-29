@@ -592,6 +592,11 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .chat-input svg { width: 16px; }
 .degraded-banner { position: fixed; z-index: 30; top: 18px; left: 50%; transform: translateX(-50%); border-radius: 20px; padding: 8px 14px; font-size: 11px; box-shadow: 0 8px 24px rgba(36,66,110,.18); }
 .degraded-banner { background: #fff4d8; color: #8a6310; }
+.safety-boundary-banner { margin: 0 20px 10px; padding: 10px 14px; border: 1px solid #d7e4f5; border-radius: 14px; background: rgba(245,249,255,.94); color: #294663; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.safety-boundary-banner div { display: grid; gap: 2px; margin-right: auto; }
+.safety-boundary-banner strong { font-size: 13px; }
+.safety-boundary-banner small { color: #6b7f95; font-size: 11px; }
+.safety-boundary-banner span { max-width: 360px; padding: 5px 9px; border-radius: 999px; background: #fff2d9; color: #8b5e08; font-size: 11px; }
 .page-state { min-height: 70vh; display: grid; place-items: center; color: var(--muted); }.page-state.error { color: #bd3c43; }
 
 .primary-button:disabled {

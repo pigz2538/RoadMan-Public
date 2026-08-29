@@ -1,6 +1,10 @@
-import pytest
+from pathlib import Path
 
-from app.db import SessionLocal
+import pytest
+from sqlalchemy import func, select
+
+from app.core.config import get_settings
+from app.db import FileRow, JobRow, SessionLocal, SkillCallRow, TripVersionRow
 from datetime import date, datetime, timedelta, timezone
 
 from app.domain.models import Activity, DayItemRef, DayPlan, Trip
@@ -51,6 +55,54 @@ async def test_trip_crud(client):
     assert deleted.status_code == 204
     assert (await client.get(f"/api/v1/trips/{trip_id}")).status_code == 404
     assert all(item["id"] != trip_id for item in (await client.get("/api/v1/trips")).json())
+
+
+@pytest.mark.asyncio
+async def test_trip_delete_purges_linked_versions_files_jobs_messages_and_audit(client):
+    created = await client.post(
+        "/api/v1/trips",
+        json={"title": "待删除行程", "request": {"raw_text": "武汉周末游"}},
+    )
+    trip_id = created.json()["id"]
+    await client.post(
+        f"/api/v1/trips/{trip_id}/versions",
+        json={"name": "删除前版本"},
+    )
+    upload_root = Path(get_settings().upload_dir)
+    upload_root.mkdir(parents=True, exist_ok=True)
+    attachment = upload_root / f"{trip_id}-attachment.txt"
+    attachment.write_text("temporary trip attachment", encoding="utf-8")
+    now = datetime.now(timezone.utc)
+    async with SessionLocal() as session:
+        session.add_all(
+            [
+                FileRow(
+                    id=f"file_{trip_id}", trip_id=trip_id, original_name="attachment.txt",
+                    stored_name=attachment.name, storage_path=str(attachment), mime_type="text/plain",
+                    size_bytes=attachment.stat().st_size, status="ready", created_at=now,
+                ),
+                JobRow(
+                    id=f"job_{trip_id}", trip_id=trip_id, kind="planning", status="queued",
+                    progress=0, payload_json="{}", created_at=now, updated_at=now,
+                ),
+                SkillCallRow(
+                    id=f"call_{trip_id}", request_id="request-delete", trip_id=trip_id,
+                    adapter="test.adapter", provider="test", success=True, cache_hit=False,
+                    latency_ms=1, source_summary_json="[]", created_at=now,
+                ),
+            ]
+        )
+        await session.commit()
+
+    response = await client.delete(f"/api/v1/trips/{trip_id}")
+    assert response.status_code == 204
+    assert not attachment.exists()
+    async with SessionLocal() as session:
+        for model in (TripVersionRow, FileRow, JobRow, SkillCallRow):
+            count = await session.scalar(
+                select(func.count()).select_from(model).where(model.trip_id == trip_id)
+            )
+            assert count == 0
 
 
 @pytest.mark.asyncio

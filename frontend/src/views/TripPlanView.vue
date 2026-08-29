@@ -160,6 +160,19 @@ const riskStages = computed(() =>
     || stage.warnings.length > 0,
   ),
 )
+const degradationNotices = computed(() => {
+  const warnings = allStages.value.flatMap(({ stage }) => stage.warnings ?? [])
+  const codes = new Set(warnings.map((warning) => warning.code))
+  const notices: string[] = []
+  if (codes.has('WEATHER_DATA_DEGRADED')) notices.push('天气服务暂不可用：已按基础风险继续，出发前需复核')
+  if (codes.has('ENERGY_STOP_ESTIMATED') || codes.has('CHARGING_POWER_ESTIMATED')) {
+    notices.push('补能数据不完整：位置、功率或时长含保守估算，出发前需确认可用性')
+  }
+  if (warnings.some((warning) => warning.estimated && !codes.has('WEATHER_DATA_DEGRADED'))) {
+    notices.push('部分路线或服务使用估算值，不能直接作为实时导航依据')
+  }
+  return [...new Set(notices)]
+})
 
 async function load() {
   const tripId = String(route.params.tripId)
@@ -787,6 +800,10 @@ watch(
     </section>
     <template v-else-if="store.trip && store.currentDay">
       <div v-if="degraded" class="degraded-banner">后端暂不可用，正在加载本地行程数据。</div>
+      <section class="safety-boundary-banner" aria-label="安全与降级状态">
+        <div><strong>规划辅助，不连接或控制车辆</strong><small>实时导航、道路公告、运营方信息与驾驶员判断具有最终优先级</small></div>
+        <span v-for="notice in degradationNotices" :key="notice">{{ notice }}</span>
+      </section>
       <section v-if="!planningComplete" class="planning-live-strip glass-card">
         <span class="planning-pulse" />
         <div class="planning-live-copy">

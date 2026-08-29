@@ -3590,6 +3590,16 @@ def build_planning_graph(
                 f"- {item['description']}"
                 for item in state["verification_result"]["issues"]
             )
+        lines.extend(
+            [
+                "",
+                "## 安全与数据边界",
+                "",
+                "- RoadMan 仅提供行程规划辅助，不连接 CAN 总线，不控制车辆，也不替代实时导航、道路公告、运营方或驾驶员判断。",
+                "- 天气、补能、班次、开放与预约数据缺失时会保留降级标记；估算位置和估算时长必须在出发前复核。",
+                "- 行程、对话与规划状态保存在本地数据库；删除行程时同步清理版本、附件、任务与该行程的工具调用记录。",
+            ]
+        )
         return {
             "plan_markdown": "\n".join(lines),
             "progress": {"node": "render_markdown", "value": 97},
@@ -5023,8 +5033,14 @@ def _energy_markdown(estimate: dict[str, Any] | None) -> str:
         return "不适用"
     remaining = estimate.get("remaining_percent")
     remaining_text = f"，预计剩余 {remaining}%" if remaining is not None else ""
+    replenished = estimate.get("replenished_amount")
+    replenished_text = (
+        f"，补能 {replenished} {estimate.get('replenished_unit') or estimate['unit']}"
+        if replenished is not None
+        else ""
+    )
     return (
-        f"{estimate['amount']} {estimate['unit']}{remaining_text}"
+        f"{estimate['amount']} {estimate['unit']}{replenished_text}{remaining_text}"
         f"{'（估算）' if estimate.get('estimated') else ''}"
     )
 

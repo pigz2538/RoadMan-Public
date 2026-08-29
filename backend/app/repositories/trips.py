@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..db import TripRow
+from ..core.config import get_settings
+from ..db import FileRow, JobRow, SkillCallRow, TripRow, TripVersionRow
 from ..domain.models import Trip, TripCreate, TripUpdate
 
 
@@ -117,6 +119,17 @@ class TripRepository:
         row = await self.session.get(TripRow, trip_id)
         if not row:
             return False
+        file_rows = list(
+            (await self.session.scalars(select(FileRow).where(FileRow.trip_id == trip_id))).all()
+        )
+        for model in (TripVersionRow, JobRow, SkillCallRow, FileRow):
+            await self.session.execute(delete(model).where(model.trip_id == trip_id))
         await self.session.delete(row)
         await self.session.commit()
+
+        upload_root = Path(get_settings().upload_dir).resolve()
+        for file_row in file_rows:
+            candidate = Path(file_row.storage_path).resolve()
+            if candidate != upload_root and upload_root in candidate.parents:
+                candidate.unlink(missing_ok=True)
         return True

@@ -34,3 +34,4 @@
 - 涉及路线/地图/交通降级，读 [routing-fallback-design.md](routing-fallback-design.md)。
 - 提交参赛或对外交付前，用 [competition-readiness.md](competition-readiness.md) 核对能力，并按 [current-repair-plan.md](current-repair-plan.md) 处理已知差距。
 - 需要确认当前代码是否真的可发布时，查看 [repo-audit-2026-08-28.md](repo-audit-2026-08-28.md) 的实测结果，不要只看历史截图或旧日志。
+- 安全责任、外部服务降级和数据删除范围见 [safety-and-data-boundary.md](safety-and-data-boundary.md)。
