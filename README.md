@@ -131,6 +131,27 @@ RoadMan 的做法是：**把「内容建议」放进可执行工作流**。一�
 
 ![运行监控与外部服务健康](docs/screenshots/ops.png)
 
+## 功能特写
+
+从「看起来像样的行程」到「真实可执行」，藏在每个功能细节里：
+
+| 阶段卡片 · 真实道路轨迹 | 跨天驾驶拆分 |
+| :---: | :---: |
+| 起点/终点、道路、路况、天气、路费与能耗估算一卡俱全；连续驾驶超时自动插入休息 | 长途按每日驾驶上限拆成多段，沿途休息点与补能站逐项排入 |
+| <img src="docs/screenshots/feature-route-card.png" alt="路线阶段卡片" width="88%"/> | <img src="docs/screenshots/feature-crossday-card.png" alt="跨天驾驶拆分卡片" width="88%"/> |
+
+| 风险与自驾校验 | 自动复核修复 |
+| :---: | :---: |
+| 连续驾驶、强降水、电量余量、夜间驾驶逐项列出，风险可追可解释 | 多源信息核验：来源数、核验时间、票价区间、预约与营业状态逐项标注 |
+| <img src="docs/screenshots/feature-risk-card.png" alt="风险与自驾校验" width="96%"/> | <img src="docs/screenshots/feature-day-sidebar.png" alt="全天时间线与多源核验" width="52%"/> |
+
+| 智能体协作 · 行程助理 | 地图选点与一键导出 |
+| :---: | :---: |
+| 快捷指令一键唤起，自然语言修改 → 预览 → 确认应用，失败不落库 | 地图加点选点；Markdown / PDF / PPT / 长图 / HTML 多格式导出 |
+| <img src="docs/screenshots/feature-agent-panel.png" alt="行程助理智能体面板" width="52%"/> | <img src="docs/screenshots/feature-map-pick.png" alt="地图加点工具条" width="70%"/> |
+
+![一键导出工具栏](docs/screenshots/feature-export-bar.png)
+
 ---
 
 ## 架构总览
