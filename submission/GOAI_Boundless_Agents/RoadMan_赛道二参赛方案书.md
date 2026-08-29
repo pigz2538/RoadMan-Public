@@ -293,6 +293,8 @@ RoadMan 提供从单元到端到端的可复现验证，全部以命令和机器
 | 前端状态测试与构建 | 规划事件去重、渐进显示、类型与生产构建 | `npm run test`、`npm run build` |
 | API 冒烟 | 健康、CRUD、外部能力、规划启动、导出门禁 | `deploy/api_smoke.py` |
 | 需求理解评测 | 日期、英文、情侣人数、同名地点、跨城、三餐住宿、补能、事件、闭环、跨海、覆盖、季节适配 | `evaluation/run_evals.py` |
+| 续航误差基准 | 预测能耗、等效续航、到达 SOC 与观测值误差；模拟与真实遥测分层披露 | `evaluation/range_accuracy.py` |
+| 安全与降级评测 | 低 SOC 长途、恶劣天气、补能设施不足、车辆信息缺失、外部服务失败 | `evaluation/safety_scenarios.py` |
 | 完整旅程验收 | 新建 → 完成 → 编辑 → 重新校验 → 五格式导出 | `deploy/full_journey_acceptance.py` |
 | 编辑重规划验收 | 补丁预览、确认、应用、重排与失败不污染 | `deploy/edit_replan_acceptance.py` |
 | 浏览器端到端 | 规划、编辑、运维页的浏览器自动化 | `deploy/showcase_browser_acceptance.mjs` |
@@ -317,6 +319,8 @@ RoadMan 提供从单元到端到端的可复现验证，全部以命令和机器
 | `season-weather-personalization` | 对单个活动逐项适配，而非固定黑名单 |
 
 评测结果写入机器可读的 JSON 证据文件，随评审材料一并提供，不以截图代替。
+
+续航基线固定 12 条 `simulation_sensor_replay` 样本，仅证明计算和评测链路可复现，不冒充真实道路遥测。当前结果为能耗 MAPE 8.442%、等效续航 MAPE 9.302%、到达 SOC MAE 2.799 个百分点，均通过预设阈值（12%、12%、5 个百分点）。安全与降级集 5/5 命中预期；补能设施只剩估算位置时，任务可以诚实完成但路线不计为可执行，因此路线可执行率为 80% 而不是虚假的 100%。
 
 ## 6.3 完整旅程与编辑重规划验收
 
@@ -488,6 +492,8 @@ npm run build
 cd ..
 python deploy/api_smoke.py
 python evaluation/run_evals.py
+python evaluation/range_accuracy.py
+python evaluation/safety_scenarios.py
 python deploy/full_journey_acceptance.py --keep-trip
 python deploy/edit_replan_acceptance.py
 ```

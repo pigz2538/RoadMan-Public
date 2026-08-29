@@ -4,7 +4,9 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
+    "predev": "node scripts/copy-draco.mjs",
     "dev": "vite --host 0.0.0.0",
+    "prebuild": "node scripts/copy-draco.mjs",
     "build": "vue-tsc -b && vite build",
     "test": "vitest run --exclude tests/e2e --passWithNoTests .",
     "test:e2e": "playwright test"

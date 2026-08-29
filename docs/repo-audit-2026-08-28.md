@@ -1,6 +1,6 @@
 # 仓库审计记录（2026-08-28）
 
-这份记录对应当前 `main` 工作区，目的是把“代码已修复”和“外部服务暂不可用”分开，避免把配置故障误报成规划算法故障。
+这份记录在 2026-08-29 完成最终复核，对应当前 `main` 工作区，目的是把“代码已修复”和“外部服务波动”分开，避免把配置故障误报成规划算法故障。
 
 ## 范围
 
@@ -37,25 +37,34 @@
 删除历史行程时，已经排队的规划任务可能仍在后台启动。工作进程现在把找不到行程视为可预期取消（`TRIP_DELETED`），清理任务状态并停止写入，不再把已删除行程记录成失败规划或输出误导性的堆栈日志。
 回归用例：`test_deleted_trip_planning_job_is_discarded`。
 
+### 6. 连续 SOC、可复现评测与调用成本
+
+新能源深度驾驶阶段现在保存起始 SOC、路段消耗、补能前 SOC、实际/估算补能量、功率、时长、补能后 SOC 和到达 SOC。跨天拆分继承上一段结果，补能站不会把电量固定写成 80%。`evaluation/range_accuracy.py` 固定 12 条模拟传感器回放，`evaluation/safety_scenarios.py` 直接调用生产规划代码覆盖低电量长途、恶劣天气、设施不足、车辆信息缺失与外部失败。DeepSeek 审计记录官方 usage Token 与耗时，但不保存 prompt、回答和私有推理。
+
+### 7. 规划页空间和 3D 模型离线依赖
+
+规划页三侧信息栏都可折叠；底部详情收起后保留简版阶段切换。状态持久化但组件不销毁，避免展开时丢失编辑/对话。McLaren GLB 所需 Draco 解码器随前端镜像发布，E2E 阻断 Google CDN 后仍能加载，避免比赛网络波动导致白模。
+
 ## 验证结果
 
 | 检查 | 结果 |
 | --- | --- |
 | Python 编译 | `compileall-ok` |
-| 后端 | `126 passed, 1 skipped` |
+| 后端 | `131 passed, 1 skipped` |
 | 前端单测 | `2 passed` |
 | 前端构建 | 通过；仅有 `model-viewer` 大 chunk 提示 |
-| 前端 E2E | `15 passed, 6 skipped`；跳过项均有显式原因 |
+| 前端 E2E | `17 passed, 6 skipped`；跳过项均有显式原因 |
 | API 冒烟 | `58/58` |
 | Docker | 五个 Compose 服务已重建；backend、postgres、redis healthy，worker/frontend running |
-| 需求评测 | `0/12`，12 条均因当前 Ollama Key 的 403 无法取得语义结果 |
-| 完整旅程 | 规划与确定性校验已完成；编辑阶段因同一 403 按契约返回 503 |
+| 续航误差 | 12 样本；能耗 MAPE `8.442%`、等效续航 MAPE `9.302%`、SOC MAE `2.799pp` |
+| 安全/降级 | `5/5` 命中预期；路线可执行率 `80%`，估算补能位置不冒充可执行路线 |
+| 真实智能体 | DeepSeek 预检、编辑、附件提取通过；本轮 10 次调用、官方 Token `16,313` |
 
-## 外部配置恢复后
+## 提交版本的真实环境复核
 
-1. 更新被授权的 `DEEPSEEK_API_KEY`（不要提交到仓库或日志），并用官方 Chat Completions 最小请求验证。
+1. 确认被授权的 `DEEPSEEK_API_KEY` 只在环境变量/Secret 中（不要提交到仓库或日志），并用官方 Chat Completions 最小请求验证。
 2. 用最小生成请求验证 Key，不要只检查模型列表。
-3. 运行 `python evaluation/run_evals.py`，目标为 12/12。
+3. 运行 `python evaluation/run_evals.py`，保存实时需求评测报告；不要把网络失败计为模型理解通过。
 4. 设置 `ROADMAN_RUN_LIVE_AGENT_E2E=1` 后运行真实预检浏览器用例。
 5. 运行 `python deploy/full_journey_acceptance.py --timeout 600`，确认语义编辑、路线重建和五种导出均完成。
 

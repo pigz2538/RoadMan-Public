@@ -32,7 +32,9 @@ RoadMan 已形成从「自然语言需求」到「可确认、可追踪、可编
 - Skill Registry 统一接入地图、天气、旅行信息、开放数据、车型目录和语义模型；每次调用可审计、可缓存并可降级。旅行信息服务的住宿结果会按目的地坐标过滤异地卡片；无库存时保留未知状态。
 - 高德路线优先使用真实道路 geometry；驾车不可用时按策略尝试骑行、步行或公共交通，全部失败返回 `ROUTE_UNAVAILABLE`，前端灰色虚线只表示不可用提示。
 - 当前阶段路线高亮，其他路线灰显；地图支持平移/缩放、阶段切换和点选；路线几何跟随地图变换。
+- 规划页左侧日程、右侧行程助理和底部阶段详情可独立折叠；底栏折叠后只保留阶段序号及前后切换，状态写入浏览器本地存储，展开不会重建组件或丢失编辑上下文。
 - 每日复核与最终验证由确定性调度和校验器执行，覆盖三餐、住宿、时段、活动冲突、连续驾驶、补能和返程闭环；发现可修复问题时自动重排并循环复核（最多 4 轮），仍无法满足的硬约束才交由用户处理。明确返程到达时刻会在排程前预留道路、补能和驾驶休息缓冲，避免深度驾驶拆分后越过截止时间。长途自驾会按每日最多 9 小时拆成跨天路段，在沿途服务区/酒店插入休息与过夜住宿，次日 08:00 再继续，不会把 24 小时以上驾驶压在第一天。
+- 新能源阶段使用连续 SOC 账本：`starting_percent → consumed_percent → before_replenishment_percent → replenished_amount → after_replenishment_percent → remaining_percent`。补能量优先取供应商实测能量，其次按站点功率 × 停留时间估算，最后才使用带 `calculation_basis` 的保守降级；跨天拆分继承上一段到达 SOC，不再在补能后写死 80%。
 - 编辑采用 `preview → apply/reject → rollback` 的 PlanPatch 两阶段流程，支持自然语言修改、地图选点、候选景点/酒店/餐饮加入或替换。
 - 规划完成后才能导出 Markdown、HTML、PDF、PPTX、PNG；历史行程从数据库恢复，不重新播放规划动画。
 - 车辆管理支持 CRUD，并提供 `carinfo.catalog` 真实车型搜索；本地车型字段由用户确认后保存。
@@ -155,7 +157,7 @@ shared/
   schemas/      跨进程 JSON Schema（由 backend/scripts/export_schemas.py 生成）
   examples/     示例行程快照
 deploy/         冒烟与验收脚本、Nginx、备份恢复
-evaluation/     需求理解评测场景与打分
+evaluation/     需求理解、续航误差、安全降级、耗时与 Token 指标评测
 docs/           当前接口、模型、运行和降级说明
 Skills/         provider skill 指南与本地开发参考（不放密钥）
 ```
@@ -197,6 +199,8 @@ Skills/         provider skill 指南与本地开发参考（不放密钥）
 - PostgreSQL 保存 Trip、版本、规划状态、任务、技能调用和上传文件元数据。
 - Redis + ARQ 执行异步规划；API 与 Worker 共享规划状态。
 - 上传内容在 `UPLOAD_DIR`，数据库只保存安全文件名和元数据；扩展名/MIME 白名单见配置。
+- 删除单条行程执行不可恢复的级联硬删除：同步清理 Trip、消息/规划状态、版本、任务、行程级 Skill 调用、附件元数据和安全上传目录内的实体文件；系统级健康审计不随单条行程删除。
+- DeepSeek 调用审计只记录智能体角色、成功状态、耗时和官方 usage Token，不保存 prompt、回答或私有推理文本；`/api/v1/ops/metrics` 汇总平均/P95 延迟、成功率与 Token 用量。
 - Compose 入口是 `8080`，后端容器内部 `8000`；前端 Nginx 反代 `/api` 到后端。
 - 通过 `CORS_ORIGINS`、`POSTGRES_*`、`ROADMAN_HTTP_PROXY` 等变量覆盖部署参数。
 - 备份恢复脚本在 `deploy/scripts/`（`backup.ps1` / `restore.ps1`）。
@@ -211,9 +215,12 @@ Skills/         provider skill 指南与本地开发参考（不放密钥）
 $env:PYTHONPATH = 'backend'
 python -m compileall -q backend/app backend/tests
 pytest backend/tests -q
+python evaluation/range_accuracy.py
+python evaluation/safety_scenarios.py
 cd frontend
 npm run test
 npm run build
+npm run test:e2e
 ```
 
 需要真实 provider 时，再执行 Docker 健康检查、`deploy/api_smoke.py` 和对应 Skill API 冒烟。没有凭据的环境也必须返回可解释的降级结果；语义智能体不可用时不能把关键词结果冒充模型理解。完整旅程与编辑重规划验收脚本见 `deploy/`；需求理解评测见 `evaluation/`。

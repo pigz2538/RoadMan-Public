@@ -123,6 +123,15 @@ onMounted(() => {
   void loadHistory()
   void loadVehicles()
   void loadHomeWeather()
+  // McLaren uses Draco mesh compression. Keep its decoder inside the frontend
+  // image so the 3D car does not depend on gstatic/CDN availability at runtime.
+  const modelViewerGlobal = window as typeof window & {
+    ModelViewerElement?: { dracoDecoderLocation?: string }
+  }
+  modelViewerGlobal.ModelViewerElement = {
+    ...modelViewerGlobal.ModelViewerElement,
+    dracoDecoderLocation: '/draco/',
+  }
   void import('@google/model-viewer').then(({ ModelViewerElement }) => {
     // The model is intentionally loaded, but keep adaptive rendering bounded.
     // model-viewer clamps this value to a safe minimum of 0.25.

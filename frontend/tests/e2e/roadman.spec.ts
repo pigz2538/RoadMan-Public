@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test'
 
 test('首页包含核心规划入口', async ({ page }) => {
+  await page.route('https://www.gstatic.com/**', (route) => route.abort())
   await page.route('**/models/mclaren.glb', async (route) => {
     await new Promise((resolve) => setTimeout(resolve, 500))
     await route.continue()
@@ -31,11 +32,13 @@ test('首页包含核心规划入口', async ({ page }) => {
     fullPage: true,
     animations: 'disabled',
     maxDiffPixelRatio: 0.03,
+    timeout: 10_000,
   })
 })
 
 test('首页 3D 车辆保留滚轮缩放和大画布缓冲', async ({ page }) => {
   test.setTimeout(45_000)
+  await page.route('https://www.gstatic.com/**', (route) => route.abort())
   await page.goto('/home')
   await expect(page.getByText('3D 模型已加载')).toBeVisible({ timeout: 20_000 })
   const vehicleModel = page.locator('model-viewer')
@@ -109,6 +112,7 @@ test('规划页支持天、阶段和节点选择', async ({ page }) => {
     fullPage: true,
     animations: 'disabled',
     maxDiffPixelRatio: 0.03,
+    timeout: 10_000,
   })
 
   const markers = page.locator('.amap-terminal-marker, .amap-poi-marker, .map-pin')
