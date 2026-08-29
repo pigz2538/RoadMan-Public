@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowLeft, ChevronLeft, ChevronRight, Crosshair, Download, Paperclip, Share2 } from '@lucide/vue'
+import { ArrowLeft, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Crosshair, Download, Paperclip, Share2 } from '@lucide/vue'
 import {
   answerClarification,
   createTripVersion,
@@ -50,6 +50,17 @@ const mapPickMessage = ref('')
 const planningRestarting = ref(false)
 const activePlanningBatchId = ref<string | null>(null)
 const historyView = computed(() => route.query.history === '1')
+const panelStorageKeys = {
+  left: 'roadman-plan-left-collapsed',
+  right: 'roadman-plan-right-collapsed',
+  bottom: 'roadman-plan-bottom-collapsed',
+} as const
+function storedPanelState(key: string) {
+  return typeof window !== 'undefined' && window.localStorage.getItem(key) === '1'
+}
+const leftPanelCollapsed = ref(storedPanelState(panelStorageKeys.left))
+const rightPanelCollapsed = ref(storedPanelState(panelStorageKeys.right))
+const bottomPanelCollapsed = ref(storedPanelState(panelStorageKeys.bottom))
 let pollingTimer: number | undefined
 let refreshInFlight = false
 let refreshQueued = false
@@ -153,6 +164,7 @@ const allStages = computed(() =>
 const currentGlobalStageIndex = computed(() =>
   allStages.value.findIndex((item) => item.stage.id === store.currentStageId),
 )
+const currentStagePosition = computed(() => currentGlobalStageIndex.value >= 0 ? currentGlobalStageIndex.value + 1 : 0)
 const riskStages = computed(() =>
   allStages.value.filter(({ stage }) =>
     stage.risk_level === 'high'
@@ -693,6 +705,9 @@ watch(
   () => store.currentStageId,
   () => nextTick(() => centerCurrentStage()),
 )
+watch(leftPanelCollapsed, (collapsed) => window.localStorage.setItem(panelStorageKeys.left, collapsed ? '1' : '0'))
+watch(rightPanelCollapsed, (collapsed) => window.localStorage.setItem(panelStorageKeys.right, collapsed ? '1' : '0'))
+watch(bottomPanelCollapsed, (collapsed) => window.localStorage.setItem(panelStorageKeys.bottom, collapsed ? '1' : '0'))
 </script>
 
 <template>
@@ -820,8 +835,8 @@ watch(
         </div>
         <b>{{ planningProgress }}%</b>
       </section>
-      <section class="plan-grid">
-        <aside class="trip-sidebar glass-card">
+      <section :class="['plan-grid', { 'left-panel-collapsed': leftPanelCollapsed, 'right-panel-collapsed': rightPanelCollapsed }]">
+        <aside v-show="!leftPanelCollapsed" class="trip-sidebar glass-card">
           <select :value="store.currentDayIndex" @change="store.setDay(Number(($event.target as HTMLSelectElement).value))">
             <option v-for="(day, index) in store.trip.days" :key="day.id" :value="index">
               第 {{ day.day_index }} 天 · {{ day.date.slice(5) }}
@@ -860,7 +875,23 @@ watch(
           />
         </aside>
 
-        <section class="map-workspace">
+        <section :class="['map-workspace', { 'bottom-panel-collapsed': bottomPanelCollapsed }]">
+          <button
+            type="button"
+            class="panel-collapse-toggle panel-collapse-left"
+            :aria-label="leftPanelCollapsed ? '展开左侧行程信息' : '收起左侧行程信息'"
+            :aria-expanded="!leftPanelCollapsed"
+            :title="leftPanelCollapsed ? '展开左侧行程信息' : '收起左侧行程信息'"
+            @click="leftPanelCollapsed = !leftPanelCollapsed"
+          ><ChevronRight v-if="leftPanelCollapsed" /><ChevronLeft v-else /></button>
+          <button
+            type="button"
+            class="panel-collapse-toggle panel-collapse-right"
+            :aria-label="rightPanelCollapsed ? '展开右侧行程助理' : '收起右侧行程助理'"
+            :aria-expanded="!rightPanelCollapsed"
+            :title="rightPanelCollapsed ? '展开右侧行程助理' : '收起右侧行程助理'"
+            @click="rightPanelCollapsed = !rightPanelCollapsed"
+          ><ChevronLeft v-if="rightPanelCollapsed" /><ChevronRight v-else /></button>
           <div class="map-pick-toolbar glass-card">
             <div class="map-pick-heading"><strong>地图加点</strong><small>先选类型，再点地图位置</small></div>
             <select v-model="mapPickCategory" aria-label="地图选点类型">
@@ -886,7 +917,16 @@ watch(
             @select-activity="selectActivityById"
             @point-selected="handleMapPoint"
           />
-          <div class="stage-nav glass-card">
+          <div class="stage-nav-shell">
+            <button
+              type="button"
+              class="bottom-panel-toggle"
+              :aria-label="bottomPanelCollapsed ? '展开阶段详情' : '收起阶段详情'"
+              :aria-expanded="!bottomPanelCollapsed"
+              :title="bottomPanelCollapsed ? '展开阶段详情' : '收起阶段详情'"
+              @click="bottomPanelCollapsed = !bottomPanelCollapsed"
+            ><ChevronUp v-if="bottomPanelCollapsed" /><ChevronDown v-else /></button>
+            <div v-show="!bottomPanelCollapsed" class="stage-nav glass-card">
             <button
               class="stage-arrow"
               aria-label="上一个阶段"
@@ -963,10 +1003,26 @@ watch(
               :disabled="currentGlobalStageIndex >= allStages.length - 1"
               @click="moveStage(1)"
             ><ChevronRight /></button>
+            </div>
+            <nav v-show="bottomPanelCollapsed" class="compact-stage-nav glass-card" aria-label="简化阶段切换">
+              <button
+                type="button"
+                aria-label="上一个阶段"
+                :disabled="currentGlobalStageIndex <= 0"
+                @click="moveStage(-1)"
+              ><ChevronLeft /></button>
+              <strong>第 {{ currentStagePosition }} / {{ allStages.length }} 段</strong>
+              <button
+                type="button"
+                aria-label="下一个阶段"
+                :disabled="currentGlobalStageIndex >= allStages.length - 1"
+                @click="moveStage(1)"
+              ><ChevronRight /></button>
+            </nav>
           </div>
         </section>
 
-        <AgentPanel @replan-requested="retryPlanning" />
+        <AgentPanel v-show="!rightPanelCollapsed" @replan-requested="retryPlanning" />
       </section>
       <details v-if="riskStages.length" class="roadbook-card risk-card glass-card">
         <summary>

@@ -135,6 +135,39 @@ test('规划页支持天、阶段和节点选择', async ({ page }) => {
   await expect(page.locator('.map-live-badge, .map-fallback-badge')).toBeVisible()
 })
 
+test('规划页三侧信息栏可折叠并保留简化阶段切换', async ({ page }) => {
+  await page.goto('/trips/trip_wuhan_lushan_demo/plan')
+  await expect(page.locator('.map-live-badge, .map-fallback-badge')).toBeVisible({ timeout: 25_000 })
+  await page.locator('.stage-card').first().click()
+  const workspace = page.locator('.map-workspace')
+  const initialBox = await workspace.boundingBox()
+  if (!initialBox) throw new Error('地图工作区未完成布局')
+
+  await page.getByRole('button', { name: '收起左侧行程信息' }).click()
+  await expect(page.locator('.trip-sidebar')).toBeHidden()
+  const leftCollapsedBox = await workspace.boundingBox()
+  expect(leftCollapsedBox!.width).toBeGreaterThan(initialBox.width + 200)
+
+  await page.getByRole('button', { name: '收起右侧行程助理' }).click()
+  await expect(page.locator('.agent-panel')).toBeHidden()
+  const bothCollapsedBox = await workspace.boundingBox()
+  expect(bothCollapsedBox!.width).toBeGreaterThan(leftCollapsedBox!.width + 200)
+
+  await page.getByRole('button', { name: '收起阶段详情' }).click()
+  await expect(page.locator('.stage-nav')).toBeHidden()
+  const compact = page.getByRole('navigation', { name: '简化阶段切换' })
+  await expect(compact).toBeVisible()
+  await expect(compact).toContainText('第 1 / 6 段')
+  await compact.getByRole('button', { name: '下一个阶段' }).click()
+  await expect(compact).toContainText('第 2 / 6 段')
+
+  await page.reload()
+  await expect(page.getByRole('button', { name: '展开左侧行程信息' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '展开右侧行程助理' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '展开阶段详情' })).toBeVisible()
+  await expect(page.getByRole('navigation', { name: '简化阶段切换' })).toBeVisible()
+})
+
 test('规划校验失败以中性弹窗展示原因和偏好建议', async ({ page }) => {
   await page.route('**/api/v1/trips/failure-demo', async (route) => {
     await route.fulfill({
