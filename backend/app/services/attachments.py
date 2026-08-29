@@ -88,6 +88,7 @@ async def _extract_with_deepseek(
             settings,
             request_prompt,
             timeout=settings.deepseek_timeout_seconds,
+            agent_name="attachment_extractor",
         )
         match = re.search(r"\{.*\}", content, re.DOTALL)
         value = json.loads(match.group(0)) if match else None

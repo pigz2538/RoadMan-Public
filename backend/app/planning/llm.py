@@ -1,5 +1,6 @@
 import json
 import re
+from time import monotonic
 from datetime import date, timedelta
 from typing import Any
 
@@ -45,6 +46,7 @@ async def deepseek_complete(
     *,
     timeout: float | None = None,
     json_output: bool = True,
+    agent_name: str = "semantic_agent",
 ) -> str:
     """Call DeepSeek once and return only the assistant's visible content.
 
@@ -66,17 +68,27 @@ async def deepseek_complete(
     if json_output:
         payload["response_format"] = {"type": "json_object"}
     request_timeout = float(timeout if timeout is not None else configured_timeout)
-    async with httpx.AsyncClient(timeout=request_timeout) as client:
-        response = await client.post(
-            api_url,
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
-            json=payload,
+    started_at = monotonic()
+    try:
+        async with httpx.AsyncClient(timeout=request_timeout) as client:
+            response = await client.post(
+                api_url,
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+            )
+            response.raise_for_status()
+            body = response.json()
+    except Exception as error:
+        await _audit_deepseek_call(
+            agent_name,
+            success=False,
+            latency_ms=round((monotonic() - started_at) * 1000),
+            error_code=type(error).__name__.upper(),
         )
-        response.raise_for_status()
-        body = response.json()
+        raise
     content: Any = None
     if isinstance(body, dict):
         choices = body.get("choices")
@@ -89,8 +101,40 @@ async def deepseek_complete(
         if content is None:
             content = body.get("response")
     if not isinstance(content, str) or not content.strip():
+        await _audit_deepseek_call(
+            agent_name,
+            success=False,
+            latency_ms=round((monotonic() - started_at) * 1000),
+            error_code="EMPTY_AGENT_RESPONSE",
+            usage=body.get("usage") if isinstance(body, dict) else None,
+        )
         raise ValueError("DeepSeek response did not contain assistant content")
+    await _audit_deepseek_call(
+        agent_name,
+        success=True,
+        latency_ms=round((monotonic() - started_at) * 1000),
+        usage=body.get("usage") if isinstance(body, dict) else None,
+    )
     return content
+
+
+async def _audit_deepseek_call(
+    agent_name: str,
+    *,
+    success: bool,
+    latency_ms: int,
+    usage: dict[str, Any] | None = None,
+    error_code: str | None = None,
+) -> None:
+    from ..repositories.skill_calls import record_agent_call
+
+    await record_agent_call(
+        f"agent.{agent_name}",
+        success=success,
+        latency_ms=latency_ms,
+        usage=usage,
+        error_code=error_code,
+    )
 
 
 class DeepSeekRequirementExtractor:
@@ -164,6 +208,7 @@ class DeepSeekRequirementExtractor:
                 self.settings,
                 prompt,
                 timeout=self.settings.deepseek_timeout_seconds,
+                agent_name="requirement_extractor",
             )
             parsed = _parse_json_object(response_text)
             if _destination_payload_needs_repair(parsed):
@@ -319,6 +364,7 @@ class DeepSeekRequirementExtractor:
                 self.settings,
                 repair_prompt,
                 timeout=min(self.settings.deepseek_timeout_seconds, 45),
+                agent_name="requirement_repair",
             )
         )
         if _destination_payload_needs_repair(repaired):
@@ -352,6 +398,7 @@ class DeepSeekRequirementValidator:
                     self.settings,
                     prompt,
                     timeout=self.settings.deepseek_timeout_seconds,
+                    agent_name="requirement_validator",
                 )
             )
             if isinstance(payload, dict):
@@ -426,6 +473,7 @@ class DeepSeekTripEditAgent:
                     self.settings,
                     prompt,
                     timeout=min(self.settings.deepseek_timeout_seconds, 45),
+                    agent_name="trip_editor",
                 )
             )
         except (httpx.HTTPError, ValueError, TypeError, json.JSONDecodeError):
@@ -518,6 +566,7 @@ class DeepSeekPoiCurator:
                     self.settings,
                     prompt,
                     timeout=self.settings.deepseek_timeout_seconds,
+                    agent_name="poi_curator",
                 )
             )
             if isinstance(payload, dict):
@@ -612,6 +661,7 @@ class DeepSeekDestinationResearchAgent:
                     self.settings,
                     prompt,
                     timeout=min(self.settings.deepseek_timeout_seconds, 45),
+                    agent_name="destination_research",
                 )
             )
         except (httpx.HTTPError, ValueError, TypeError, json.JSONDecodeError):
@@ -711,6 +761,7 @@ class DeepSeekDestinationPlanAgent:
                     self.settings,
                     prompt,
                     timeout=min(self.settings.deepseek_timeout_seconds, 45),
+                    agent_name="destination_planner",
                 )
             )
         except (httpx.HTTPError, ValueError, TypeError, json.JSONDecodeError):
@@ -822,6 +873,7 @@ class DeepSeekPoiRanker:
                     self.settings,
                     prompt,
                     timeout=min(self.settings.deepseek_timeout_seconds, 45),
+                    agent_name="poi_ranker",
                 )
             )
         except (httpx.HTTPError, ValueError, TypeError, json.JSONDecodeError):
@@ -944,6 +996,7 @@ class DeepSeekPoiSuitabilityAgent:
                     self.settings,
                     prompt,
                     timeout=min(self.settings.deepseek_timeout_seconds, 45),
+                    agent_name="poi_suitability",
                 )
             )
         except (httpx.HTTPError, ValueError, TypeError, json.JSONDecodeError):
@@ -1086,6 +1139,7 @@ class DeepSeekEventResearchAgent:
                     self.settings,
                     prompt,
                     timeout=min(self.settings.deepseek_timeout_seconds, 45),
+                    agent_name="event_research",
                 )
             )
         except (httpx.HTTPError, ValueError, TypeError, json.JSONDecodeError):

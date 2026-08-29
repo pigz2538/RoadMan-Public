@@ -553,7 +553,7 @@ class SkillCallRecord(BaseModel):
     cache_hit: bool = False
     latency_ms: int = 0
     error_code: str | None = None
-    source_summary: list[dict[str, str | None]] = Field(default_factory=list)
+    source_summary: list[dict[str, Any]] = Field(default_factory=list)
     created_at: datetime
 
 

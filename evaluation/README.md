@@ -13,3 +13,14 @@ python evaluation/range_accuracy.py
 接入真实路测时保留相同字段，将 `data_kind` 改为 `vehicle_telemetry`，并记录车辆配置、路线、天气、载荷、出发/到达 SOC、仪表或充电记录来源以及脱敏方式。评审材料应分别展示模拟基线和真实样本，不能混写。
 
 当前门槛：能耗 MAPE ≤ 12%，等效续航 MAPE ≤ 12%，到达 SOC MAE ≤ 5 个百分点。低温样本允许单例误差高于总体门槛，用于明确当前基础模型尚未完整建模温度和载荷修正的边界。
+
+## 安全与降级场景
+
+在完整后端依赖环境运行：
+
+```powershell
+$env:PYTHONPATH = "backend"
+python evaluation/safety_scenarios.py
+```
+
+该评测直接调用生产规划与校验代码，覆盖低电量长途、恶劣天气、补能设施不足、车辆信息缺失和外部服务错误。`route_executability_rate` 不等于任务完成率：补能设施只剩估算位置时，系统可以完成“诚实降级”任务，但路线明确标记为尚不可执行，不能用一个虚假的 100% 掩盖风险。

@@ -10,6 +10,7 @@ from datetime import date, datetime, timedelta, timezone
 from app.domain.models import Activity, DayItemRef, DayPlan, Trip
 from app.domain.models import SSEEvent
 from app.repositories import TripRepository
+from app.repositories.skill_calls import record_agent_call
 from app.services.sse import sse_manager
 
 
@@ -22,12 +23,20 @@ async def test_health(client):
 
 @pytest.mark.asyncio
 async def test_operational_metrics_expose_request_and_skill_summary(client):
+    await record_agent_call(
+        "agent.test_metrics",
+        success=True,
+        latency_ms=12,
+        usage={"prompt_tokens": 11, "completion_tokens": 7, "total_tokens": 18},
+    )
     await client.get("/health")
     response = await client.get("/api/v1/ops/metrics")
     assert response.status_code == 200
     body = response.json()
     assert body["service"]["requests"] >= 1
     assert "total_calls" in body["skills"]
+    assert body["skills"]["agent_usage"]["total_tokens"] >= 18
+    assert body["skills"]["token_cost"]["unit"] == "tokens"
 
 
 @pytest.mark.asyncio

@@ -1,0 +1,98 @@
+{
+  "dataset_id": "roadman-safety-scenarios-v1",
+  "sample_count": 5,
+  "task_completion_rate": 1.0,
+  "route_executability_rate": 0.8,
+  "average_latency_ms": 0.382,
+  "passed": true,
+  "cases": [
+    {
+      "id": "low-soc-long-distance",
+      "passed": true,
+      "expected_codes": [
+        "ENERGY_STOP_SCHEDULED",
+        "REST_STOP_SCHEDULED"
+      ],
+      "observed_codes": [
+        "ENERGY_STOP_SCHEDULED",
+        "REST_STOP_SCHEDULED"
+      ],
+      "route_executable": true,
+      "route_executability_basis": "verified",
+      "soc_continuous": true,
+      "blocker_codes": [],
+      "latency_ms": 0.755
+    },
+    {
+      "id": "adverse-weather",
+      "passed": true,
+      "expected_codes": [
+        "EXTREME_TEMPERATURE",
+        "HEAVY_PRECIPITATION",
+        "HIGH_WIND",
+        "LOW_VISIBILITY"
+      ],
+      "observed_codes": [
+        "EXTREME_TEMPERATURE",
+        "HEAVY_PRECIPITATION",
+        "HIGH_WIND",
+        "LOW_VISIBILITY"
+      ],
+      "route_executable": true,
+      "route_executability_basis": "verified",
+      "soc_continuous": true,
+      "blocker_codes": [],
+      "latency_ms": 0.193
+    },
+    {
+      "id": "energy-facilities-insufficient",
+      "passed": true,
+      "expected_codes": [
+        "CHARGING_POWER_ESTIMATED",
+        "ENERGY_STOP_ESTIMATED"
+      ],
+      "observed_codes": [
+        "CHARGING_POWER_ESTIMATED",
+        "ENERGY_STOP_ESTIMATED",
+        "REST_STOP_SCHEDULED"
+      ],
+      "route_executable": false,
+      "route_executability_basis": "补能设施仅有估算位置，需真实服务确认",
+      "soc_continuous": true,
+      "blocker_codes": [],
+      "latency_ms": 0.6
+    },
+    {
+      "id": "vehicle-information-missing",
+      "passed": true,
+      "expected_codes": [
+        "VEHICLE_DATA_MISSING"
+      ],
+      "observed_codes": [
+        "VEHICLE_DATA_MISSING"
+      ],
+      "route_executable": true,
+      "route_executability_basis": "verified",
+      "soc_continuous": true,
+      "blocker_codes": [],
+      "latency_ms": 0.212
+    },
+    {
+      "id": "external-services-error",
+      "passed": true,
+      "expected_codes": [
+        "WEATHER_DATA_DEGRADED",
+        "WEATHER_DEGRADED"
+      ],
+      "observed_codes": [
+        "WEATHER_DATA_DEGRADED",
+        "WEATHER_DEGRADED"
+      ],
+      "route_executable": true,
+      "route_executability_basis": "verified",
+      "soc_continuous": true,
+      "blocker_codes": [],
+      "latency_ms": 0.151
+    }
+  ]
+}

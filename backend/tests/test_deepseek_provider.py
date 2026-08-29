@@ -14,6 +14,7 @@ async def test_deepseek_chat_contract_uses_official_model_and_max_thinking(monke
 
         def json(self):
             return {
+                "usage": {"prompt_tokens": 11, "completion_tokens": 7, "total_tokens": 18},
                 "choices": [
                     {
                         "message": {
@@ -42,7 +43,14 @@ async def test_deepseek_chat_contract_uses_official_model_and_max_thinking(monke
 
     monkeypatch.setattr("app.planning.llm.httpx.AsyncClient", FakeClient)
     settings = Settings(deepseek_api_key="test-key")
-    result = await deepseek_complete(settings, "Return JSON", timeout=12)
+    audited = {}
+
+    async def fake_audit(agent_name, **kwargs):
+        audited["agent_name"] = agent_name
+        audited.update(kwargs)
+
+    monkeypatch.setattr("app.planning.llm._audit_deepseek_call", fake_audit)
+    result = await deepseek_complete(settings, "Return JSON", timeout=12, agent_name="requirement")
 
     assert result == '{"ok":true}'
     assert captured["url"] == "https://api.deepseek.com/chat/completions"
@@ -52,3 +60,6 @@ async def test_deepseek_chat_contract_uses_official_model_and_max_thinking(monke
     assert captured["json"]["reasoning_effort"] == "max"
     assert captured["json"]["response_format"] == {"type": "json_object"}
     assert "reasoning_content" not in result
+    assert audited["agent_name"] == "requirement"
+    assert audited["usage"]["total_tokens"] == 18
+    assert audited["success"] is True
