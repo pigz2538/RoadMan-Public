@@ -346,6 +346,34 @@ def schedule_tourism_activities(
         if item.get("place", {}).get("name")
         and (not item.get("seasonal_excluded") or item.get("user_required"))
     }
+    attraction_source_keys = {
+        _attraction_name_key(name): item
+        for name, item in attraction_sources.items()
+        if _attraction_name_key(name)
+    }
+
+    def source_for_stage(stage: dict[str, Any]) -> dict[str, Any] | None:
+        """Resolve a route destination to its researched attraction record."""
+        destination_name = (stage.get("destination") or {}).get("name")
+        exact = attraction_sources.get(destination_name)
+        if exact:
+            return exact
+        destination_key = _attraction_name_key(destination_name)
+        if not destination_key:
+            return None
+        direct = attraction_source_keys.get(destination_key)
+        if direct:
+            return direct
+        # Providers append entrance/branch/campus suffixes. Prefer the
+        # longest containment match so a short label such as “省博” cannot
+        # accidentally claim an unrelated museum.
+        matches = [
+            (key, item)
+            for key, item in attraction_source_keys.items()
+            if min(len(key), len(destination_key)) >= 2
+            and (key in destination_key or destination_key in key)
+        ]
+        return max(matches, key=lambda pair: len(pair[0]))[1] if matches else None
     seasonal_excluded_names = {
         item.get("place", {}).get("name")
         for item in candidates.get("attractions", [])
@@ -436,14 +464,6 @@ def schedule_tourism_activities(
                     return_cutoff = datetime.fromisoformat(final_stage["planned_start"])
             except (KeyError, TypeError, ValueError):
                 return_cutoff = None
-        _ensure_meals(
-            day,
-            activities,
-            stages,
-            candidates.get("meals", []),
-            used_names=used_meal_names,
-        )
-        _reschedule_meals(day, activities, stages)
         existing_hotel = next(
             (item for item in activities if item.get("type") == "hotel"),
             None,
@@ -468,7 +488,7 @@ def schedule_tourism_activities(
             if item.get("place")
         }
         for stage_index, stage in enumerate(stages):
-            candidate = attraction_sources.get(stage.get("destination", {}).get("name"))
+            candidate = source_for_stage(stage)
             if (
                 not candidate
                 or candidate["place"]["name"] in existing_names
@@ -538,6 +558,132 @@ def schedule_tourism_activities(
             existing_names.add(candidate["place"]["name"])
             used_attraction_names.add(candidate["place"]["name"])
 
+        # A hard requirement must have an activity record, not only a
+        # movement stage.  If a provider changed the stage label (or the
+        # stage gap is too small for the normal ranked filler), reserve a
+        # daytime slot on the requirement's assigned day before meals are
+        # placed. This keeps “橘子洲/省博” visible and verifiable without
+        # inventing a new place from a keyword list.
+        required_for_day = [
+            candidate
+            for candidate in candidates.get("attractions", [])
+            if candidate.get("user_required")
+            and candidate.get("place", {}).get("name")
+            and candidate.get("coverage_day_index") in {None, day_index + 1}
+            and _attraction_name_key(candidate["place"]["name"])
+            not in {
+                _attraction_name_key(name) for name in used_attraction_names if name
+            }
+        ]
+        if required_for_day:
+            stage_ranges = [
+                (
+                    datetime.fromisoformat(stage["planned_start"]),
+                    datetime.fromisoformat(stage["planned_end"]),
+                )
+                for stage in stages
+                if stage.get("planned_start") and stage.get("planned_end")
+            ]
+            occupied_required = [*stage_ranges, *_occupied_ranges(activities)]
+            for candidate in required_for_day:
+                if not (candidate.get("place") or {}).get("coordinates"):
+                    # Keep the unresolved marker for verification instead of
+                    # constructing an activity that cannot be mapped.
+                    continue
+                candidate_key = _attraction_name_key(candidate["place"]["name"])
+                matching_stages = [
+                    stage
+                    for stage in stages
+                    if _attraction_name_key(
+                        (stage.get("destination") or {}).get("name")
+                    )
+                    and (
+                        _attraction_name_key(
+                            (stage.get("destination") or {}).get("name")
+                        )
+                        == candidate_key
+                        or candidate_key
+                        in _attraction_name_key(
+                            (stage.get("destination") or {}).get("name")
+                        )
+                        or _attraction_name_key(
+                            (stage.get("destination") or {}).get("name")
+                        )
+                        in candidate_key
+                    )
+                ]
+                if matching_stages:
+                    target_stage = matching_stages[0]
+                    start_at = datetime.fromisoformat(target_stage["planned_end"])
+                    next_starts = [
+                        datetime.fromisoformat(stage["planned_start"])
+                        for stage in stages
+                        if stage is not target_stage and stage.get("planned_start")
+                        and datetime.fromisoformat(stage["planned_start"]) > start_at
+                    ]
+                    window_end = min(
+                        next_starts[0] if next_starts else start_at + timedelta(hours=3),
+                        datetime.combine(day_date, time(21, 0), tzinfo=SHANGHAI),
+                    )
+                    preferred = start_at + timedelta(minutes=15)
+                else:
+                    start_at = datetime.combine(day_date, time(9, 0), tzinfo=SHANGHAI)
+                    window_end = datetime.combine(day_date, time(21, 0), tzinfo=SHANGHAI)
+                    preferred = datetime.combine(day_date, time(14, 0), tzinfo=SHANGHAI)
+                slot = _closest_free_slot(
+                    start_at,
+                    window_end,
+                    preferred=preferred,
+                    duration_minutes=_suggested_duration(candidate, 90),
+                    occupied=occupied_required,
+                    minimum_minutes=30,
+                )
+                if not slot:
+                    continue
+                activity_start, duration = slot
+                activities.append(
+                    _activity(
+                        day=day,
+                        sequence=len(activities),
+                        activity_type="attraction",
+                        candidate=candidate,
+                        place=candidate["place"],
+                        start_at=activity_start,
+                        duration_minutes=duration,
+                        sources=candidate.get("source_records", []),
+                        opening_text="开放时间以景区当日公告为准",
+                        required=True,
+                        ticket_or_price=candidate.get("ticket_or_price"),
+                        user_note=(
+                            candidate.get("agent_reason")
+                            or "；".join(candidate.get("recommendation_reasons", []))
+                            or "用户指定地点，已保留游览时段"
+                        ),
+                        description=candidate.get("description"),
+                        image_url=candidate.get("image_url"),
+                        detail_url=candidate.get("detail_url"),
+                    )
+                )
+                candidate["coverage_scheduled"] = True
+                existing_names.add(candidate["place"]["name"])
+                used_attraction_names.add(candidate["place"]["name"])
+                occupied_required.append(
+                    (activity_start, activity_start + timedelta(minutes=duration))
+                )
+
+        # Reserve executable sightseeing windows before filling the day with
+        # meals.  A flight/transfer day can otherwise have all free time
+        # consumed by the three meal placeholders, leaving a named must-visit
+        # stage with no activity record even though the route reaches it.
+        _ensure_meals(
+            day,
+            activities,
+            stages,
+            candidates.get("meals", []),
+            used_names=used_meal_names,
+        )
+        _reschedule_meals(day, activities, stages)
+
         # Use remaining safe gaps for a second/third attraction when the day
         # has enough slack.  The old implementation only attached the POI
         # whose name exactly matched a stage destination, which left most of
@@ -568,6 +714,16 @@ def schedule_tourism_activities(
             4,
             max(2, len(stages) + 1, priority_target),
         )
+        travel_only_day = any(
+            "跨天" in str(stage.get("title") or "")
+            and stage.get("mode") == "driving"
+            for stage in stages
+        )
+        if travel_only_day:
+            # A calendar day occupied by an intercity driving piece still
+            # needs meals, charging/rest and an overnight stop, but never a
+            # destination attraction squeezed into an artificial gap.
+            target_attractions = len(scheduled_attractions)
         if len(scheduled_attractions) < target_attractions:
             outbound_intercity_day = day_index == 0 and any(
                 stage.get("title") == "城市出发"
@@ -1320,6 +1476,25 @@ def verify_tourism_plan(
         for activity in day.get("activities", [])
         if activity.get("type") == "attraction"
     }
+    uncovered_required = [
+        str(item.get("required_name") or item.get("place", {}).get("name") or "").strip()
+        for item in candidates.get("attractions", [])
+        if item.get("user_required")
+        and item.get("place", {}).get("name")
+        and _attraction_name_key(item["place"]["name"]) not in scheduled_attraction_names
+    ]
+    if uncovered_required:
+        issues.append(
+            {
+                "code": "REQUIRED_PLACES_UNSCHEDULED",
+                "severity": "blocker",
+                "description": (
+                    "用户明确指定的地点尚未进入可执行日程："
+                    + "、".join(dict.fromkeys(uncovered_required))
+                    + "；规划智能体需要重新分配游览时段，不能静默替换成其他地点。"
+                ),
+            }
+        )
     uncovered_highlights = [
         item.get("place", {}).get("name")
         for item in candidates.get("attractions", [])

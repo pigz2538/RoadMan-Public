@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from datetime import datetime, time, timedelta
-from math import ceil
+from math import ceil, isfinite
 from typing import Any
 
 from ..domain.models import Activity, DayItemRef, EnergyEstimate, PlaceRef, PlanWarning
@@ -45,27 +45,78 @@ def enrich_deep_drive_plan(
     max_daily_drive_minutes: int = DEFAULT_DAILY_DRIVING_MINUTES,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     raw_current_percent = vehicle.get("current_energy_percent")
-    current_percent = float(80 if raw_current_percent is None else raw_current_percent)
-    reserve = float(vehicle.get("safe_energy_reserve_percent") or 15)
+    parsed_current_percent = _finite_number(raw_current_percent)
+    parsed_reserve = _finite_number(vehicle.get("safe_energy_reserve_percent"))
+    current_percent = min(100.0, max(0.0, parsed_current_percent if parsed_current_percent is not None else 80.0))
+    reserve = min(50.0, max(0.0, parsed_reserve if parsed_reserve is not None else 15.0))
+    vehicle_energy_data_normalized = (
+        parsed_current_percent is None
+        or parsed_current_percent != current_percent
+        or parsed_reserve is None
+        or parsed_reserve != reserve
+    )
     power_type = vehicle.get("power_type", "electric")
     warnings: list[dict[str, Any]] = []
+    used_energy_stop_keys: set[str] = set()
 
     # Split before energy/rest enrichment.  This makes the calendar date an
     # invariant for every persisted movement stage and gives the later
     # continuous-driving splitter a normal, day-sized stage to work with.
+    # Reserve part of the 08:00–20:00 daily window for charging/fuelling,
+    # meals and rest. Using the full nine hours as wheel-turning time made
+    # those required stops push the final piece past midnight and overlap the
+    # next calendar day's stage.
+    effective_daily_drive_minutes = max(
+        180,
+        int(max_daily_drive_minutes or DEFAULT_DAILY_DRIVING_MINUTES) - 80,
+    )
     _split_cross_day_driving_stages(
         plans,
         service_pois,
-        max_daily_drive_minutes=max_daily_drive_minutes,
+        max_daily_drive_minutes=effective_daily_drive_minutes,
     )
 
     for day in plans:
-        activities: list[dict[str, Any]] = list(day.get("activities", []))
+        # Split a calendar-day highway leg into continuous-driving pieces
+        # before computing SOC. A nine-hour leg can consume more than one
+        # full battery even though each two-hour piece is perfectly feasible
+        # with en-route charging. Computing one EnergyEstimate for the raw leg
+        # both overstated a single-stage percentage and prevented multiple
+        # charging boundaries from being represented.
+        pre_split_stages, planned_break_activities = _split_long_driving_stages(
+            day.get("stages", []),
+            service_pois,
+            max_continuous_drive_minutes,
+            power_type,
+        )
+        day["stages"] = pre_split_stages
+        activities: list[dict[str, Any]] = [
+            *list(day.get("activities", [])),
+            *planned_break_activities,
+        ]
+        previous_stage_end: datetime | None = None
         for stage in day.get("stages", []):
+            stage_start = datetime.fromisoformat(stage["planned_start"])
+            stage_end = datetime.fromisoformat(stage["planned_end"])
+            if previous_stage_end is not None and stage_start < previous_stage_end:
+                shift = previous_stage_end - stage_start
+                stage_start += shift
+                stage_end += shift
+                stage["planned_start"] = stage_start.isoformat()
+                stage["planned_end"] = stage_end.isoformat()
             stage_warnings = [
                 PlanWarning.model_validate(item).model_dump(mode="json")
                 for item in stage.get("warnings", [])
             ]
+            if stage.get("mode") == "driving" and vehicle_energy_data_normalized:
+                stage_warnings.append(
+                    _warning(
+                        "VEHICLE_ENERGY_DATA_NORMALIZED",
+                        "车辆电量或安全余量字段异常，已限制到安全范围并使用保守默认值",
+                        "warning",
+                        True,
+                    )
+                )
             risk_tags: list[str] = list(stage.get("risk_tags", []))
             if stage["mode"] == "driving":
                 amount, unit, used_percent = _energy_use(stage, vehicle)
@@ -88,7 +139,14 @@ def enrich_deep_drive_plan(
                 stop_type = "charging" if power_type == "electric" else "fueling"
                 stage_services = service_pois.get(stage["id"], {})
                 if needs_energy:
-                    stop_place = _first_place(stage_services.get(stop_type))
+                    stop_place = next(
+                        (
+                            item
+                            for item in (stage_services.get(stop_type) or [])
+                            if _service_place_key(item) not in used_energy_stop_keys
+                        ),
+                        None,
+                    )
                     energy_stop_estimated = False
                     if not stop_place:
                         # A provider outage or a sparse corridor must not make
@@ -104,6 +162,7 @@ def enrich_deep_drive_plan(
                             stage_services.setdefault(stop_type, []).insert(0, stop_place)
                             service_pois.setdefault(stage["id"], stage_services)
                     if stop_place:
+                        used_energy_stop_keys.add(_service_place_key(stop_place))
                         # A repair pass may receive the stage snapshot from a
                         # previous failed attempt.  In that case the old
                         # provider error can still be present even though a
@@ -229,6 +288,11 @@ def enrich_deep_drive_plan(
                             stage["waypoints"].append(meal_place)
                         stop_minutes += 45
 
+                # Movement time and elapsed time are intentionally distinct:
+                # route_segments retain pure wheel-turning minutes for the
+                # continuous-driving guard, while the stage includes planned
+                # charging/rest/meal dwell so arrival times stay honest.
+                stage["planned_stop_minutes"] = stop_minutes
                 stage["duration_minutes"] += stop_minutes
                 stage["planned_end"] = (
                     datetime.fromisoformat(stage["planned_end"])
@@ -244,6 +308,7 @@ def enrich_deep_drive_plan(
             stage["risk_level"] = _risk_level(stage["warnings"])
             if stage["risk_level"] != "low":
                 warnings.extend(stage["warnings"])
+            previous_stage_end = datetime.fromisoformat(stage["planned_end"])
 
         expanded_stages, break_activities = _split_long_driving_stages(
             day.get("stages", []),
@@ -277,7 +342,88 @@ def enrich_deep_drive_plan(
             DayItemRef(type="activity", id=item["id"]).model_dump() for item in activities
         ]
         day["items"] = [*stage_refs, *activity_refs]
+    # Energy/rest dwell can push a later piece into the next calendar day.
+    # Re-home the item after all dwell calculations so the day column, stage
+    # timestamp and map route cannot disagree (the verifier also calls this
+    # helper before checking a repaired snapshot).
+    normalize_plan_calendar(plans)
     return plans, _dedupe_warnings(warnings)
+
+
+def normalize_plan_calendar(plans: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Keep stages and activities in the day matching their timestamps.
+
+    A repair pass may extend a driving/charging block past midnight.  Merely
+    changing the timestamp leaves it attached to the previous ``DayPlan`` and
+    produces a false route jump (or an invalid cross-day driving stage). Move
+    items to an existing target day whenever possible; if the requested trip
+    window has no such day, leave the item in place so verification can report
+    the overflow honestly instead of silently truncating it.
+    """
+    if not plans:
+        return plans
+    day_by_date = {
+        str(day.get("date")): day
+        for day in plans
+        if day.get("date")
+    }
+    # A stage can move more than one day after a long dwell. Repeat until no
+    # in-window item is left under the wrong owner, bounded for malformed data.
+    for _ in range(max(1, len(plans) + 1)):
+        moved = False
+        for owner in list(plans):
+            owner_key = str(owner.get("date"))
+            for collection_name in ("stages", "activities"):
+                collection = list(owner.get(collection_name) or [])
+                kept: list[dict[str, Any]] = []
+                for item in collection:
+                    parsed = _parse_datetime(item.get("planned_start"))
+                    target_key = parsed.date().isoformat() if parsed else owner_key
+                    target = day_by_date.get(target_key)
+                    if target is not None and target is not owner:
+                        item["day_id"] = target.get("id") or f"day_{target.get('day_index', 1)}"
+                        target.setdefault(collection_name, []).append(item)
+                        moved = True
+                    else:
+                        kept.append(item)
+                owner[collection_name] = kept
+        if not moved:
+            break
+
+    for day in plans:
+        stages = sorted(
+            day.get("stages") or [],
+            key=lambda item: (str(item.get("planned_start") or ""), item.get("sequence", 0)),
+        )
+        activities = sorted(
+            day.get("activities") or [],
+            key=lambda item: (str(item.get("planned_start") or ""), item.get("sequence", 0)),
+        )
+        day["stages"] = stages
+        day["activities"] = activities
+        for sequence, item in enumerate(stages):
+            item["sequence"] = sequence
+        for sequence, item in enumerate(activities):
+            item["sequence"] = sequence
+        day["items"] = [
+            *[{"type": "stage", "id": item["id"]} for item in stages],
+            *[{"type": "activity", "id": item["id"]} for item in activities],
+        ]
+        day["total_distance_km"] = round(
+            sum(float(item.get("distance_km") or 0) for item in stages),
+            2,
+        )
+        day["total_drive_minutes"] = sum(
+            int(item.get("duration_minutes") or 0)
+            for item in stages
+            if item.get("mode") == "driving"
+        )
+        day["total_walk_minutes"] = sum(
+            int(item.get("duration_minutes") or 0)
+            for item in stages
+            if item.get("mode") == "walking"
+        )
+    return plans
 
 
 def _split_cross_day_driving_stages(
@@ -333,8 +479,18 @@ def _split_cross_day_driving_stages(
             or movement_duration <= 0
             or (end.date() == start.date() and movement_duration <= max_daily)
         ):
+            # The repair loop can call this pass again after a previous split.
+            # In that case a stage may still sit in its original list while
+            # its timestamp already belongs to another calendar day. Re-home
+            # it by the timestamp whenever that day exists; otherwise keep the
+            # original owner so the verifier can report an honest overflow.
             owner_key = str(owner_day.get("date"))
-            staged_by_date.setdefault(owner_key, []).append(stage)
+            stage_date_key = start.date().isoformat()
+            target_key = stage_date_key if stage_date_key in day_by_date else owner_key
+            target_day = day_by_date.get(target_key)
+            if target_day:
+                stage["day_id"] = target_day.get("id") or f"day_{target_day.get('day_index', 1)}"
+            staged_by_date.setdefault(target_key, []).append(stage)
             continue
 
         pieces, overnight_activities, piece_services = _split_driving_stage(
@@ -418,6 +574,7 @@ def _split_driving_stage(
     piece_services: dict[str, list[dict[str, Any]]] = {}
     part_number = 1
     overnight_number = 1
+    used_overnight_keys: set[str] = set()
 
     while remaining > 0:
         day_end = cursor.replace(
@@ -452,7 +609,9 @@ def _split_driving_stage(
                 stage_services,
                 piece_geometry[-1],
                 overnight_number,
+                used_overnight_keys,
             )
+            used_overnight_keys.add(_service_place_key(stop_place))
             overnight_number += 1
         piece = deepcopy(stage)
         piece["id"] = f"{stage.get('id', 'driving')}_calendar_{part_number}"
@@ -565,10 +724,36 @@ def _overnight_stop_place(
     stage_services: dict[str, list[dict[str, Any]]],
     coordinate: dict[str, Any],
     number: int,
+    used_keys: set[str] | None = None,
 ) -> dict[str, Any]:
+    provider_candidates: list[dict[str, Any]] = []
     for category in ("overnight_hotel", "hotel", "rest"):
-        place = _first_place(stage_services.get(category))
-        if place and place.get("coordinates"):
+        provider_candidates.extend(
+            place
+            for place in (stage_services.get(category) or [])
+            if place.get("coordinates")
+            and _service_place_key(place) not in (used_keys or set())
+        )
+    if provider_candidates:
+        place = min(
+            provider_candidates,
+            key=lambda item: (
+                float(item["coordinates"]["longitude"]) - float(coordinate["longitude"])
+            ) ** 2
+            + (
+                float(item["coordinates"]["latitude"]) - float(coordinate["latitude"])
+            ) ** 2,
+        )
+        # A provider can return one terminal-area hotel for an entire
+        # thousand-kilometre corridor. Use it only near the actual daily cut;
+        # otherwise keep a route-derived booking placeholder at the correct
+        # coordinate instead of teleporting every overnight to one property.
+        squared_distance = (
+            float(place["coordinates"]["longitude"]) - float(coordinate["longitude"])
+        ) ** 2 + (
+            float(place["coordinates"]["latitude"]) - float(coordinate["latitude"])
+        ) ** 2
+        if squared_distance <= 0.25:
             return place
     return {
         "id": f"route_overnight_{stage.get('id', 'stage')}_{number}",
@@ -593,7 +778,12 @@ def verify_deep_drive_plan(
     if not vehicle:
         issues.append(_issue("VEHICLE_DATA_MISSING", "warning", "车辆数据缺失，能耗只能降级估算"))
     for day in plans:
-        for stage in day.get("stages", []):
+        stages = sorted(
+            day.get("stages", []),
+            key=lambda item: str(item.get("planned_start") or ""),
+        )
+        previous_stage: dict[str, Any] | None = None
+        for stage in stages:
             route_segment = _first_route_segment(stage)
             codes = {item["code"] for item in stage.get("warnings", [])}
             movement_minutes = int(
@@ -625,6 +815,28 @@ def verify_deep_drive_plan(
                 )
             start = datetime.fromisoformat(stage["planned_start"])
             end = datetime.fromisoformat(stage["planned_end"])
+            if (
+                stage.get("mode") == "driving"
+                and day.get("date")
+                and (start.date().isoformat() != str(day["date"]) or end.date() != start.date())
+            ):
+                issues.append(
+                    _issue(
+                        "DRIVING_STAGE_CALENDAR_MISMATCH",
+                        "blocker",
+                        f"{stage['title']} 已跨出所属日期，需减少当日驾驶或提前安排过夜",
+                    )
+                )
+            if previous_stage is not None:
+                previous_end = datetime.fromisoformat(previous_stage["planned_end"])
+                if start < previous_end:
+                    issues.append(
+                        _issue(
+                            "STAGE_OVERLAP",
+                            "blocker",
+                            f"{stage['title']} 与前一移动阶段时间重叠",
+                        )
+                    )
             elapsed_minutes = int((end - start).total_seconds() / 60)
             if end <= start or abs(elapsed_minutes - stage["duration_minutes"]) > 5:
                 issues.append(
@@ -664,6 +876,7 @@ def verify_deep_drive_plan(
                         f"{stage['title']} 骑行距离或时长超出单阶段上限",
                     )
                 )
+            previous_stage = stage
         meals = [item for item in day.get("activities", []) if item.get("type") == "meal"]
         if len(meals) < 3:
             issues.append(
@@ -680,17 +893,16 @@ def _energy_use(stage: dict[str, Any], vehicle: dict[str, Any]) -> tuple[float, 
     distance = float(stage["distance_km"])
     # Route difficulty comes from the elevation skill, not from guessing from
     # Chinese place-name characters such as “山” or “峰”.
-    elevation_gain = float(stage.get("elevation_gain_m") or 0)
+    elevation_gain = _finite_number(stage.get("elevation_gain_m")) or 0.0
     factor = 1.12 if elevation_gain >= ELEVATED_ROUTE_THRESHOLD_M else 1.0
-    consumption = float(
-        vehicle.get("consumption_per_100km")
-        or (18 if vehicle.get("power_type") == "electric" else 7.5)
+    consumption = _positive_number(vehicle.get("consumption_per_100km")) or (
+        18.0 if vehicle.get("power_type") == "electric" else 7.5
     )
     amount = distance * consumption / 100 * factor
     if vehicle.get("power_type") == "electric":
-        capacity = float(vehicle.get("battery_kwh") or 75)
+        capacity = _positive_number(vehicle.get("battery_kwh")) or 75.0
         return amount, "kWh", amount / capacity * 100
-    rated_range = float(vehicle.get("rated_range_km") or 650)
+    rated_range = _positive_number(vehicle.get("rated_range_km")) or 650.0
     return amount, "L", distance / rated_range * 100 * factor
 
 
@@ -718,7 +930,7 @@ def _calculate_replenishment(
     power_type = vehicle.get("power_type", "electric")
 
     if power_type == "electric":
-        capacity = float(vehicle.get("battery_kwh") or 75)
+        capacity = _positive_number(vehicle.get("battery_kwh")) or 75.0
         reported_energy = _first_positive_number(
             stop_place,
             "actual_energy_added_kwh",
@@ -789,8 +1001,8 @@ def _calculate_replenishment(
             "estimated": estimated,
         }
 
-    consumption_l_per_100km = float(vehicle.get("consumption_per_100km") or 7.5)
-    rated_range = float(vehicle.get("rated_range_km") or 650)
+    consumption_l_per_100km = _positive_number(vehicle.get("consumption_per_100km")) or 7.5
+    rated_range = _positive_number(vehicle.get("rated_range_km")) or 650.0
     tank_liters = max(1.0, rated_range * consumption_l_per_100km / 100.0)
     reported_liters = _first_positive_number(
         stop_place,
@@ -851,10 +1063,27 @@ def _apply_weather_risk(
         tags.append("天气数据不足")
         return
     sample = samples[0]
-    precipitation = sample.get("precipitation_probability")
-    visibility = sample.get("visibility_m")
-    wind = sample.get("wind_speed_kmh")
-    temperature = sample.get("temperature_c")
+    raw_values = {
+        "precipitation": sample.get("precipitation_probability"),
+        "visibility": sample.get("visibility_m"),
+        "wind": sample.get("wind_speed_kmh"),
+        "temperature": sample.get("temperature_c"),
+    }
+    parsed_values = {key: _finite_number(value) for key, value in raw_values.items()}
+    if any(value is not None and parsed_values[key] is None for key, value in raw_values.items()):
+        warnings.append(
+            _warning(
+                "WEATHER_DATA_PARTIAL",
+                "部分天气字段格式异常，已忽略异常字段并按可用信息继续规划",
+                "warning",
+                True,
+            )
+        )
+        tags.append("天气数据部分可用")
+    precipitation = parsed_values["precipitation"]
+    visibility = parsed_values["visibility"]
+    wind = parsed_values["wind"]
+    temperature = parsed_values["temperature"]
     if precipitation is not None and precipitation >= 60:
         warnings.append(_warning("HEAVY_PRECIPITATION", f"预计降水概率 {precipitation:.0f}%", "error"))
         tags.append("强降水")
@@ -867,6 +1096,14 @@ def _apply_weather_risk(
     if temperature is not None and (temperature <= 0 or temperature >= 38):
         warnings.append(_warning("EXTREME_TEMPERATURE", f"预计气温 {temperature:.0f}°C", "warning"))
         tags.append("极端温度")
+
+
+def _finite_number(value: Any) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if isfinite(number) else None
 
 
 def _apply_night_risk(
@@ -980,10 +1217,31 @@ def _split_long_driving_stages(
         )
         if len(selected) < part_count - 1:
             selected_names = {item[1].get("name") for item in selected}
-            remaining = [item for item in candidates if item[1].get("name") not in selected_names]
+            remaining = [
+                item for item in candidates if item[1].get("name") not in selected_names
+            ]
+            rest_candidates = [item for item in remaining if item[0] == "rest"]
             selected.extend(
-                _select_break_places(stage, remaining, part_count - 1 - len(selected))
+                _select_break_places(
+                    stage,
+                    rest_candidates,
+                    part_count - 1 - len(selected),
+                )
             )
+            if len(selected) < part_count - 1:
+                selected_names = {item[1].get("name") for item in selected}
+                other_candidates = [
+                    item
+                    for item in remaining
+                    if item[0] != "rest" and item[1].get("name") not in selected_names
+                ]
+                selected.extend(
+                    _select_break_places(
+                        stage,
+                        other_candidates,
+                        part_count - 1 - len(selected),
+                    )
+                )
         if len(selected) < part_count - 1:
             selected = _fill_planned_rest_points(
                 stage,
@@ -1054,7 +1312,9 @@ def _split_long_driving_stages(
             piece["planned_start"] = cursor.isoformat()
             piece_end = cursor + timedelta(minutes=duration)
             piece["planned_end"] = piece_end.isoformat()
-            segment = deepcopy(stage["route_segments"][0])
+            segment = deepcopy(_first_route_segment(stage))
+            segment.setdefault("distance_km", distance)
+            segment.setdefault("duration_minutes", duration)
             segment["coordinates"] = geometry[
                 boundaries[index] : boundaries[index + 1] + 1
             ]
@@ -1128,6 +1388,10 @@ def _split_long_driving_stages(
                     dict.fromkeys([*piece.get("risk_tags", []), "连续驾驶"])
                 )
             expanded.append(piece)
+            # The energy pass runs on these new piece IDs. Preserve the
+            # original corridor candidates so every piece can select a nearby
+            # charge/fuel/rest point or transparently derive a fallback.
+            service_pois[piece["id"]] = services
             if index < part_count - 1:
                 kind, place = selected[index]
                 energy_minutes = (
@@ -1248,8 +1512,12 @@ def _fill_planned_rest_points(
 def _first_route_segment(stage: dict[str, Any]) -> dict[str, Any]:
     segments = stage.get("route_segments")
     if not isinstance(segments, list) or not segments or not isinstance(segments[0], dict):
-        stage["route_segments"] = [{}]
-        return stage["route_segments"][0]
+        # Keep the stage schema valid: an empty list is allowed, while a
+        # placeholder ``{}`` would later fail RouteSegment validation.  Callers
+        # use the returned ephemeral dict only for best-effort duration/
+        # geometry recovery.
+        stage["route_segments"] = []
+        return {}
     return segments[0]
 
 
@@ -1317,9 +1585,16 @@ def _route_derived_stop_place(
     index = max(1, min(len(geometry) - 2, round((len(geometry) - 1) / 2)))
     point = geometry[index]
     label = "充电点" if stop_type == "charging" else "加油点"
+    stage_id = str(stage.get("id") or "stage")
+    part_label = stage_id.rsplit("_part_", 1)[-1] if "_part_" in stage_id else ""
+    display_label = (
+        f"沿途估算{label}（第{part_label}段，需确认）"
+        if part_label
+        else f"沿途估算{label}（需确认）"
+    )
     return {
         "id": f"route_estimated_{stop_type}_{stage.get('id', 'stage')}",
-        "name": f"沿途估算{label}（需确认）",
+        "name": display_label,
         "address": "路线估算位置；出发前请通过导航确认实际营业与可用状态",
         "city": (stage.get("origin") or {}).get("city")
         or (stage.get("destination") or {}).get("city"),
@@ -1367,7 +1642,7 @@ def _select_break_places(
     candidates: list[tuple[str, dict[str, Any]]],
     count: int,
 ) -> list[tuple[str, dict[str, Any]]]:
-    geometry = stage.get("route_segments", [{}])[0].get("coordinates", [])
+    geometry = _stage_geometry(stage, minimum_points=3)
     if len(geometry) < 3:
         return []
     indexed = [
@@ -1534,6 +1809,17 @@ def _dedupe_activities(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def _first_place(items: list[dict[str, Any]] | None) -> dict[str, Any] | None:
     return items[0] if items else None
+
+
+def _service_place_key(place: dict[str, Any]) -> str:
+    coordinates = place.get("coordinates") or {}
+    return "|".join(
+        [
+            str(place.get("id") or place.get("source_id") or place.get("name") or ""),
+            str(coordinates.get("longitude") or ""),
+            str(coordinates.get("latitude") or ""),
+        ]
+    )
 
 
 def _warning(

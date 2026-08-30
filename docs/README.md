@@ -15,7 +15,12 @@
 | [operations.md](operations.md) | 部署、健康检查、验收脚本、备份恢复、Nginx/HTTPS、排障与凭据管理 |
 | [carinfo-catalog.md](carinfo-catalog.md) | 车型目录搜索、确定性回退与前端车辆抽屉接入 |
 | [mobility-and-poi-data-contract.md](mobility-and-poi-data-contract.md) | 景点事实、票务预约、停车、图片、公共交通与跨城班次的数据契约和未知状态 |
+| [safety-and-data-boundary.md](safety-and-data-boundary.md) | 不接车辆控制、诚实降级、数据最小化、保留与级联删除 |
 | [README.md](README.md) | 本文档索引 |
+
+## 复赛专项材料
+
+评委四个优化方向、2560×1440 截图和可复现命令集中在 [submission/GOAI_Boundless_Agents/semifinal/README.md](../submission/GOAI_Boundless_Agents/semifinal/README.md)，分别覆盖续航量化、可复现 Demo、差异化商业价值与安全/数据边界。
 
 ## 评审与规划文档（5 份）
 

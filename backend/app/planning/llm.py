@@ -300,6 +300,18 @@ class DeepSeekRequirementExtractor:
                     merged.pop("max_days", None)
                 else:
                     merged["max_days"] = max_days
+                    # “下周一出发，十天左右” supplies a duration rather than
+                    # a second calendar literal. Once the Requirement Agent
+                    # has extracted that duration, complete the end date from
+                    # the explicit start instead of defaulting to one day.
+                    if merged.get("start_date") and not merged.get("end_date"):
+                        try:
+                            start_value = date.fromisoformat(str(merged["start_date"]))
+                            merged["end_date"] = (
+                                start_value + timedelta(days=max_days - 1)
+                            ).isoformat()
+                        except (TypeError, ValueError):
+                            pass
                 merged["cross_sea_required"] = _coerce_optional_bool(
                     merged.get("cross_sea_required")
                 )
@@ -387,6 +399,11 @@ class DeepSeekRequirementValidator:
             "你是 RoadMan Requirement Guard，只检查旅行需求是否自相矛盾、"
             "明显不可执行或缺少必须由用户决定的信息，不规划路线，不重复检查"
             "出发地、目的地、日期顺序、跨海方式和明确时间窗。"
+            "若结构化需求已有出发地、目的地、开始和结束日期，不得返回笼统的"
+            "SEMANTIC_MISSING_INFO。‘周日到周三玩三天’中的三天可以表示三个完整"
+            "游玩日，首尾还包含接驳，不是必须追问的日期矛盾；不要返回"
+            "SEMANTIC_DURATION_MISMATCH。预算、精确酒店和具体班次可由规划智能体"
+            "按默认偏好选择，也不是必须由用户补充的信息。"
             "返回单个 JSON：{\"issues\":[{\"code\":\"SEMANTIC_*\","
             "\"message\":\"给用户的简短问题\",\"field\":\"preferences\","
             "\"answer_type\":\"text\",\"options\":[]}]}。没有问题返回 {\"issues\":[]}。"
@@ -1305,6 +1322,50 @@ def _extract_literal_constraints(raw_text: str, today: date) -> dict[str, Any]:
             )
         except ValueError:
             continue
+    # Normal Chinese calendar forms are the authoritative structural signal.
+    # Support ranges where the month is written only once, for example
+    # “9月18到20号”, and single dates such as “9月12号”.
+    chinese_ranges = list(re.finditer(
+        r"(?<!\d)(?:(?P<year>\d{4})年)?(?P<month>\d{1,2})月"
+        r"(?P<day_start>\d{1,2})(?:日|号)?\s*"
+        r"(?:到|至|[-~～])\s*"
+        r"(?:(?P<end_month>\d{1,2})月)?(?P<day_end>\d{1,2})(?:日|号)?",
+        raw_text,
+    ))
+    covered_ranges: set[tuple[int, int]] = set()
+    for match in chinese_ranges:
+        try:
+            year = int(match.group("year") or today.year)
+            month = int(match.group("month"))
+            end_month = int(match.group("end_month") or month)
+            start_day = int(match.group("day_start"))
+            end_day = int(match.group("day_end"))
+            explicit_dates.extend(
+                [
+                    date(year, month, start_day).isoformat(),
+                    date(year, end_month, end_day).isoformat(),
+                ]
+            )
+            covered_ranges.add((match.start(), match.end()))
+        except ValueError:
+            continue
+    for match in re.finditer(
+        r"(?<!\d)(?:(?P<year>\d{4})年)?(?P<month>\d{1,2})月"
+        r"(?P<day>\d{1,2})(?:日|号)",
+        raw_text,
+    ):
+        if any(start <= match.start() < end for start, end in covered_ranges):
+            continue
+        try:
+            explicit_dates.append(
+                date(
+                    int(match.group("year") or today.year),
+                    int(match.group("month")),
+                    int(match.group("day")),
+                ).isoformat()
+            )
+        except ValueError:
+            continue
     if not explicit_dates:
         for year, month, day_value in re.findall(
             r"(?:(\d{4})年)?(\d{1,2})月(\d{1,2})日", raw_text
@@ -1346,17 +1407,24 @@ _WEEKDAY_PATTERN = re.compile(r"(?P<scope>下周|下星期|本周|这周|周|星
 _WEEKDAY_INDEX = {"一": 0, "二": 1, "三": 2, "四": 3, "五": 4, "六": 5, "日": 6, "天": 6}
 _ENGLISH_WEEKDAY_PATTERN = re.compile(
     r"(?P<scope>next\s+week\s+|next\s+|this\s+)?"
-    r"(?P<day>monday|tuesday|wednesday|thursday|friday|saturday|sunday)",
+    r"(?P<day>mon(?:day)?|tue(?:s(?:day)?)?|wed(?:nesday)?|"
+    r"thu(?:r(?:s(?:day)?)?)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?)(?![A-Za-z])",
     re.IGNORECASE,
 )
-_ENGLISH_WEEKDAY_INDEX = {
-    "monday": 0,
-    "tuesday": 1,
-    "wednesday": 2,
-    "thursday": 3,
-    "friday": 4,
-    "saturday": 5,
-    "sunday": 6,
+_ENGLISH_WEEKDAY_INDEX = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6}
+_CHINESE_WEEKDAY_PATTERN = re.compile(
+    r"(?P<scope>下周|下星期|下个星期|本周|这周|周|星期)"
+    r"(?P<day>[一二三四五六日天])"
+    r"(?![一二三四五六日天])"
+)
+_CHINESE_WEEKDAY_INDEX = {"一": 0, "二": 1, "三": 2, "四": 3, "五": 4, "六": 5, "日": 6, "天": 6}
+_CHINESE_RELATIVE_DAY_OFFSETS = {
+    "后天": 2,
+    "大后天": 3,
+    "明天": 1,
+    "今天": 0,
+    "昨天": -1,
+    "前天": -2,
 }
 _RELATIVE_DAY_OFFSETS = {
     "大后天": 3,
@@ -1388,12 +1456,23 @@ def _weekday_date(match: re.Match[str], today: date) -> date:
 
 def _english_weekday_date(match: re.Match[str], today: date) -> date:
     monday = today - timedelta(days=today.weekday())
-    day = match.group("day").casefold()
+    day = match.group("day").casefold()[:3]
     candidate = monday + timedelta(days=_ENGLISH_WEEKDAY_INDEX[day])
     scope = (match.group("scope") or "").strip().casefold()
     if scope in {"next", "next week"}:
         candidate += timedelta(days=7)
     elif scope == "" and candidate < today:
+        candidate += timedelta(days=7)
+    return candidate
+
+
+def _chinese_weekday_date(match: re.Match[str], today: date) -> date:
+    monday = today - timedelta(days=today.weekday())
+    candidate = monday + timedelta(days=_CHINESE_WEEKDAY_INDEX[match.group("day")])
+    scope = (match.group("scope") or "").strip()
+    if scope in {"下周", "下星期", "下个星期"}:
+        candidate += timedelta(days=7)
+    elif scope in {"周", "星期", "本周", "这周", ""} and candidate < today:
         candidate += timedelta(days=7)
     return candidate
 
@@ -1412,15 +1491,42 @@ def extract_structural_constraints(raw_text: str, today: date) -> dict[str, Any]
     # a destination or preference guess.  Preserve it across clarification
     # rounds even when the cloud Requirement Agent is unavailable; do not
     # infer it from names such as "海岛" or from a geography dictionary.
-    if re.search(r"跨海|跨水|过海|渡海|跨海峡", raw_text or ""):
+    explicit_mode = _explicit_cross_sea_mode(raw_text or "")
+    if re.search(r"跨海|跨水|过海|渡海|跨海峡|海上", raw_text or "") or explicit_mode == "ferry":
         result["cross_sea_required"] = True
-        explicit_mode = _explicit_cross_sea_mode(raw_text or "")
         if explicit_mode:
             result["cross_sea_mode"] = explicit_mode
 
     explicit_window = _extract_explicit_time_window(raw_text or "")
     if explicit_window:
         result.update(explicit_window)
+
+    actual_relative = list(
+        re.finditer(
+            r"大后天|后天|明天|今天|昨天|前天|the day after tomorrow|"
+            r"day after tomorrow|day before yesterday|tomorrow|today|yesterday",
+            raw_text,
+            re.IGNORECASE,
+        )
+    )
+    if actual_relative:
+        relative_offsets = {
+            **_CHINESE_RELATIVE_DAY_OFFSETS,
+            "the day after tomorrow": 2,
+            "day after tomorrow": 2,
+            "tomorrow": 1,
+            "today": 0,
+            "yesterday": -1,
+            "day before yesterday": -2,
+        }
+        relative_dates = [
+            today + timedelta(days=relative_offsets[item.group(0).casefold()])
+            for item in actual_relative[:2]
+        ]
+        if "start_date" not in result:
+            result["start_date"] = relative_dates[0].isoformat()
+        if len(relative_dates) > 1 and "end_date" not in result:
+            result["end_date"] = relative_dates[1].isoformat()
 
     relative = list(
         re.finditer(
@@ -1441,11 +1547,19 @@ def extract_structural_constraints(raw_text: str, today: date) -> dict[str, Any]
             result["end_date"] = relative_dates[1].isoformat()
 
     weekday_matches = list(_WEEKDAY_PATTERN.finditer(raw_text))
+    chinese_weekday_matches = list(_CHINESE_WEEKDAY_PATTERN.finditer(raw_text))
     english_weekday_matches = list(_ENGLISH_WEEKDAY_PATTERN.finditer(raw_text))
     weekday_dates = [
         *[_weekday_date(match, today) for match in weekday_matches[:2]],
+        *[_chinese_weekday_date(match, today) for match in chinese_weekday_matches[:2]],
         *[_english_weekday_date(match, today) for match in english_weekday_matches[:2]],
     ]
+    # ``_WEEKDAY_PATTERN`` predates the explicit Chinese pattern above and
+    # intentionally overlaps it for ordinary 周/星期 expressions.  Collapse
+    # duplicate dates before deciding whether the user supplied a range; an
+    # otherwise identical pair such as “周日” must not become Sunday→next
+    # Sunday and mask a numeric start date in the same sentence.
+    weekday_dates = list(dict.fromkeys(weekday_dates))
     weekend_requested = bool(
         re.search(r"周末|本周末|这个周末|this\s+weekend|weekend", raw_text, re.IGNORECASE)
     )
@@ -1460,6 +1574,7 @@ def extract_structural_constraints(raw_text: str, today: date) -> dict[str, Any]
         weekday_dates = [saturday, saturday + timedelta(days=1)]
     if weekday_dates:
         weekday_dates = weekday_dates[:2]
+        had_numeric_start = "start_date" in result
         if len(weekday_dates) > 1 and weekday_dates[1] <= weekday_dates[0]:
             # A bare second weekday in a range belongs after the first one,
             # including ranges that cross the Sunday/Monday boundary.
@@ -1471,6 +1586,17 @@ def extract_structural_constraints(raw_text: str, today: date) -> dict[str, Any]
             result["start_date"] = weekday_dates[0].isoformat()
         if len(weekday_dates) > 1 and "end_date" not in result:
             result["end_date"] = weekday_dates[1].isoformat()
+        elif had_numeric_start and "end_date" not in result:
+            # A numeric start followed by one weekday (“9月12号……周日回”)
+            # denotes the next occurrence after that start date.
+            try:
+                start_value = date.fromisoformat(str(result["start_date"]))
+                end_value = weekday_dates[0]
+                while end_value <= start_value:
+                    end_value += timedelta(days=7)
+                result["end_date"] = end_value.isoformat()
+            except (TypeError, ValueError):
+                pass
 
     return result
 

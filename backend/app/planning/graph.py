@@ -32,6 +32,7 @@ from ..skills.registry import SkillRegistry
 from .deep_drive import (
     default_vehicle,
     enrich_deep_drive_plan,
+    normalize_plan_calendar,
     verify_deep_drive_plan,
 )
 from .event_research import event_research_summary, research_special_events
@@ -105,6 +106,137 @@ def _return_deadline_issue(
 def _normalize_poi_name(value: Any) -> str:
     """Normalize a model-selected POI name for exact identity matching."""
     return "".join(str(value or "").split()).casefold()
+
+
+def _poi_name_matches(requested: Any, candidate: Any) -> bool:
+    """Match a requested venue to a provider label without losing aliases.
+
+    Map providers commonly append an entrance, branch, campus or scenic-area
+    suffix to the exact name supplied by the traveller. Treat that as the same
+    place, but never let an empty or one-character fragment claim an unrelated
+    candidate.
+    """
+    requested_key = _normalize_poi_name(requested)
+    candidate_key = _normalize_poi_name(candidate)
+    if not requested_key or not candidate_key:
+        return False
+    if requested_key == candidate_key:
+        return True
+    return min(len(requested_key), len(candidate_key)) >= 2 and (
+        requested_key in candidate_key or candidate_key in requested_key
+    )
+
+
+def _mark_existing_required_candidates(
+    attractions: list[dict[str, Any]],
+    required_places: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Mark already-discovered must-visits and return names still unresolved.
+
+    Previously an exact candidate was excluded from the directed lookup but
+    was left as an ordinary recommendation. Ranking could then silently drop
+    a place that the traveller explicitly required.
+    """
+    unresolved: list[dict[str, Any]] = []
+    for required in required_places:
+        requested_name = str(required.get("name") or "").strip()
+        match = next(
+            (
+                item
+                for item in attractions
+                if _poi_name_matches(
+                    requested_name,
+                    (item.get("place") or {}).get("name"),
+                )
+            ),
+            None,
+        )
+        if match is None:
+            unresolved.append(required)
+            continue
+        match["user_required"] = True
+        match["required_name"] = requested_name
+        place = match.setdefault("place", {})
+        # Keep the traveller's wording in the itinerary. Provider identifiers,
+        # coordinates and evidence remain attached to the same record.
+        place["name"] = requested_name
+    return unresolved
+
+
+def _merge_required_lookup_result(
+    attractions: list[dict[str, Any]],
+    required: dict[str, Any],
+    result: Any,
+    destination: dict[str, Any],
+) -> bool:
+    """Merge one directed map lookup into the required candidate pool."""
+    if isinstance(result, Exception) or not result.success or not isinstance(result.data, dict):
+        return False
+    requested_name = str(required.get("name") or "").strip()
+    items = [item for item in result.data.get("items", []) if isinstance(item, dict)]
+    match = next(
+        (
+            item
+            for item in items
+            if _poi_name_matches(requested_name, item.get("name"))
+            and item.get("location")
+        ),
+        None,
+    )
+    if match is None:
+        return False
+    try:
+        longitude, latitude = str(match["location"]).split(",", 1)
+        coordinates_value = {
+            "longitude": float(longitude),
+            "latitude": float(latitude),
+        }
+    except (TypeError, ValueError):
+        return False
+    source_records = [item.model_dump(mode="json") for item in result.sources]
+    resolved = next(
+        (
+            item
+            for item in attractions
+            if _poi_name_matches(
+                requested_name,
+                (item.get("place") or {}).get("name"),
+            )
+        ),
+        None,
+    )
+    if resolved is None:
+        resolved = {
+            "place": {
+                "id": match.get("id") or requested_name,
+                "name": requested_name,
+                "address": match.get("address"),
+                "city": match.get("city") or destination.get("city"),
+                "coordinates": coordinates_value,
+                "source_id": match.get("id") or requested_name,
+            },
+            "source_records": [],
+        }
+        attractions.append(resolved)
+    resolved_place = resolved.setdefault("place", {})
+    resolved_place["name"] = requested_name
+    resolved_place["coordinates"] = coordinates_value
+    resolved_place.setdefault("city", match.get("city") or destination.get("city"))
+    resolved["source_records"] = [
+        *resolved.get("source_records", []),
+        *source_records,
+        {
+            "provider": "高德地图",
+            "title": f"{requested_name} 指定景点详情",
+            "url": f"https://www.amap.com/search?query={quote(requested_name)}",
+        },
+    ]
+    resolved["detail_url"] = f"https://www.amap.com/search?query={quote(requested_name)}"
+    resolved["image_url"] = (match.get("photos") or [None])[0] or resolved.get("image_url")
+    resolved["provider"] = result.provider
+    resolved["user_required"] = True
+    resolved["required_name"] = requested_name
+    return True
 
 
 def _destination_search_area(destination: dict[str, Any]) -> str:
@@ -254,16 +386,19 @@ def build_planning_graph(
             current["stay_only_at_destination"] = True
         extracted_must_visit = extracted.get("must_visit_names") or []
         if isinstance(extracted_must_visit, list):
-            existing_names = {
+            existing_names = [
                 str(item.get("name") or "").strip()
                 for item in current.get("must_visit", [])
                 if isinstance(item, dict)
-            }
+            ]
             for name in extracted_must_visit:
                 normalized = str(name or "").strip()
-                if normalized and normalized not in existing_names:
+                if normalized and not any(
+                    _poi_name_matches(normalized, existing)
+                    for existing in existing_names
+                ):
                     current.setdefault("must_visit", []).append({"name": normalized})
-                    existing_names.add(normalized)
+                    existing_names.append(normalized)
         current["defaults_applied"] = list(dict.fromkeys(defaults))
         current["raw_text"] = state["raw_input"]
         current["preferences"] = list(
@@ -478,6 +613,31 @@ def build_planning_graph(
             default=time(20, 0),
         )
 
+        # A province/region is a valid travel destination, but scheduled
+        # providers need a concrete gateway city.  Resolve that gateway with
+        # the semantic travel-search Agent (for example, 青海 -> 西宁) instead
+        # of maintaining a brittle province-name table or querying a region
+        # name as if it were a station.  The geographic anchor remains the
+        # original resolved destination; only the provider query label is
+        # enriched.
+        if explicit_intercity or (
+            str(request.get("destination_scope") or "").strip().lower()
+            in {"province", "region"}
+        ):
+            for place in (origin, destination):
+                transport_city, transport_warnings, transport_sources = (
+                    await _resolve_transport_gateway(
+                        registry,
+                        place,
+                        state["trip_id"],
+                    )
+                )
+                warnings.extend(transport_warnings)
+                if transport_sources:
+                    place.setdefault("transport_sources", []).extend(transport_sources)
+                if transport_city:
+                    place["transport_city"] = transport_city
+
         async def scheduled(
             mode: str,
             leg_origin: dict[str, Any],
@@ -638,6 +798,115 @@ def build_planning_graph(
             end_date,
             arrival_deadline=deadline,
         )
+
+        # Self-drive is the default, but a short fixed window must not be
+        # allowed to consume every calendar day with the outbound and return
+        # legs.  If both road legs would require more driving days than the
+        # trip leaves after reserving one destination day, compare real FlyAI
+        # flight/train schedules and switch only when a complete pair exists.
+        # This is a feasibility decision, not a destination keyword rule: a
+        # six-day Wuhan→Harbin road trip can remain self-drive while a
+        # four-day Wuhan→Qinghai round trip is escalated to air/rail.
+        if (
+            not explicit_intercity
+            and not explicit_local
+            and outbound.get("success")
+            and inbound.get("success")
+            and str((outbound.get("data") or {}).get("selected_mode")) == "driving"
+            and str((inbound.get("data") or {}).get("selected_mode")) == "driving"
+        ):
+            try:
+                trip_days = max(1, (end_date - start_date).days + 1)
+                effective_daily = max(
+                    180,
+                    int(request.get("max_daily_drive_minutes") or 9 * 60) - 80,
+                )
+                outbound_drive_days = ceil(
+                    int((outbound.get("data") or {}).get("duration_minutes") or 0)
+                    / effective_daily
+                )
+                inbound_drive_days = ceil(
+                    int((inbound.get("data") or {}).get("duration_minutes") or 0)
+                    / effective_daily
+                )
+                road_days_needed = outbound_drive_days + inbound_drive_days
+            except (TypeError, ValueError, ZeroDivisionError):
+                trip_days = 0
+                road_days_needed = 0
+            if trip_days and road_days_needed > max(1, trip_days - 1):
+                alternatives: list[tuple[str, dict[str, Any], dict[str, Any]]] = []
+                for alternative_mode in ("flight", "train"):
+                    alt_outbound, outbound_warnings = await scheduled(
+                        alternative_mode,
+                        origin,
+                        destination,
+                        start_date,
+                        requested_departure=departure_at,
+                    )
+                    alt_inbound, inbound_warnings = await scheduled(
+                        alternative_mode,
+                        destination,
+                        origin,
+                        end_date,
+                        arrival_deadline=deadline,
+                    )
+                    warnings.extend(outbound_warnings)
+                    warnings.extend(inbound_warnings)
+                    if (
+                        alt_outbound.get("success")
+                        and alt_inbound.get("success")
+                        and _intercity_pair_within_window(
+                            alt_outbound,
+                            alt_inbound,
+                            requested_departure=departure_at,
+                            arrival_deadline=deadline,
+                            start_date=start_date,
+                            end_date=end_date,
+                        )
+                    ):
+                        alternatives.append((alternative_mode, alt_outbound, alt_inbound))
+                    elif alt_outbound.get("success") and alt_inbound.get("success"):
+                        warnings.append(
+                            {
+                                "code": "TRANSPORT_ALTERNATIVE_WINDOW_REJECTED",
+                                "message": (
+                                    f"{_intercity_mode_label(alternative_mode)}往返班次未能同时落在行程日期与返程截止时间内，"
+                                    "未用晚到班次替代可执行路线"
+                                ),
+                                "severity": "info",
+                            }
+                        )
+                if alternatives:
+                    selected_mode, outbound, inbound = min(
+                        alternatives,
+                        key=lambda item: (
+                            _intercity_route_quality(
+                                item[1],
+                                requested_departure=departure_at,
+                                arrival_deadline=None,
+                                mode_order=(0 if item[0] == "flight" else 1),
+                            ),
+                            _intercity_route_quality(
+                                item[2],
+                                requested_departure=None,
+                                arrival_deadline=deadline,
+                                mode_order=(0 if item[0] == "flight" else 1),
+                            ),
+                        ),
+                    )
+                    primary_mode = selected_mode
+                    primary_tool = f"flyai.{selected_mode}"
+                    warnings.append(
+                        {
+                            "code": "TRANSPORT_AUTO_ESCALATED",
+                            "message": (
+                                f"驾车往返预计占用 {road_days_needed} 个驾驶日，"
+                                f"超过 {trip_days} 天行程可用窗口，已改用"
+                                f"{_intercity_mode_label(selected_mode)}并保留目的地游览时间"
+                            ),
+                            "severity": "warning",
+                        }
+                    )
         candidates = [item for item in (outbound, inbound) if item.get("success")]
         error = None
         if not outbound.get("success"):
@@ -1464,15 +1733,10 @@ def build_planning_graph(
             if isinstance(item, dict) and str(item.get("name") or "").strip()
         ]
         if required_places:
-            existing_names = {
-                _normalize_poi_name(item.get("place", {}).get("name"))
-                for item in candidates["attractions"]
-            }
-            required_to_lookup = [
-                item
-                for item in required_places
-                if _normalize_poi_name(item.get("name")) not in existing_names
-            ]
+            required_to_lookup = _mark_existing_required_candidates(
+                candidates["attractions"],
+                required_places,
+            )
             if required_to_lookup and "amap.poi" in registry.names():
                 await emit(
                     state,
@@ -1482,120 +1746,85 @@ def build_planning_graph(
                     event="tool_started",
                     tool="amap.poi",
                 )
-                lookup_results = await asyncio.gather(
-                    *[
-                        registry.execute(
+                # A multi-city request may name a place that belongs to a
+                # later city (for example “西安再去洛阳…龙门石窟”).  Searching
+                # every required place only in the first destination silently
+                # drops it.  Try the explicitly attached city first, then the
+                # ordered destination anchors, and retain a blocker marker if
+                # none of the scoped searches can resolve the name.
+                request_destination_names = [
+                    str(value).strip()
+                    for value in state["trip_request"].get("destination_names", [])
+                    if isinstance(value, str) and value.strip()
+                ]
+                destination_areas: list[str] = []
+                for area in [
+                    *[str(item.get("city") or "").strip() for item in required_to_lookup],
+                    *request_destination_names,
+                    str(destination.get("city") or "").strip(),
+                ]:
+                    if area and area not in destination_areas:
+                        destination_areas.append(area)
+
+                async def lookup_required_place(required: dict[str, Any]) -> bool:
+                    searched: list[str | None] = []
+                    item_city = str(required.get("city") or "").strip()
+                    for area in [item_city, *destination_areas, None]:
+                        if area in searched:
+                            continue
+                        searched.append(area)
+                        result = await registry.execute(
                             "amap.poi",
                             {
-                                "keywords": str(item["name"])[:80],
-                                "city": destination.get("city"),
+                                "keywords": str(required["name"])[:80],
+                                "city": area,
                                 "page_size": 10,
                             },
                             SkillContext(
                                 trip_id=state["trip_id"],
                                 metadata={
                                     "purpose": "required_poi_lookup",
-                                    "required_name": item["name"],
+                                    "required_name": required["name"],
+                                    "search_city": area,
                                 },
                             ),
                         )
-                        for item in required_to_lookup
-                    ],
-                    return_exceptions=True,
+                        if _merge_required_lookup_result(
+                            candidates["attractions"],
+                            required,
+                            result,
+                            destination,
+                        ):
+                            return True
+                    return False
+
+                lookup_status = await asyncio.gather(
+                    *(lookup_required_place(item) for item in required_to_lookup)
                 )
-                for required, result in zip(required_to_lookup, lookup_results, strict=True):
-                    if isinstance(result, Exception) or not result.success or not isinstance(result.data, dict):
-                        continue
-                    requested_name = str(required["name"]).strip()
-                    requested_key = _normalize_poi_name(requested_name)
-                    items = [item for item in result.data.get("items", []) if isinstance(item, dict)]
-                    if not items:
-                        continue
-                    match = next(
-                        (
-                            item
-                            for item in items
-                            if _normalize_poi_name(item.get("name")) == requested_key
-                        ),
-                        next(
-                            (
-                                item
-                                for item in items
-                                if requested_key in _normalize_poi_name(item.get("name"))
-                                or _normalize_poi_name(item.get("name")) in requested_key
-                            ),
-                            None,
-                        ),
-                    )
-                    if not match or not match.get("location"):
-                        continue
-                    try:
-                        longitude, latitude = str(match["location"]).split(",", 1)
-                        coordinates_value = {
-                            "longitude": float(longitude),
-                            "latitude": float(latitude),
-                        }
-                    except (TypeError, ValueError):
-                        continue
-                    source_records = [item.model_dump(mode="json") for item in result.sources]
-                    resolved = next(
-                        (
-                            item
-                            for item in candidates["attractions"]
-                            if requested_key in _normalize_poi_name((item.get("place") or {}).get("name"))
-                            or _normalize_poi_name((item.get("place") or {}).get("name")) in requested_key
-                        ),
-                        None,
-                    )
-                    if resolved is not None:
-                        resolved_place = resolved.setdefault("place", {})
-                        # Keep the wording the traveller used in the visible
-                        # itinerary while retaining the provider's resolved
-                        # coordinates and source records.  This prevents a
-                        # request such as “麓湖CPI” from being rendered only
-                        # as the generic provider label “CPI”.
-                        resolved_place["name"] = requested_name
-                        resolved_place["coordinates"] = coordinates_value
-                        resolved_place.setdefault("city", match.get("city") or destination.get("city"))
-                        resolved["source_records"] = [
-                            *resolved.get("source_records", []),
-                            *source_records,
-                        ]
-                        resolved["detail_url"] = f"https://www.amap.com/search?query={quote(requested_name)}"
-                        resolved["image_url"] = (match.get("photos") or [None])[0] or resolved.get("image_url")
-                        resolved["user_required"] = True
-                        resolved["required_name"] = requested_name
-                        continue
-                    candidates["attractions"].append(
-                        {
-                            "place": {
-                                "id": match.get("id") or requested_name,
-                                "name": requested_name,
-                                "address": match.get("address"),
-                                "city": match.get("city") or destination.get("city"),
-                                "coordinates": coordinates_value,
-                                "source_id": match.get("id") or requested_name,
-                            },
-                            "detail_url": f"https://www.amap.com/search?query={quote(requested_name)}",
-                            "image_url": (match.get("photos") or [None])[0],
-                            "required_name": requested_name,
-                            "user_required": True,
-                            "source_records": [
-                                *source_records,
-                                {
-                                    "provider": "高德地图",
-                                    "title": f"{requested_name} 指定景点详情",
-                                    "url": f"https://www.amap.com/search?query={quote(requested_name)}",
+                for required, resolved in zip(required_to_lookup, lookup_status, strict=True):
+                    if not resolved:
+                        # Keep an explicit unresolved marker so verification
+                        # reports the named place as a blocker instead of
+                        # falsely declaring a complete plan after a provider
+                        # outage or a city-scoped search miss.
+                        candidates["attractions"].append(
+                            {
+                                "place": {
+                                    "id": f"required-unresolved:{required['name']}",
+                                    "name": str(required["name"]).strip(),
+                                    "city": required.get("city") or destination.get("city"),
+                                    "coordinates": None,
                                 },
-                            ],
-                            "provider": result.provider,
-                        }
-                    )
-                    existing_names.add(requested_key)
+                                "user_required": True,
+                                "required_name": str(required["name"]).strip(),
+                                "lookup_unresolved": True,
+                                "source_records": [],
+                            }
+                        )
                 await emit(
                     state,
                     "required_poi_lookup",
-                    "指定景点已找到并加入行程规划",
+                    "指定景点已检索并加入候选；无法核实的地点会阻断静默遗漏",
                     67,
                     event="tool_completed",
                     tool="amap.poi",
@@ -1837,7 +2066,45 @@ def build_planning_graph(
         if not selected_candidates:
             return {"local_routes": []}
 
-        modes = ["transit", "walking", "riding"]
+        # Keep local movement consistent with the trip's transport choice.
+        # Self-drive requests must not silently switch to public transit once
+        # the traveller reaches the destination city.
+        selected_intercity_mode = str(
+            (state.get("selected_route") or {}).get("data", {}).get("selected_mode")
+            or ""
+        ).casefold()
+        driving_requested = "driving" in {
+            str(mode).strip().casefold()
+            for mode in request.get("transport_modes", [])
+            if str(mode).strip()
+        } or (
+            not request.get("transport_modes")
+            and selected_intercity_mode == "driving"
+        )
+        modes = (
+            ["driving", "transit", "riding", "walking"]
+            if driving_requested
+            else ["transit", "walking", "riding"]
+        )
+        default_local_mode = "driving" if driving_requested else "transit"
+
+        # Research clusters may assign several hard requirements to the same
+        # day. Spread user-required places over available stay days so each
+        # one receives a real sightseeing window instead of being squeezed
+        # into a transfer-day evening.
+        required_candidates = [
+            candidate
+            for candidate in selected_candidates
+            if candidate.get("user_required") or candidate.get("user_confirmed")
+        ]
+        if required_candidates:
+            stay_day_indexes = list(range(day_count))
+            if selected_intercity_mode in {"train", "flight", "ferry"} and day_count > 2:
+                stay_day_indexes = stay_day_indexes[1:-1] or stay_day_indexes
+            for requirement_index, candidate in enumerate(required_candidates):
+                candidate["coverage_day_index"] = (
+                    stay_day_indexes[requirement_index % len(stay_day_indexes)] + 1
+                )
         local_routes: list[dict[str, Any]] = []
         used_target_names: set[str] = set()
         for day_index in range(day_count):
@@ -1852,6 +2119,10 @@ def build_planning_graph(
                 candidate
                 for candidate in selected_candidates
                 if candidate not in day_pool
+                and not (
+                    candidate.get("user_required") or candidate.get("user_confirmed")
+                )
+                and not candidate.get("coverage_day_index")
                 and _normalize_poi_name(candidate.get("place", {}).get("name"))
                 not in used_target_names
             )
@@ -1865,6 +2136,10 @@ def build_planning_graph(
                 for candidate in selected_candidates
                 if candidate not in day_pool
                 and not candidate.get("destination_research_priority")
+                and not (
+                    candidate.get("user_required") or candidate.get("user_confirmed")
+                )
+                and not candidate.get("coverage_day_index")
             )
             day_targets = _select_itinerary_places(
                 day_pool,
@@ -2005,6 +2280,11 @@ def build_planning_graph(
             },
         )
         hotel_place = (hotel_base or {}).get("place") or request["destination"]
+        # The first scheduled leg may start at an airport/station rather than
+        # the city's geocoded centroid.  Use that concrete terminal as the
+        # return anchor as well, so a fallback road leg cannot close at a
+        # random city centre and trigger a false/non-closed itinerary.
+        origin_return_anchor = outbound.get("origin_place") or request["origin"]
 
         # A long outbound self-drive leg can occupy several calendar days.
         # Local routes are discovered before this stage builder runs, so the
@@ -2030,15 +2310,35 @@ def build_planning_graph(
                 outbound_arrival_date = _estimated_driving_arrival_date(
                     outbound_start_at,
                     outbound_duration,
-                    int(
-                        request.get("max_daily_drive_minutes")
-                        or 9 * 60
+                    max(
+                        180,
+                        int(request.get("max_daily_drive_minutes") or 9 * 60) - 80,
                     ),
                 )
             else:
                 outbound_arrival_date = (
                     outbound_start_at + timedelta(minutes=outbound_duration)
                 ).date()
+
+        inbound_data = inbound.get("data") or {}
+        try:
+            inbound_duration = int(inbound_data.get("duration_minutes") or 0)
+        except (TypeError, ValueError):
+            inbound_duration = 0
+        max_daily_drive = max(
+            180,
+            int(request.get("max_daily_drive_minutes") or 9 * 60) - 80,
+        )
+        long_driving_return = (
+            str(inbound_data.get("selected_mode")) == "driving"
+            and inbound_duration > max_daily_drive
+        )
+        inbound_departure_date: date | None = None
+        if long_driving_return and day_defs:
+            return_days = max(1, ceil(inbound_duration / max(1, max_daily_drive)))
+            inbound_departure_date = date.fromisoformat(day_defs[-1]["date"]) - timedelta(
+                days=return_days - 1
+            )
 
         async def prepare_route(route: dict[str, Any]) -> dict[str, Any]:
             """Attach best-effort terrain gain to walking/riding routes."""
@@ -2093,22 +2393,45 @@ def build_planning_graph(
                 )
             return route
 
+        # Resolve a self-drive return from the actual hotel once, before the
+        # return start day. A long return may begin several days before the
+        # requested end date; waiting until the final-day branch would make it
+        # teleport from the city centroid and then overflow beyond the trip.
+        if (
+            str((inbound.get("data") or {}).get("selected_mode")) == "driving"
+            and hotel_place.get("coordinates")
+            and not _same_place(hotel_place, origin_return_anchor)
+        ):
+            hotel_return = await _route(
+                registry,
+                hotel_place,
+                origin_return_anchor,
+                state["trip_id"],
+                preferred_mode="driving",
+                fallback_modes=["transit", "riding", "walking"],
+            )
+            if hotel_return.get("success"):
+                hotel_return["origin_place"] = hotel_place
+                hotel_return["destination_place"] = origin_return_anchor
+                inbound = hotel_return
+
         for index, day_def in enumerate(day_defs):
             stages: list[MovementStage] = []
             day_date = date.fromisoformat(day_def["date"])
             return_route = inbound
             if (
                 index == len(day_defs) - 1
+                and not long_driving_return
                 and str((inbound.get("data") or {}).get("selected_mode")) == "driving"
                 and hotel_place.get("coordinates")
-                and not _same_place(hotel_place, request["destination"])
+                and not _same_place(hotel_place, origin_return_anchor)
             ):
                 # A self-drive return should leave from the booked hotel, not
                 # teleport back to the destination city centroid.
                 return_route = await _route(
                     registry,
                     hotel_place,
-                    request["origin"],
+                    origin_return_anchor,
                     state["trip_id"],
                     preferred_mode="driving",
                     fallback_modes=["transit", "riding", "walking"],
@@ -2117,7 +2440,7 @@ def build_planning_graph(
                     return_route = inbound
                 else:
                     return_route["origin_place"] = hotel_place
-                    return_route["destination_place"] = request["origin"]
+                    return_route["destination_place"] = origin_return_anchor
             if index == 0:
                 outbound = await prepare_route(outbound)
                 outbound_start = _request_clock(
@@ -2233,6 +2556,14 @@ def build_planning_graph(
                 # progress.  The next usable sightseeing day starts after
                 # the final driving piece arrives.
                 local_items = []
+            if (
+                inbound_departure_date is not None
+                and day_date >= inbound_departure_date
+            ):
+                # The return route owns these calendar days. Do not inject
+                # destination sightseeing or hotel-area connectors into the
+                # middle of a cross-day drive home.
+                local_items = []
             # A late intercity train can cross midnight.  Do not append local
             # sightseeing transfers to the departure calendar day after the
             # traveller is still on the train; those items belong to the
@@ -2328,7 +2659,7 @@ def build_planning_graph(
                     break
                 stages.append(stage)
                 local_start = stage.planned_end + timedelta(minutes=105)
-            if index == len(day_defs) - 1 and return_cutoff:
+            if index == len(day_defs) - 1 and return_cutoff and not long_driving_return:
                 # The local-route builder may have stopped before its
                 # generated "back to base" connector because that connector
                 # would miss the train. Reconcile the chain here: retain as
@@ -2557,7 +2888,7 @@ def build_planning_graph(
                 )
                 stages.append(connector_stage)
                 local_start = connector_stage.planned_end + timedelta(minutes=15)
-            if index == len(day_defs) - 1:
+            if index == len(day_defs) - 1 and not long_driving_return:
                 # Finish the hotel-to-terminal leg explicitly.  The flight or
                 # train route itself starts at the terminal, not at the hotel.
                 return_origin = return_route.get("origin_place") or request["destination"]
@@ -2682,7 +3013,22 @@ def build_planning_graph(
                     if return_cutoff is None or connector_stage.planned_end <= return_cutoff:
                         stages.append(connector_stage)
                         local_start = connector_stage.planned_end + timedelta(minutes=15)
-            if index == len(day_defs) - 1:
+            if long_driving_return and day_date == inbound_departure_date:
+                return_route = await prepare_route(inbound)
+                return_origin = return_route.get("origin_place") or hotel_place
+                return_destination = return_route.get("destination_place") or origin_return_anchor
+                stages.append(
+                    _movement_stage(
+                        day_id=f"day_{index + 1}",
+                        sequence=len(stages),
+                        title="返程",
+                        origin=return_origin,
+                        destination=return_destination,
+                        route=return_route,
+                        start_at=_request_clock(day_date, "08:00:00", default=time(8, 0)),
+                    )
+                )
+            elif index == len(day_defs) - 1 and not long_driving_return:
                 return_route = await prepare_route(return_route)
                 return_start = _return_stage_start(
                     day_date,
@@ -2709,7 +3055,7 @@ def build_planning_graph(
                 ):
                     return_start = return_cutoff
                 return_origin = return_route.get("origin_place") or request["destination"]
-                return_destination = return_route.get("destination_place") or request["origin"]
+                return_destination = return_route.get("destination_place") or origin_return_anchor
                 stages.append(
                     _movement_stage(
                         day_id=f"day_{index + 1}",
@@ -2721,6 +3067,48 @@ def build_planning_graph(
                         start_at=return_start,
                     )
                 )
+                # A provider may return a different terminal on the inbound
+                # leg (for example, an airport outbound and a railway station
+                # inbound). Join that terminal to the exact outbound anchor
+                # instead of declaring the city-centre centroid a closed
+                # route. The connector is visible on the map and is subject
+                # to the same timing/transport checks as every other stage.
+                if not _same_place(
+                    stages[-1].destination.model_dump(mode="json"),
+                    origin_return_anchor,
+                ):
+                    connector_origin = stages[-1].destination.model_dump(mode="json")
+                    connector_mode = (
+                        "driving"
+                        if "driving" in request.get("transport_modes", [])
+                        else "transit"
+                    )
+                    connector_route = await _route(
+                        registry,
+                        connector_origin,
+                        origin_return_anchor,
+                        state["trip_id"],
+                        preferred_mode=connector_mode,
+                        fallback_modes=["transit", "riding", "walking", "driving"],
+                    )
+                    if not connector_route.get("success"):
+                        connector_route = _fallback_local_route(
+                            connector_origin,
+                            origin_return_anchor,
+                            connector_mode,
+                        )
+                    connector_route = await prepare_route(connector_route)
+                    stages.append(
+                        _movement_stage(
+                            day_id=f"day_{index + 1}",
+                            sequence=len(stages),
+                            title="鍥炲埌鍑哄彂浜ら€氭灑绾?",
+                            origin=connector_origin,
+                            destination=origin_return_anchor,
+                            route=connector_route,
+                            start_at=stages[-1].planned_end + timedelta(minutes=15),
+                        )
+                    )
             plan = DayPlan(
                 id=f"day_{index + 1}",
                 day_index=index + 1,
@@ -3298,7 +3686,9 @@ def build_planning_graph(
         # Normalize provider timestamps before enforcing hard constraints.
         # A service or meal can be returned at the exact start of the next
         # movement segment; move that segment forward to avoid a false blocker.
-        normalized_days = _repair_activity_stage_overlaps(state.get("day_plans", []))
+        normalized_days = normalize_plan_calendar(
+            _repair_activity_stage_overlaps(state.get("day_plans", []))
+        )
         issues: list[dict[str, Any]] = []
         if state.get("error"):
             issues.append(
@@ -3867,11 +4257,29 @@ async def _route(
     preferred_mode: str = "driving",
     fallback_modes: list[str] | None = None,
 ) -> dict[str, Any]:
+    origin_coordinates = origin.get("coordinates") or {}
+    destination_coordinates = destination.get("coordinates") or {}
+    if not (
+        origin_coordinates.get("longitude") is not None
+        and origin_coordinates.get("latitude") is not None
+        and destination_coordinates.get("longitude") is not None
+        and destination_coordinates.get("latitude") is not None
+    ):
+        # An unresolved user-required POI is kept in the candidate pool so
+        # verification can report it honestly. Do not let a missing provider
+        # coordinate crash the whole graph while trying to route to it.
+        return {
+            "success": False,
+            "data": {},
+            "error_code": "ROUTE_COORDINATES_MISSING",
+            "warnings": ["路线端点缺少坐标，已保留为待核实地点"],
+            "sources": [],
+        }
     result = await registry.execute(
         "amap.route",
         {
-            "origin": {**origin["coordinates"], "city": origin.get("city")},
-            "destination": {**destination["coordinates"], "city": destination.get("city")},
+            "origin": {**origin_coordinates, "city": origin.get("city")},
+            "destination": {**destination_coordinates, "city": destination.get("city")},
             "preferred_mode": preferred_mode,
             "allowed_fallback_modes": fallback_modes or ["riding", "walking", "transit"],
         },
@@ -3895,7 +4303,7 @@ async def _route(
             {
                 "origin": {**origin["coordinates"], "city": origin.get("city")},
                 "destination": {
-                    **destination["coordinates"],
+                    **destination_coordinates,
                     "city": destination.get("city"),
                 },
                 "preferred_mode": retry_mode,
@@ -3906,6 +4314,55 @@ async def _route(
         if result.success and isinstance(result.data, dict):
             selected_mode = result.data.get("selected_mode")
             retry_modes = [mode for mode in retry_modes if mode != selected_mode]
+    # A route provider can return a successful distance/time response without a
+    # polyline (this is common for ferry/short-transfer fallbacks).  The domain
+    # model requires at least two map points, so synthesize a clearly estimated
+    # straight connector from the already geocoded endpoints.  If even those
+    # endpoints are unavailable, report a normal route failure and let callers
+    # choose their existing fallback instead of crashing during RouteSegment
+    # validation.
+    if result.success and isinstance(result.data, dict):
+        data = dict(result.data)
+        geometry = data.get("geometry")
+        if not isinstance(geometry, list) or len(geometry) < 2:
+            try:
+                origin_point = RoutePoint(
+                    longitude=float(origin_coordinates["longitude"]),
+                    latitude=float(origin_coordinates["latitude"]),
+                )
+                destination_point = RoutePoint(
+                    longitude=float(destination_coordinates["longitude"]),
+                    latitude=float(destination_coordinates["latitude"]),
+                )
+            except (KeyError, TypeError, ValueError):
+                return {
+                    "success": False,
+                    "data": data,
+                    "error_code": "ROUTE_GEOMETRY_MISSING",
+                    "warnings": [*result.warnings, "路线服务未返回可绘制轨迹"],
+                    "sources": [item.model_dump(mode="json") for item in result.sources],
+                }
+            distance_km = round(_haversine_km(origin_point, destination_point), 2)
+            mode = str(data.get("selected_mode") or preferred_mode)
+            speed_kmh = {"walking": 4.5, "riding": 15.0, "transit": 25.0, "driving": 45.0}.get(mode, 25.0)
+            try:
+                duration_minutes = int(data.get("duration_minutes") or 0)
+            except (TypeError, ValueError):
+                duration_minutes = 0
+            data["geometry"] = [
+                {"longitude": origin_point.longitude, "latitude": origin_point.latitude},
+                {"longitude": destination_point.longitude, "latitude": destination_point.latitude},
+            ]
+            data["distance_km"] = float(data.get("distance_km") or distance_km)
+            data["duration_minutes"] = duration_minutes or max(5, round(distance_km / max(speed_kmh, 1) * 60))
+            data["estimated"] = True
+            return {
+                "success": True,
+                "data": data,
+                "error_code": result.error_code,
+                "warnings": [*result.warnings, "路线服务未返回完整轨迹，已使用端点直连估算"],
+                "sources": [item.model_dump(mode="json") for item in result.sources],
+            }
     return {
         "success": result.success,
         "data": result.data,
@@ -3941,6 +4398,127 @@ def _parse_train_datetime(value: Any) -> datetime | None:
     except ValueError:
         return None
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=SHANGHAI)
+
+
+def _transport_city_name(place: dict[str, Any] | None) -> str:
+    """Return the concrete city label used by a flight/train provider.
+
+    Administrative destinations intentionally keep their original name and
+    coordinates for map and tourism planning.  ``transport_city`` is an
+    optional semantic gateway resolved by the travel-search Agent, so a
+    province such as 青海 can be queried as 西宁 without changing the user's
+    destination wording in the itinerary.
+    """
+    if not place:
+        return ""
+    return str(
+        place.get("transport_city")
+        or place.get("city")
+        or place.get("name")
+        or ""
+    ).strip()
+
+
+async def _resolve_transport_gateway(
+    registry: SkillRegistry,
+    place: dict[str, Any],
+    trip_id: str,
+) -> tuple[str | None, list[dict[str, Any]], list[dict[str, Any]]]:
+    """Ask the semantic travel-search Agent for a gateway city when needed.
+
+    Structured intercity APIs require a city/station query and do not accept a
+    whole province reliably.  This is deliberately a provider-backed semantic
+    lookup rather than a code-side list of Chinese administrative names.  If
+    the lookup is unavailable, the caller keeps the original label and the
+    normal route fallback remains responsible for reporting the limitation.
+    """
+    scope = str(place.get("destination_scope") or "").strip().lower()
+    name = str(place.get("name") or "").strip()
+    city = str(place.get("city") or "").strip()
+    if scope not in {"province", "region"} or not name:
+        return None, [], []
+    if city and _normalize_poi_name(city) != _normalize_poi_name(name):
+        return None, [], []
+    if "flyai.ai_search" not in set(registry.names()):
+        return None, [], []
+    result = await registry.execute(
+        "flyai.ai_search",
+        {
+            "query": (
+                f"{name} 适合从外地乘坐飞机或高铁到达的具体城市和主要交通枢纽。"
+                "请优先返回省会或最常用落地城市，只给出城市名称，不要返回餐馆、大学或景点名称。"
+            )
+        },
+        SkillContext(trip_id=trip_id, metadata={"purpose": "transport_gateway"}),
+    )
+    if not result.success or not isinstance(result.data, dict):
+        return None, [], []
+    content = str(result.data.get("content") or "")
+    gateway: str | None = None
+    # FlyAI semantic answers normally present a cited city as a Markdown link.
+    # Prefer that explicit answer; the second pattern handles plain-text
+    # responses from a degraded provider without hard-coding any city names.
+    markdown_match = re.search(r"\*\*\[([^\]]{2,24})\]", content)
+    if markdown_match:
+        gateway = markdown_match.group(1).strip()
+    if not gateway:
+        plain_match = re.search(
+            r"(?:首选|推荐|落地城市|具体城市)\s*[:：]\s*([^\s，,。；;（）()]{2,24})",
+            content,
+        )
+        if plain_match:
+            gateway = plain_match.group(1).strip()
+    if not gateway or _normalize_poi_name(gateway) == _normalize_poi_name(name):
+        return None, [], [item.model_dump(mode="json") for item in result.sources]
+    sources = [item.model_dump(mode="json") for item in result.sources]
+    return (
+        gateway,
+        [
+            {
+                "code": "TRANSPORT_GATEWAY_RESOLVED",
+                "message": f"{name} 的班次查询已由语义搜索解析为交通门户城市 {gateway}",
+                "severity": "info",
+            }
+        ],
+        sources,
+    )
+
+
+def _intercity_pair_within_window(
+    outbound: dict[str, Any],
+    inbound: dict[str, Any],
+    *,
+    requested_departure: datetime | None,
+    arrival_deadline: datetime | None,
+    start_date: date,
+    end_date: date,
+) -> bool:
+    """Accept an automatic flight/train replacement only when both legs fit."""
+    outbound_data = outbound.get("data") or {}
+    inbound_data = inbound.get("data") or {}
+    outbound_departure = _parse_train_datetime(
+        outbound_data.get("scheduled_departure_at")
+    )
+    outbound_arrival = _parse_train_datetime(
+        outbound_data.get("scheduled_arrival_at")
+    )
+    inbound_departure = _parse_train_datetime(
+        inbound_data.get("scheduled_departure_at")
+    )
+    inbound_arrival = _parse_train_datetime(
+        inbound_data.get("scheduled_arrival_at")
+    )
+    if not all((outbound_departure, outbound_arrival, inbound_departure, inbound_arrival)):
+        return False
+    if outbound_departure.date() != start_date or outbound_arrival.date() > end_date:
+        return False
+    if inbound_departure.date() > end_date or inbound_arrival.date() > end_date:
+        return False
+    if requested_departure and outbound_departure < requested_departure:
+        return False
+    if arrival_deadline and inbound_arrival + timedelta(minutes=30) > arrival_deadline:
+        return False
+    return True
 
 
 def _train_route_result(
@@ -4047,8 +4625,8 @@ async def _train_route(
     result = await registry.execute(
         "flyai.train",
         {
-            "origin": origin.get("city") or origin.get("name"),
-            "destination": destination.get("city") or destination.get("name"),
+            "origin": _transport_city_name(origin),
+            "destination": _transport_city_name(destination),
             "dep_date": travel_date.isoformat(),
             "sort_type": 4,
         },
@@ -4285,8 +4863,8 @@ async def _scheduled_route(
         arrival_deadline = arrival_deadline.replace(tzinfo=SHANGHAI)
     adapter_name = f"flyai.{mode}"
     payload: dict[str, Any] = {
-        "origin": origin.get("city") or origin.get("name"),
-        "destination": destination.get("city") or destination.get("name"),
+        "origin": _transport_city_name(origin),
+        "destination": _transport_city_name(destination),
         "dep_date": travel_date.isoformat(),
     }
     result = await registry.execute(
@@ -4652,7 +5230,7 @@ def _movement_stage(
     start_at: datetime,
 ) -> MovementStage:
     data = route["data"]
-    duration = int(data["duration_minutes"])
+    duration = int(data.get("duration_minutes") or 0)
     road_names = list(
         dict.fromkeys(
             step.get("road")
@@ -4660,18 +5238,33 @@ def _movement_stage(
             if step.get("road")
         )
     )
-    segment = RouteSegment(
-        coordinates=[
-            Coordinates.model_validate(point)
-            for point in data["geometry"]
-        ],
-        distance_km=data["distance_km"],
-        duration_minutes=duration,
-        road_name=" / ".join(road_names[:3]) or None,
-        toll=bool(data.get("tolls_cny")),
-        estimated=bool(data.get("estimated", False)),
-        elevation_gain_m=data.get("elevation_gain_m"),
-    )
+    route_segments: list[RouteSegment] = []
+    geometry = data.get("geometry") if isinstance(data.get("geometry"), list) else []
+    if len(geometry) >= 2:
+        try:
+            route_segments.append(
+                RouteSegment(
+                    coordinates=[Coordinates.model_validate(point) for point in geometry],
+                    distance_km=float(data.get("distance_km") or 0),
+                    duration_minutes=duration,
+                    road_name=" / ".join(road_names[:3]) or None,
+                    toll=bool(data.get("tolls_cny")),
+                    estimated=bool(data.get("estimated", False)),
+                    elevation_gain_m=data.get("elevation_gain_m"),
+                )
+            )
+        except (TypeError, ValueError):
+            route_segments = []
+    route_warnings: list[PlanWarning] = []
+    if not route_segments:
+        route_warnings.append(
+            PlanWarning(
+                code="ROUTE_GEOMETRY_UNAVAILABLE",
+                message="路线服务未返回可绘制轨迹，已保留时间与端点信息",
+                severity="warning",
+                estimated=True,
+            )
+        )
     traffic_summary = data.get("traffic_summary")
     if data.get("selected_mode") == "driving" and traffic_summary:
         if start_at.date() != date.today():
@@ -4729,10 +5322,10 @@ def _movement_stage(
         transit_legs=transit_legs,
         origin=PlaceRef.model_validate(origin),
         destination=PlaceRef.model_validate(destination),
-        route_segments=[segment],
+        route_segments=route_segments,
         planned_start=start_at,
         planned_end=start_at + timedelta(minutes=duration),
-        distance_km=data["distance_km"],
+        distance_km=float(data.get("distance_km") or 0),
         duration_minutes=duration,
         elevation_gain_m=data.get("elevation_gain_m"),
         traffic_summary=traffic_summary,
@@ -4756,6 +5349,7 @@ def _movement_stage(
             SourceRecord.model_validate(item)
             for item in route.get("sources", [])
         ],
+        warnings=route_warnings,
     )
 
 
@@ -5001,11 +5595,19 @@ def _same_place(first: dict[str, Any] | None, second: dict[str, Any] | None) -> 
     second_coordinates = second.get("coordinates")
     if not first_coordinates or not second_coordinates:
         return False
-    longitude_delta = (
-        first_coordinates["longitude"] - second_coordinates["longitude"]
-    ) * 0.87
-    latitude_delta = first_coordinates["latitude"] - second_coordinates["latitude"]
-    return (longitude_delta**2 + latitude_delta**2) ** 0.5 <= 0.02
+    try:
+        return _haversine_km(
+            RoutePoint(
+                longitude=float(first_coordinates["longitude"]),
+                latitude=float(first_coordinates["latitude"]),
+            ),
+            RoutePoint(
+                longitude=float(second_coordinates["longitude"]),
+                latitude=float(second_coordinates["latitude"]),
+            ),
+        ) <= 1.0
+    except (KeyError, TypeError, ValueError):
+        return False
 
 
 def _poi_place(item: dict[str, Any]) -> dict[str, Any]:

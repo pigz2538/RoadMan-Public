@@ -303,8 +303,12 @@ python deploy/api_smoke.py               # 运行中容器 API 冒烟
 python deploy/full_journey_acceptance.py # 完整旅程验收（建行程→规划→修改→导出）
 python evaluation/run_evals.py           # 需求理解评测（12 条场景）
 python evaluation/range_accuracy.py      # 能耗、等效续航与到达 SOC 误差基准
-python evaluation/safety_scenarios.py    # 低电量、恶劣天气、缺设施/信息与服务失败
+python evaluation/safety_scenarios.py    # 12 类低电量、异常元数据、恶劣天气与服务失败
+.\deploy\semifinal-check.ps1             # 复赛一键构建、测试、评测与证据报告
+node deploy/semifinal_evidence.mjs       # 生成 2560×1440 复赛产品/指标截图
 ```
+
+复赛专项材料见 [submission/GOAI_Boundless_Agents/semifinal/README.md](submission/GOAI_Boundless_Agents/semifinal/README.md)。续航基准明确标记为模拟传感器回放；需要审核真实道路数据时使用 `python evaluation/range_accuracy.py --input <real.json> --require-real`，模拟输入会被拒绝。
 
 真实云端智能体的浏览器验收默认不阻断离线回归；配置有效 Key 后显式开启：
 

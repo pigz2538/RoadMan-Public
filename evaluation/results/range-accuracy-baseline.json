@@ -2,12 +2,164 @@
   "dataset_id": "roadman-range-simulation-v1",
   "data_kind": "simulation_sensor_replay",
   "claim_boundary": "用于验证误差计算、SOC 连续性与评测流程，不代表真实道路续航承诺；真实车辆数据可按相同字段替换。",
+  "is_real_road_data": false,
   "metrics": {
     "sample_count": 12,
     "energy_mape_percent": 8.442,
     "energy_mae_kwh": 2.295,
+    "energy_rmse_kwh": 2.605,
+    "energy_bias_kwh": -1.962,
+    "energy_p95_absolute_error_percent": 15.707,
     "range_mape_percent": 9.302,
-    "soc_mae_percentage_points": 2.799
+    "range_p95_absolute_error_percent": 18.889,
+    "soc_mae_percentage_points": 2.799,
+    "soc_p95_error_percentage_points": 5.287
+  },
+  "condition_metrics": {
+    "以下坡和动能回收为主": {
+      "sample_count": 1,
+      "energy_mape_percent": 9.459,
+      "energy_mae_kwh": 1.4,
+      "energy_rmse_kwh": 1.4,
+      "energy_bias_kwh": 1.4,
+      "energy_p95_absolute_error_percent": 9.459,
+      "range_mape_percent": 8.642,
+      "range_p95_absolute_error_percent": 8.642,
+      "soc_mae_percentage_points": 1.707,
+      "soc_p95_error_percentage_points": 1.707
+    },
+    "低温空调与电池效率下降": {
+      "sample_count": 1,
+      "energy_mape_percent": 20.0,
+      "energy_mae_kwh": 4.5,
+      "energy_rmse_kwh": 4.5,
+      "energy_bias_kwh": -4.5,
+      "energy_p95_absolute_error_percent": 20.0,
+      "range_mape_percent": 25.0,
+      "range_p95_absolute_error_percent": 25.0,
+      "soc_mae_percentage_points": 5.488,
+      "soc_p95_error_percentage_points": 5.488
+    },
+    "城市低速与动能回收": {
+      "sample_count": 1,
+      "energy_mape_percent": 4.348,
+      "energy_mae_kwh": 0.6,
+      "energy_rmse_kwh": 0.6,
+      "energy_bias_kwh": 0.6,
+      "energy_p95_absolute_error_percent": 4.348,
+      "range_mape_percent": 4.167,
+      "range_p95_absolute_error_percent": 4.167,
+      "soc_mae_percentage_points": 0.732,
+      "soc_p95_error_percentage_points": 0.732
+    },
+    "城市高速混合": {
+      "sample_count": 1,
+      "energy_mape_percent": 3.743,
+      "energy_mae_kwh": 1.4,
+      "energy_rmse_kwh": 1.4,
+      "energy_bias_kwh": -1.4,
+      "energy_p95_absolute_error_percent": 3.743,
+      "range_mape_percent": 3.889,
+      "range_p95_absolute_error_percent": 3.889,
+      "soc_mae_percentage_points": 1.707,
+      "soc_p95_error_percentage_points": 1.707
+    },
+    "常温平路": {
+      "sample_count": 1,
+      "energy_mape_percent": 3.571,
+      "energy_mae_kwh": 0.8,
+      "energy_rmse_kwh": 0.8,
+      "energy_bias_kwh": -0.8,
+      "energy_p95_absolute_error_percent": 3.571,
+      "range_mape_percent": 3.704,
+      "range_p95_absolute_error_percent": 3.704,
+      "soc_mae_percentage_points": 0.976,
+      "soc_p95_error_percentage_points": 0.976
+    },
+    "常温高速": {
+      "sample_count": 1,
+      "energy_mape_percent": 6.087,
+      "energy_mae_kwh": 2.8,
+      "energy_rmse_kwh": 2.8,
+      "energy_bias_kwh": -2.8,
+      "energy_p95_absolute_error_percent": 6.087,
+      "range_mape_percent": 6.481,
+      "range_p95_absolute_error_percent": 6.481,
+      "soc_mae_percentage_points": 3.415,
+      "soc_p95_error_percentage_points": 3.415
+    },
+    "拥堵与频繁启停": {
+      "sample_count": 1,
+      "energy_mape_percent": 12.195,
+      "energy_mae_kwh": 1.5,
+      "energy_rmse_kwh": 1.5,
+      "energy_bias_kwh": -1.5,
+      "energy_p95_absolute_error_percent": 12.195,
+      "range_mape_percent": 13.889,
+      "range_p95_absolute_error_percent": 13.889,
+      "soc_mae_percentage_points": 1.829,
+      "soc_p95_error_percentage_points": 1.829
+    },
+    "持续降水与湿滑路面": {
+      "sample_count": 1,
+      "energy_mape_percent": 10.0,
+      "energy_mae_kwh": 3.6,
+      "energy_rmse_kwh": 3.6,
+      "energy_bias_kwh": -3.6,
+      "energy_p95_absolute_error_percent": 10.0,
+      "range_mape_percent": 11.111,
+      "range_p95_absolute_error_percent": 11.111,
+      "soc_mae_percentage_points": 4.39,
+      "soc_p95_error_percentage_points": 4.39
+    },
+    "满载与行李": {
+      "sample_count": 1,
+      "energy_mape_percent": 9.091,
+      "energy_mae_kwh": 2.7,
+      "energy_rmse_kwh": 2.7,
+      "energy_bias_kwh": -2.7,
+      "energy_p95_absolute_error_percent": 9.091,
+      "range_mape_percent": 10.0,
+      "range_p95_absolute_error_percent": 10.0,
+      "soc_mae_percentage_points": 3.293,
+      "soc_p95_error_percentage_points": 3.293
+    },
+    "累计爬升超过300米": {
+      "sample_count": 1,
+      "energy_mape_percent": 6.504,
+      "energy_mae_kwh": 2.244,
+      "energy_rmse_kwh": 2.244,
+      "energy_bias_kwh": -2.244,
+      "energy_p95_absolute_error_percent": 6.504,
+      "range_mape_percent": 6.957,
+      "range_p95_absolute_error_percent": 6.957,
+      "soc_mae_percentage_points": 2.737,
+      "soc_p95_error_percentage_points": 2.737
+    },
+    "长途混合路况": {
+      "sample_count": 1,
+      "energy_mape_percent": 7.216,
+      "energy_mae_kwh": 4.2,
+      "energy_rmse_kwh": 4.2,
+      "energy_bias_kwh": -4.2,
+      "energy_p95_absolute_error_percent": 7.216,
+      "range_mape_percent": 7.778,
+      "range_p95_absolute_error_percent": 7.778,
+      "soc_mae_percentage_points": 5.122,
+      "soc_p95_error_percentage_points": 5.122
+    },
+    "高温制冷": {
+      "sample_count": 1,
+      "energy_mape_percent": 9.091,
+      "energy_mae_kwh": 1.8,
+      "energy_rmse_kwh": 1.8,
+      "energy_bias_kwh": -1.8,
+      "energy_p95_absolute_error_percent": 9.091,
+      "range_mape_percent": 10.0,
+      "range_p95_absolute_error_percent": 10.0,
+      "soc_mae_percentage_points": 2.195,
+      "soc_p95_error_percentage_points": 2.195
+    }
   },
   "thresholds": {
     "energy_mape_percent": 12.0,
@@ -24,6 +176,8 @@
     {
       "id": "mild-flat-120",
       "condition": "常温平路",
+      "predicted_energy_kwh": 21.6,
+      "observed_energy_kwh": 22.4,
       "energy_error_percent": 3.571,
       "energy_error_kwh": 0.8,
       "soc_error_percentage_points": 0.976,
@@ -36,6 +190,8 @@
     {
       "id": "highway-240",
       "condition": "常温高速",
+      "predicted_energy_kwh": 43.2,
+      "observed_energy_kwh": 46.0,
       "energy_error_percent": 6.087,
       "energy_error_kwh": 2.8,
       "soc_error_percentage_points": 3.415,
@@ -48,6 +204,8 @@
     {
       "id": "urban-80",
       "condition": "城市低速与动能回收",
+      "predicted_energy_kwh": 14.4,
+      "observed_energy_kwh": 13.8,
       "energy_error_percent": 4.348,
       "energy_error_kwh": 0.6,
       "soc_error_percentage_points": 0.732,
@@ -60,6 +218,8 @@
     {
       "id": "mountain-160",
       "condition": "累计爬升超过300米",
+      "predicted_energy_kwh": 32.256,
+      "observed_energy_kwh": 34.5,
       "energy_error_percent": 6.504,
       "energy_error_kwh": 2.244,
       "soc_error_percentage_points": 2.737,
@@ -72,6 +232,8 @@
     {
       "id": "cold-100",
       "condition": "低温空调与电池效率下降",
+      "predicted_energy_kwh": 18.0,
+      "observed_energy_kwh": 22.5,
       "energy_error_percent": 20.0,
       "energy_error_kwh": 4.5,
       "soc_error_percentage_points": 5.488,
@@ -84,6 +246,8 @@
     {
       "id": "hot-100",
       "condition": "高温制冷",
+      "predicted_energy_kwh": 18.0,
+      "observed_energy_kwh": 19.8,
       "energy_error_percent": 9.091,
       "energy_error_kwh": 1.8,
       "soc_error_percentage_points": 2.195,
@@ -96,6 +260,8 @@
     {
       "id": "rain-180",
       "condition": "持续降水与湿滑路面",
+      "predicted_energy_kwh": 32.4,
+      "observed_energy_kwh": 36.0,
       "energy_error_percent": 10.0,
       "energy_error_kwh": 3.6,
       "soc_error_percentage_points": 4.39,
@@ -108,6 +274,8 @@
     {
       "id": "congestion-60",
       "condition": "拥堵与频繁启停",
+      "predicted_energy_kwh": 10.8,
+      "observed_energy_kwh": 12.3,
       "energy_error_percent": 12.195,
       "energy_error_kwh": 1.5,
       "soc_error_percentage_points": 1.829,
@@ -120,6 +288,8 @@
     {
       "id": "mixed-200",
       "condition": "城市高速混合",
+      "predicted_energy_kwh": 36.0,
+      "observed_energy_kwh": 37.4,
       "energy_error_percent": 3.743,
       "energy_error_kwh": 1.4,
       "soc_error_percentage_points": 1.707,
@@ -132,6 +302,8 @@
     {
       "id": "full-load-150",
       "condition": "满载与行李",
+      "predicted_energy_kwh": 27.0,
+      "observed_energy_kwh": 29.7,
       "energy_error_percent": 9.091,
       "energy_error_kwh": 2.7,
       "soc_error_percentage_points": 3.293,
@@ -144,6 +316,8 @@
     {
       "id": "downhill-90",
       "condition": "以下坡和动能回收为主",
+      "predicted_energy_kwh": 16.2,
+      "observed_energy_kwh": 14.8,
       "energy_error_percent": 9.459,
       "energy_error_kwh": 1.4,
       "soc_error_percentage_points": 1.707,
@@ -156,6 +330,8 @@
     {
       "id": "long-mixed-300",
       "condition": "长途混合路况",
+      "predicted_energy_kwh": 54.0,
+      "observed_energy_kwh": 58.2,
       "energy_error_percent": 7.216,
       "energy_error_kwh": 4.2,
       "soc_error_percentage_points": 5.122,

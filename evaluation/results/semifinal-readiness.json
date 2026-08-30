@@ -1,0 +1,68 @@
+{
+  "generated_at": "2026-08-29T09:34:17.922016+00:00",
+  "git_commit": "4fabe8fe04466daa6e4a1e3ad97c6e303fe881a4",
+  "runtime": {
+    "python": "3.11.15",
+    "platform": "Linux-6.6.87.2-microsoft-standard-WSL2-x86_64-with-glibc2.41"
+  },
+  "checks": {
+    "range_baseline_passed": true,
+    "range_claim_labeled_non_real": true,
+    "degradation_matrix_passed": true,
+    "all_required_files_present": true,
+    "live_probe_passed_when_requested": true
+  },
+  "passed": true,
+  "range_evaluation": {
+    "dataset_id": "roadman-range-simulation-v1",
+    "data_kind": "simulation_sensor_replay",
+    "claim_boundary": "用于验证误差计算、SOC 连续性与评测流程，不代表真实道路续航承诺；真实车辆数据可按相同字段替换。",
+    "metrics": {
+      "sample_count": 12,
+      "energy_mape_percent": 8.442,
+      "energy_mae_kwh": 2.295,
+      "energy_rmse_kwh": 2.605,
+      "energy_bias_kwh": -1.962,
+      "energy_p95_absolute_error_percent": 15.707,
+      "range_mape_percent": 9.302,
+      "range_p95_absolute_error_percent": 18.889,
+      "soc_mae_percentage_points": 2.799,
+      "soc_p95_error_percentage_points": 5.287
+    },
+    "thresholds": {
+      "energy_mape_percent": 12.0,
+      "range_mape_percent": 12.0,
+      "soc_mae_percentage_points": 5.0
+    }
+  },
+  "degradation_evaluation": {
+    "dataset_id": "roadman-safety-scenarios-v2",
+    "sample_count": 12,
+    "task_completion_rate": 1.0,
+    "route_executability_rate": 0.9167,
+    "degradation_handled_rate": 1.0,
+    "average_latency_ms": 0.261,
+    "p95_latency_ms": 0.512,
+    "passed": true
+  },
+  "source_test_inventory": {
+    "backend_and_evaluation_test_functions": 142,
+    "frontend_test_declarations": 12,
+    "note": "源码静态计数仅用于规模索引，最终通过数以测试命令输出为准。"
+  },
+  "required_file_checks": {
+    "README.md": true,
+    "PROJECT.md": true,
+    "docker-compose.yml": true,
+    "docs/safety-and-data-boundary.md": true,
+    "deploy/api_smoke.py": true,
+    "deploy/full_journey_acceptance.py": true,
+    "evaluation/range_accuracy.py": true,
+    "evaluation/safety_scenarios.py": true
+  },
+  "live_probe": {
+    "requested": false,
+    "available": null,
+    "note": "未要求在线探测"
+  }
+}

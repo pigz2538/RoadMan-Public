@@ -1,0 +1,26 @@
+{
+  "base_url": "http://127.0.0.1:8000",
+  "trip_id": "trip_ac4d9884823a",
+  "cases": [
+    {
+      "index": 8,
+      "name": "自然语言替换景点",
+      "status": "failed",
+      "error": "deleted activity still appears after replan: 鼓浪屿",
+      "seconds": 325.77
+    },
+    {
+      "index": 9,
+      "name": "批量新增后删除再统一重排",
+      "status": "passed",
+      "seconds": 323.65
+    },
+    {
+      "index": 10,
+      "name": "自然语言新增景点",
+      "status": "passed",
+      "seconds": 285.71
+    }
+  ],
+  "status": "failed"
+}

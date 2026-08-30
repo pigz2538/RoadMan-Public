@@ -1,0 +1,62 @@
+{
+  "generated_at": "2026-08-30T06:49:21.179155+08:00",
+  "base_url": "http://127.0.0.1:8000",
+  "scenario_count": 1,
+  "full_journey_count": 1,
+  "passed": 0,
+  "failed": 1,
+  "duration_seconds": 383.85,
+  "results": [
+    {
+      "id": "v3-xiamen-ferry-family",
+      "input": "9月18到20号一家三口从武汉去厦门，飞机高铁你帮我比较一下，鼓浪屿和环岛路想去，海上那段坐轮渡，别给我排凌晨的活动，酒店尽量只住一家。",
+      "full_requested": true,
+      "preflight": {
+        "ready": false,
+        "confirmation_required": true,
+        "semantic_checked": true,
+        "issues": [],
+        "extracted": {
+          "start_date": "2026-09-18",
+          "end_date": "2026-09-20",
+          "cross_sea_required": true,
+          "cross_sea_mode": "ferry",
+          "origin_name": "武汉",
+          "destination_name": "厦门",
+          "destination_names": [
+            "厦门",
+            "鼓浪屿",
+            "环岛路"
+          ],
+          "destination_scope": "city",
+          "travelers": 3,
+          "preferences": [
+            "尽量只住一家酒店",
+            "不安排凌晨活动"
+          ],
+          "transport_modes": [
+            "flight",
+            "train",
+            "ferry"
+          ],
+          "past_return_requested": false,
+          "stay_only_at_destination": false,
+          "must_visit_names": [
+            "鼓浪屿",
+            "环岛路"
+          ],
+          "travel_intents": [],
+          "special_events": [],
+          "time_window_minutes": null,
+          "_intent_status": "ok",
+          "_intent_source": "deepseek",
+          "_source_raw_text": "9月18到20号一家三口从武汉去厦门，飞机高铁你帮我比较一下，鼓浪屿和环岛路想去，海上那段坐轮渡，别给我排凌晨的活动，酒店尽量只住一家。"
+        }
+      },
+      "trip_id": "trip_cf9e0aa40e54",
+      "passed": false,
+      "error": "status=failed: {\"passed\": false, \"issues\": [{\"code\": \"PLANNING_EXECUTION_FAILED\", \"severity\": \"blocker\", \"description\": \"规划执行中断：6 validation errors for DayPlan\\nstages.1.route_segments.0.coordinates\\n  Field required [type=missing, input_value={}, input_type=dict]\\n    For further information visit https://errors.pydantic.dev/2.13/v/missing\\nstages.1.route_segments.0.di\"}]}",
+      "latency_ms": 383846.62
+    }
+  ]
+}

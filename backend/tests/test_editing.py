@@ -156,6 +156,10 @@ async def test_replacing_attraction_recomputes_both_adjacent_routes():
         "stage_out",
         "stage_back",
     ]
+    assert any(
+        item.get("name") == "旧景点"
+        for item in state.get("excluded_places", [])
+    )
 
 
 def test_semantic_edit_adds_meal_near_selected_stage_without_activity_selection():

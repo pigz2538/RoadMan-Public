@@ -1,0 +1,125 @@
+{
+  "generated_at": "2026-08-29T23:05:09.177437+08:00",
+  "base_url": "http://127.0.0.1:8000",
+  "scenario_count": 1,
+  "full_journey_count": 1,
+  "passed": 1,
+  "failed": 0,
+  "duration_seconds": 407.29,
+  "results": [
+    {
+      "id": "harbin-six-day-roadtrip",
+      "input": "武汉到哈尔滨情侣自驾，6天，旅游，下周一出发，路上别让我俩一天硬开十几个小时",
+      "full_requested": true,
+      "preflight": {
+        "ready": false,
+        "confirmation_required": true,
+        "semantic_checked": true,
+        "issues": [],
+        "extracted": {
+          "start_date": "2026-08-31",
+          "origin_name": "武汉",
+          "destination_name": "哈尔滨",
+          "destination_names": [
+            "哈尔滨"
+          ],
+          "destination_scope": "city",
+          "travel_intents": [
+            "旅游"
+          ],
+          "travelers": 2,
+          "max_days": 6,
+          "preferences": [
+            "每日驾驶时间不宜过长"
+          ],
+          "transport_modes": [
+            "driving"
+          ],
+          "cross_sea_required": false,
+          "past_return_requested": false,
+          "stay_only_at_destination": false,
+          "cross_sea_mode": null,
+          "special_events": [],
+          "must_visit_names": [],
+          "time_window_minutes": null,
+          "_intent_status": "ok",
+          "_intent_source": "deepseek",
+          "_source_raw_text": "武汉到哈尔滨情侣自驾，6天，旅游，下周一出发，路上别让我俩一天硬开十几个小时",
+          "end_date": "2026-09-05"
+        }
+      },
+      "trip_id": "trip_ae1b835ba32c",
+      "progress": [
+        {
+          "value": 0,
+          "node": "queued"
+        },
+        {
+          "value": 5,
+          "node": "load_context"
+        },
+        {
+          "value": 15,
+          "node": "extract_trip_request"
+        },
+        {
+          "value": 64,
+          "node": "split_into_days"
+        },
+        {
+          "value": 69,
+          "node": "discover_tourism"
+        },
+        {
+          "value": 78,
+          "node": "build_stages"
+        },
+        {
+          "value": 85,
+          "node": "discover_services"
+        },
+        {
+          "value": 86,
+          "node": "sample_weather"
+        },
+        {
+          "value": 89,
+          "node": "review_tourism_suitability"
+        },
+        {
+          "value": 90,
+          "node": "enrich_deep_drive"
+        },
+        {
+          "value": 91,
+          "node": "schedule_tourism"
+        },
+        {
+          "value": 100,
+          "node": "persist_trip"
+        }
+      ],
+      "verification": {
+        "passed": true,
+        "issues": [
+          {
+            "code": "WEATHER_DEGRADED",
+            "severity": "warning",
+            "description": "返回住宿或目的地核心区 当前天气数据暂不可用，已按基础风险继续规划"
+          },
+          {
+            "code": "RETURN_WINDOW_FLEXIBLE",
+            "severity": "warning",
+            "description": "返程预计略晚于目标时间，但仍在半天弹性范围内；可按实际路况灵活抵达。"
+          }
+        ],
+        "auto_repair_attempts": 0,
+        "auto_repair_exhausted": false
+      },
+      "html_export_bytes": 3860830,
+      "failures": [],
+      "passed": true,
+      "latency_ms": 407221.2
+    }
+  ]
+}

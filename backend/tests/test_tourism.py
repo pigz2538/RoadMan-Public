@@ -2,6 +2,7 @@ import json
 
 import pytest
 
+from app.domain.models import SkillResult, SourceRecord
 from app.planning.recommendations import plan_attraction_coverage, rank_tourism_candidates
 from app.planning.tourism import (
     activity_checks,
@@ -147,6 +148,89 @@ def test_tourism_scheduler_preserves_explicit_required_attraction():
     )
     assert attraction["place"]["name"] == "麓湖CPI"
     assert attraction["required"] is True
+
+
+def test_existing_provider_candidate_is_promoted_to_required_alias():
+    from app.planning.graph import _mark_existing_required_candidates
+
+    attractions = [
+        {
+            "place": {
+                "name": "麓湖CPI岛(西门)",
+                "city": "成都市",
+                "coordinates": {"longitude": 104.04, "latitude": 30.46},
+            },
+            "score": 45,
+        }
+    ]
+
+    unresolved = _mark_existing_required_candidates(
+        attractions,
+        [{"name": "麓湖CPI岛"}],
+    )
+
+    assert unresolved == []
+    assert attractions[0]["user_required"] is True
+    assert attractions[0]["required_name"] == "麓湖CPI岛"
+    assert attractions[0]["place"]["name"] == "麓湖CPI岛"
+
+
+def test_directed_required_lookup_adds_new_candidate_without_prior_pool_entry():
+    from app.planning.graph import _merge_required_lookup_result
+
+    attractions = []
+    result = SkillResult(
+        success=True,
+        provider="amap",
+        data={
+            "items": [
+                {
+                    "id": "required-1",
+                    "name": "麓湖CPI岛",
+                    "city": "成都市",
+                    "address": "天府新区",
+                    "location": "104.041,30.462",
+                    "photos": ["https://example.test/cpi.jpg"],
+                }
+            ]
+        },
+        sources=[SourceRecord(provider="高德地图", title="地点搜索")],
+    )
+
+    merged = _merge_required_lookup_result(
+        attractions,
+        {"name": "麓湖CPI"},
+        result,
+        {"name": "成都", "city": "成都市"},
+    )
+
+    assert merged is True
+    assert len(attractions) == 1
+    assert attractions[0]["place"]["name"] == "麓湖CPI"
+    assert attractions[0]["place"]["coordinates"] == {
+        "longitude": 104.041,
+        "latitude": 30.462,
+    }
+    assert attractions[0]["user_required"] is True
+
+
+def test_verifier_blocks_silent_omission_of_required_attraction():
+    issues = verify_tourism_plan(
+        [{"date": "2026-08-23", "activities": [], "stages": []}],
+        {
+            "attractions": [
+                {
+                    "place": {"name": "成都航天博目电子科技有限公司"},
+                    "required_name": "成都航天博目电子科技有限公司",
+                    "user_required": True,
+                }
+            ],
+            "hotels": [],
+            "meals": [],
+        },
+    )
+
+    assert "REQUIRED_PLACES_UNSCHEDULED" in {item["code"] for item in issues}
 
 
 def test_primary_hotel_prefers_city_base_over_airport_or_station_property():

@@ -38,6 +38,14 @@ class EmptyCollectionAdapter(SkillAdapter):
         return {"status": "ready"}
 
 
+class UnconfiguredKeyedAdapter(CountingAdapter):
+    name = "test.unconfigured-keyed"
+
+    def __init__(self):
+        super().__init__()
+        self.api_key = ""
+
+
 @pytest.mark.asyncio
 async def test_registry_caches_and_audits():
     audits = []
@@ -87,6 +95,27 @@ async def test_registry_does_not_cache_empty_provider_collections():
     assert second.success is True
     assert first.cache_hit is False
     assert second.cache_hit is False
+
+
+@pytest.mark.asyncio
+async def test_registry_does_not_read_stale_cache_for_unconfigured_keyed_adapter():
+    adapter = UnconfiguredKeyedAdapter()
+    cache = MemorySkillCache()
+    registry = SkillRegistry(cache=cache)
+    registry.register(adapter)
+    key = registry._cache_key(adapter.name, adapter.version, {"query": "cached"})
+    await cache.set(
+        key,
+        SkillResult(success=True, provider="stale", data={"cached": True}),
+        60,
+    )
+
+    result = await registry.execute(adapter.name, {"query": "cached"})
+
+    assert result.cache_hit is False
+    assert result.success is True
+    assert result.provider == "test"
+    assert adapter.calls == 1
 
 
 class FakeRedis:

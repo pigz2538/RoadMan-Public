@@ -1,0 +1,60 @@
+{
+  "generated_at": "2026-08-30T02:41:59.321845+08:00",
+  "base_url": "http://127.0.0.1:8000",
+  "scenario_count": 1,
+  "full_journey_count": 1,
+  "passed": 0,
+  "failed": 1,
+  "duration_seconds": 425.83,
+  "results": [
+    {
+      "id": "v2-qinghai-stars-weather",
+      "input": "9月15日到9月18日想去青海看星星，带对象，从武汉出发，白天别排太满，晚上拍银河但不想看完还开长途。你把天气、海拔、月亮和高原休息一起考虑，阴天给我一个不扫兴的备选。",
+      "full_requested": true,
+      "preflight": {
+        "ready": false,
+        "confirmation_required": true,
+        "semantic_checked": true,
+        "issues": [],
+        "extracted": {
+          "start_date": "2026-09-15",
+          "end_date": "2026-09-18",
+          "origin_name": "武汉",
+          "destination_name": "青海",
+          "destination_names": [
+            "青海"
+          ],
+          "destination_scope": "province",
+          "travel_intents": [
+            "看星星",
+            "拍银河"
+          ],
+          "travelers": 2,
+          "preferences": [
+            "白天行程不要太满",
+            "晚上拍摄后不长途驾驶",
+            "考虑天气、海拔、月亮和高原休息",
+            "阴天时提供备选方案"
+          ],
+          "special_events": [
+            "银河"
+          ],
+          "cross_sea_required": false,
+          "past_return_requested": false,
+          "stay_only_at_destination": false,
+          "cross_sea_mode": null,
+          "must_visit_names": [],
+          "transport_modes": [],
+          "time_window_minutes": null,
+          "_intent_status": "ok",
+          "_intent_source": "deepseek",
+          "_source_raw_text": "9月15日到9月18日想去青海看星星，带对象，从武汉出发，白天别排太满，晚上拍银河但不想看完还开长途。你把天气、海拔、月亮和高原休息一起考虑，阴天给我一个不扫兴的备选。"
+        }
+      },
+      "trip_id": "trip_2afad143e05f",
+      "passed": false,
+      "error": "status=failed: {\"passed\": false, \"issues\": [{\"code\": \"DRIVING_STAGE_CALENDAR_MISMATCH\", \"severity\": \"blocker\", \"description\": \"返程（跨天第1段） · 第 1/4 段 已跨出所属日期，需减少当日驾驶或提前安排过夜\"}, {\"code\": \"DRIVING_STAGE_CALENDAR_MISMATCH\", \"severity\": \"blocker\", \"description\": \"返程（跨天第1段） · 第 2/4 段 已跨出所属日期，需减少当日驾驶或提前安排过夜\"}, {\"code\": \"DRIVING_STAGE_CALENDAR_MISMATCH\", \"severity\": \"blocker\", \"description\": \"返程（跨天第1段） · 第 3/4 段 已跨出所属日期，需减少当日驾驶或提前安排过夜\"}, {\"code\": \"DRIVING_STAGE_CALENDAR_MISMATCH\", \"severity\": \"blocker\", \"description\": \"返程（跨天第1段） · 第 4/4 段 已跨出所属日期，需减少当日驾驶或提前安排过夜\"}, {\"code\": \"DRIVING_STAGE_CALENDAR_MISMATCH\", \"severity\": \"blocker\", \"description\": \"返程（跨天第2段） · 第 4/4 段 已跨出所属日期，需减少当日驾驶或提前安排过夜\"}, {\"code\": \"ROUTE_DISCONTINUITY\", \"severity\": \"blocker\", \"description\": \"阶段“城市出发（跨天第2段） · 第 4/4 段”终点与“返程（跨天第1段） · 第 1/4 段”起点不连续\"}, {\"code\": \"ROUTE_DISCONTINUITY\", \"severity\": \"blocker\", \"description\": \"阶段“返程（跨天第1段） · 第 4/4 段”终点与“城市出发（跨天第3段）”起点不连续\"}, {\"code\": \"ROUTE_DISCONTINUITY\", \"severity\": \"blocker\", \"description\": \"阶段“城市出发（跨天第3段）”终点与“返程（跨天第2段） · 第 1/4 段”起点不连续\"}, {\"code\": \"WEATHER_DEGRADED\", \"severity\": \"warning\", \"description\": \"城市出发（跨天第1段） · 第 1/4 段 当前天气数据暂不可用，已按基础风险继续规划\"}, {\"code\": \"WEATHER_DEGRADED\", \"severity\": \"warning\", \"description\": \"城市出发（跨天第1段） · 第 2/4 段 当前天气数据暂不可用，已按基础风险继续规划\"}, {\"code\": \"WEATHER_DEGRADED\", \"severity\": \"warning\", \"description\": \"城市出发（跨天第1段） · 第 3/4 段 当前天气数据暂不可用，已按基础风险继续规划\"}, {\"code\": \"WEATHER_DEGRADED\", \"severity\": \"warning\", \"description\": \"城市出发（跨天第1段） · 第 4/4 段 当前天气数据暂不可用，已按基础风险继续规划\"}, {\"code\": \"WEATHER_DEGRADED\", \"severity\": \"warning\", \"description\": \"城市出发（跨天第2段） · 第 1/4 段 当前天气数据暂不可用，已按基础风险继续规划\"}, {\"code\": \"WEATHER_DEGRADED\", \"severity\": \"warning\", \"description\": \"城市出发（跨天第2段） · 第 2/4 段 当前天气数据暂不可用，已按基础风险继续规划\"}, {\"code\": \"WEATHER_DEGRADED\", \"severity\": \"warning\", \"description\": \"城",
+      "latency_ms": 425828.72
+    }
+  ]
+}

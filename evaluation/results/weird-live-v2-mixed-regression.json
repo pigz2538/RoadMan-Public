@@ -1,0 +1,61 @@
+{
+  "generated_at": "2026-08-30T02:33:18.134610+08:00",
+  "base_url": "http://127.0.0.1:8000",
+  "scenario_count": 1,
+  "full_journey_count": 1,
+  "passed": 0,
+  "failed": 1,
+  "duration_seconds": 526.14,
+  "results": [
+    {
+      "id": "v2-mixed-english-changsha",
+      "input": "Next Tue 到 Thu 我和对象从武汉飞长沙，想慢慢逛橘子洲和省博，Sunday night 不用回，别把英文日期理解错，也不要安排红眼后马上爬山。",
+      "full_requested": true,
+      "preflight": {
+        "ready": false,
+        "confirmation_required": true,
+        "semantic_checked": true,
+        "issues": [],
+        "extracted": {
+          "start_date": "2026-09-01",
+          "end_date": "2026-09-03",
+          "origin_name": "武汉",
+          "destination_name": "长沙",
+          "destination_names": [
+            "长沙"
+          ],
+          "destination_scope": "city",
+          "travel_intents": [
+            "慢节奏游览",
+            "悠闲观光"
+          ],
+          "travelers": 2,
+          "preferences": [
+            "慢慢逛",
+            "不安排红眼后马上爬山"
+          ],
+          "transport_modes": [
+            "flight"
+          ],
+          "cross_sea_required": false,
+          "past_return_requested": false,
+          "stay_only_at_destination": false,
+          "must_visit_names": [
+            "橘子洲",
+            "省博"
+          ],
+          "cross_sea_mode": null,
+          "special_events": [],
+          "time_window_minutes": null,
+          "_intent_status": "ok",
+          "_intent_source": "deepseek",
+          "_source_raw_text": "Next Tue 到 Thu 我和对象从武汉飞长沙，想慢慢逛橘子洲和省博，Sunday night 不用回，别把英文日期理解错，也不要安排红眼后马上爬山。"
+        }
+      },
+      "trip_id": "trip_badac738b0ef",
+      "passed": false,
+      "error": "status=failed: {\"passed\": false, \"issues\": [{\"code\": \"ROUTE_NOT_CLOSED\", \"severity\": \"blocker\", \"description\": \"行程终点未回到整体出发点，路线尚未形成闭环\"}, {\"code\": \"WEATHER_DEGRADED\", \"severity\": \"warning\", \"description\": \"城市出发 当前天气数据暂不可用，已按基础风险继续规划\"}, {\"code\": \"WEATHER_DEGRADED\", \"severity\": \"warning\", \"description\": \"入住酒店接驳 当前天气数据暂不可用，已按基础风险继续规划\"}, {\"code\": \"WEATHER_DEGRADED\", \"severity\": \"warning\", \"description\": \"公共交通前往景点 当前天气数据暂不可用，已按基础风险继续规划\"}, {\"code\": \"WEATHER_DEGRADED\", \"severity\": \"warning\", \"description\": \"返回住宿或目的地核心区 当前天气数据暂不可用，已按基础风险继续规划\"}, {\"code\": \"WEATHER_DEGRADED\", \"severity\": \"warning\", \"description\": \"骑行游览接驳 当前天气数据暂不可用，已按基础风险继续规划\"}, {\"code\": \"WEATHER_DEGRADED\", \"severity\": \"warning\", \"description\": \"返程接驳 当前天气数据暂不可用，已按基础风险继续规划\"}, {\"code\": \"WEATHER_DEGRADED\", \"severity\": \"warning\", \"description\": \"返程 · 第 1/2 段 当前天气数据暂不可用，已按基础风险继续规划\"}, {\"code\": \"WEATHER_DEGRADED\", \"severity\": \"warning\", \"description\": \"返程 · 第 2/2 段 当前天气数据暂不可用，已按基础风险继续规划\"}, {\"code\": \"DESTINATION_HIGHLIGHTS_UNCOVERED\", \"severity\": \"warning\", \"description\": \"目的地研究标记的代表性景点未全部进入当前可执行时间窗：坡子街、坡子街(公交站)、坡子街派出所、坡子街美食城、天心阁、太平巷、太平街、太平街牌坊；可延长天数、减少停留或在编辑面板中加入。\"}], \"auto_repair_attempts\": 4, \"auto_repair_exhausted\": true}",
+      "latency_ms": 526135.25
+    }
+  ]
+}

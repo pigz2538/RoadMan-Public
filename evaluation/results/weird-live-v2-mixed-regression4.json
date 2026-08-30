@@ -1,0 +1,124 @@
+{
+  "generated_at": "2026-08-30T04:41:19.480711+08:00",
+  "base_url": "http://127.0.0.1:8000",
+  "scenario_count": 1,
+  "full_journey_count": 1,
+  "passed": 1,
+  "failed": 0,
+  "duration_seconds": 368.14,
+  "results": [
+    {
+      "id": "v2-mixed-english-changsha",
+      "input": "Next Tue 到 Thu 我和对象从武汉飞长沙，想慢慢逛橘子洲和省博，Sunday night 不用回，别把英文日期理解错，也不要安排红眼后马上爬山。",
+      "full_requested": true,
+      "preflight": {
+        "ready": false,
+        "confirmation_required": true,
+        "semantic_checked": true,
+        "issues": [],
+        "extracted": {
+          "start_date": "2026-09-01",
+          "end_date": "2026-09-03",
+          "origin_name": "武汉",
+          "destination_name": "长沙",
+          "destination_names": [
+            "长沙"
+          ],
+          "destination_scope": "city",
+          "travel_intents": [
+            "休闲慢游",
+            "人文历史"
+          ],
+          "travelers": 2,
+          "preferences": [
+            "休闲慢节奏",
+            "避免红眼后立即爬山"
+          ],
+          "transport_modes": [
+            "flight"
+          ],
+          "cross_sea_required": false,
+          "past_return_requested": false,
+          "stay_only_at_destination": false,
+          "must_visit_names": [
+            "橘子洲",
+            "省博"
+          ],
+          "cross_sea_mode": null,
+          "special_events": [],
+          "time_window_minutes": null,
+          "_intent_status": "ok",
+          "_intent_source": "deepseek",
+          "_source_raw_text": "Next Tue 到 Thu 我和对象从武汉飞长沙，想慢慢逛橘子洲和省博，Sunday night 不用回，别把英文日期理解错，也不要安排红眼后马上爬山。"
+        }
+      },
+      "trip_id": "trip_44e2072db62e",
+      "progress": [
+        {
+          "value": 0,
+          "node": "queued"
+        },
+        {
+          "value": 5,
+          "node": "load_context"
+        },
+        {
+          "value": 28,
+          "node": "validate_required_fields"
+        },
+        {
+          "value": 64,
+          "node": "split_into_days"
+        },
+        {
+          "value": 69,
+          "node": "discover_tourism"
+        },
+        {
+          "value": 72,
+          "node": "build_local_routes"
+        },
+        {
+          "value": 78,
+          "node": "build_stages"
+        },
+        {
+          "value": 85,
+          "node": "discover_services"
+        },
+        {
+          "value": 86,
+          "node": "sample_weather"
+        },
+        {
+          "value": 90,
+          "node": "enrich_deep_drive"
+        },
+        {
+          "value": 95,
+          "node": "verify_plan"
+        },
+        {
+          "value": 100,
+          "node": "persist_trip"
+        }
+      ],
+      "verification": {
+        "passed": true,
+        "issues": [
+          {
+            "code": "DESTINATION_HIGHLIGHTS_UNCOVERED",
+            "severity": "warning",
+            "description": "目的地研究标记的代表性景点未全部进入当前可执行时间窗：坡子街、坡子街(公交站)、坡子街派出所、坡子街美食城、天心阁、太平巷、太平街、太平街牌坊；可延长天数、减少停留或在编辑面板中加入。"
+          }
+        ],
+        "auto_repair_attempts": 0,
+        "auto_repair_exhausted": false
+      },
+      "html_export_bytes": 3212432,
+      "failures": [],
+      "passed": true,
+      "latency_ms": 368137.82
+    }
+  ]
+}

@@ -1,7 +1,12 @@
+from copy import deepcopy
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from app.planning.deep_drive import enrich_deep_drive_plan, verify_deep_drive_plan
+from app.planning.deep_drive import (
+    enrich_deep_drive_plan,
+    normalize_plan_calendar,
+    verify_deep_drive_plan,
+)
 
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
@@ -93,7 +98,7 @@ def test_vehicle_weather_and_schedule_agents_insert_required_stops_and_risks():
     assert stage["energy_estimate"]["unit"] == "kWh"
     assert stage["energy_estimate"]["estimated"] is True
     assert len(driving_stages) >= 2
-    assert all(item["duration_minutes"] <= 120 for item in driving_stages)
+    assert all(item["route_segments"][0]["duration_minutes"] <= 120 for item in driving_stages)
     assert {"charging", "meal"} <= {
         item["type"] for item in enriched[0]["activities"]
     }
@@ -108,8 +113,62 @@ def test_vehicle_weather_and_schedule_agents_insert_required_stops_and_risks():
         == estimates[index + 1]["starting_percent"]
         for index in range(len(estimates) - 1)
     )
-    assert sum(item["replenished_amount"] is not None for item in estimates) == 1
+    assert sum(item["replenished_amount"] is not None for item in estimates) >= 1
     assert verify_deep_drive_plan(enriched, _vehicle(), 120) == []
+
+
+def test_nine_hour_ev_leg_is_split_before_soc_estimation_and_can_charge_repeatedly():
+    stage = deepcopy(_stage())
+    stage["title"] = "武汉至哈尔滨长途段"
+    stage["distance_km"] = 900
+    stage["duration_minutes"] = 540
+    stage["elevation_gain_m"] = 0
+    stage["planned_start"] = datetime(2026, 8, 31, 8, 0, tzinfo=SHANGHAI).isoformat()
+    stage["planned_end"] = datetime(2026, 8, 31, 17, 0, tzinfo=SHANGHAI).isoformat()
+    stage["route_segments"][0].update(distance_km=900, duration_minutes=540)
+    plans = [
+        {
+            "id": "day_1",
+            "day_index": 1,
+            "date": "2026-08-31",
+            "title": "第 1 天",
+            "stages": [stage],
+            "activities": [],
+            "items": [],
+        }
+    ]
+    vehicle = {
+        **_vehicle(),
+        "current_energy_percent": 80,
+        "safe_energy_reserve_percent": 15,
+    }
+
+    enriched, _ = enrich_deep_drive_plan(plans, vehicle, {}, 120)
+    pieces = enriched[0]["stages"]
+    estimates = [item["energy_estimate"] for item in pieces]
+
+    assert len(pieces) == 5
+    assert all(item["route_segments"][0]["duration_minutes"] <= 120 for item in pieces)
+    assert all(item["consumed_percent"] <= 100 for item in estimates)
+    assert sum(item["replenished_amount"] is not None for item in estimates) >= 2
+    assert all(0 <= item["remaining_percent"] <= 100 for item in estimates)
+
+
+def test_verifier_rejects_driving_piece_that_spills_into_next_calendar_day():
+    stage = deepcopy(_stage())
+    stage["planned_start"] = datetime(2026, 8, 31, 23, 0, tzinfo=SHANGHAI).isoformat()
+    stage["planned_end"] = datetime(2026, 9, 1, 3, 0, tzinfo=SHANGHAI).isoformat()
+    plan = {
+        "id": "day_1",
+        "day_index": 1,
+        "date": "2026-08-31",
+        "stages": [stage],
+        "activities": [],
+    }
+
+    issues = verify_deep_drive_plan([plan], _vehicle(), 120)
+
+    assert "DRIVING_STAGE_CALENDAR_MISMATCH" in {item["code"] for item in issues}
 
 
 def test_measured_charge_energy_updates_soc_without_fixed_reset():
@@ -175,6 +234,113 @@ def test_charger_power_and_duration_drive_replenishment_estimate():
     assert estimate["replenishment_minutes"] == 30
     assert estimate["replenished_amount"] == 22.5
     assert estimate["remaining_percent"] == 53.1
+
+
+def test_reported_charge_is_capped_by_battery_headroom():
+    stage = _stage()
+    stage["distance_km"] = 100
+    stage["duration_minutes"] = 60
+    stage["elevation_gain_m"] = 0
+    stage["planned_end"] = datetime(2026, 8, 1, 10, 0, tzinfo=SHANGHAI).isoformat()
+    stage["route_segments"][0].update(distance_km=100, duration_minutes=60)
+    plans = [{"id": "day_1", "day_index": 1, "date": "2026-08-01", "title": "第 1 天", "stages": [stage], "activities": [], "items": []}]
+    charger = {
+        **_place("异常超量上报充电站", 115.15),
+        "actual_energy_added_kwh": 500,
+        "charging_power_kw": 180,
+    }
+    vehicle = {
+        **_vehicle(),
+        "current_energy_percent": 40,
+        "battery_kwh": 80,
+        "consumption_per_100km": 20,
+        "safe_energy_reserve_percent": 50,
+        "max_charge_kw": 120,
+    }
+
+    enriched, _ = enrich_deep_drive_plan(
+        plans, vehicle, {"stage_long": {"charging": [charger]}}, 120
+    )
+    estimate = enriched[0]["stages"][0]["energy_estimate"]
+
+    assert estimate["after_replenishment_percent"] == 100.0
+    assert estimate["replenished_amount"] < 80.0
+    assert estimate["remaining_percent"] < 100.0
+
+
+def test_station_power_is_limited_by_vehicle_and_invalid_metadata_degrades():
+    stage = _stage()
+    stage["distance_km"] = 100
+    stage["duration_minutes"] = 60
+    stage["elevation_gain_m"] = 0
+    stage["planned_end"] = datetime(2026, 8, 1, 10, 0, tzinfo=SHANGHAI).isoformat()
+    stage["route_segments"][0].update(distance_km=100, duration_minutes=60)
+    plans = [{"id": "day_1", "day_index": 1, "date": "2026-08-01", "title": "第 1 天", "stages": [stage], "activities": [], "items": []}]
+    vehicle = {
+        **_vehicle(),
+        "current_energy_percent": 40,
+        "battery_kwh": 80,
+        "consumption_per_100km": 20,
+        "safe_energy_reserve_percent": 50,
+        "max_charge_kw": 90,
+    }
+    fast_charger = {
+        **_place("超充站", 115.15),
+        "charging_power_kw": 350,
+        "planned_charge_minutes": 10,
+    }
+
+    enriched, _ = enrich_deep_drive_plan(
+        plans, vehicle, {"stage_long": {"charging": [fast_charger]}}, 120
+    )
+    estimate = enriched[0]["stages"][0]["energy_estimate"]
+    assert estimate["charging_power_kw"] == 90.0
+    assert estimate["replenished_amount"] == 13.5
+
+    invalid_charger = {
+        **_place("元数据异常充电站", 115.15),
+        "charging_power_kw": 0,
+        "actual_energy_added_kwh": -30,
+        "planned_charge_minutes": "invalid",
+    }
+    degraded, warnings = enrich_deep_drive_plan(
+        plans, vehicle, {"stage_long": {"charging": [invalid_charger]}}, 120
+    )
+    degraded_estimate = degraded[0]["stages"][0]["energy_estimate"]
+    assert degraded_estimate["calculation_basis"] == "conservative_fallback"
+    assert degraded_estimate["charging_power_kw"] == 60.0
+    assert degraded_estimate["replenished_amount"] > 0
+    assert any(item["code"] == "CHARGING_POWER_ESTIMATED" for item in warnings)
+
+
+def test_measured_fuel_amount_updates_remaining_range_without_fixed_reset():
+    stage = _stage()
+    stage["distance_km"] = 260
+    stage["duration_minutes"] = 180
+    stage["elevation_gain_m"] = 0
+    stage["planned_end"] = datetime(2026, 8, 1, 12, 0, tzinfo=SHANGHAI).isoformat()
+    stage["route_segments"][0].update(distance_km=260, duration_minutes=180)
+    plans = [{"id": "day_1", "day_index": 1, "date": "2026-08-01", "title": "第 1 天", "stages": [stage], "activities": [], "items": []}]
+    vehicle = {
+        "power_type": "fuel",
+        "current_energy_percent": 35,
+        "rated_range_km": 650,
+        "consumption_per_100km": 7.5,
+        "safe_energy_reserve_percent": 20,
+    }
+    station = {**_place("实测加油站", 115.15), "actual_fuel_added_liters": 18}
+    enriched, _ = enrich_deep_drive_plan(
+        plans, vehicle, {"stage_long": {"fueling": [station]}}, 120
+    )
+    estimates = [item["energy_estimate"] for item in enriched[0]["stages"]]
+    measured = next(item for item in estimates if item["replenished_amount"] is not None)
+    assert measured["calculation_basis"] == "measured_energy"
+    assert measured["replenished_amount"] == 18.0
+    assert measured["after_replenishment_percent"] != 80.0
+    assert all(
+        estimates[index]["remaining_percent"] == estimates[index + 1]["starting_percent"]
+        for index in range(len(estimates) - 1)
+    )
 
 
 def test_missing_energy_provider_degrades_to_an_estimated_route_stop():
@@ -275,6 +441,57 @@ def test_noncritical_service_and_weather_failures_degrade_without_blocking():
     assert any("当前天气数据暂不可用，已按基础风险继续规划" in item["description"] for item in issues)
 
 
+def test_malformed_weather_fields_are_ignored_without_crashing_planning():
+    stage = _stage()
+    stage["distance_km"] = 20
+    stage["duration_minutes"] = 30
+    stage["elevation_gain_m"] = 0
+    stage["planned_end"] = datetime(2026, 8, 1, 9, 30, tzinfo=SHANGHAI).isoformat()
+    stage["route_segments"][0].update(distance_km=20, duration_minutes=30)
+    stage["weather_samples"] = [{
+        "place": {"name": "终点"},
+        "sampled_at": stage["planned_start"],
+        "temperature_c": "unknown",
+        "precipitation_probability": "80",
+        "visibility_m": float("nan"),
+        "wind_speed_kmh": None,
+    }]
+    plans = [{"id": "day_1", "day_index": 1, "date": "2026-08-01", "title": "第 1 天", "stages": [stage], "activities": [], "items": []}]
+
+    enriched, _ = enrich_deep_drive_plan(plans, _vehicle(), {}, 120)
+    warnings = enriched[0]["stages"][0]["warnings"]
+    warning_codes = {item["code"] for item in warnings}
+
+    assert "WEATHER_DATA_PARTIAL" in warning_codes
+    assert "HEAVY_PRECIPITATION" in warning_codes
+    assert "LOW_VISIBILITY" not in warning_codes
+
+
+def test_invalid_vehicle_energy_metadata_is_normalized_and_disclosed():
+    stage = _stage()
+    stage["distance_km"] = 20
+    stage["duration_minutes"] = 30
+    stage["elevation_gain_m"] = 0
+    stage["planned_end"] = datetime(2026, 8, 1, 9, 30, tzinfo=SHANGHAI).isoformat()
+    stage["route_segments"][0].update(distance_km=20, duration_minutes=30)
+    plans = [{"id": "day_1", "day_index": 1, "date": "2026-08-01", "title": "第 1 天", "stages": [stage], "activities": [], "items": []}]
+    vehicle = {
+        **_vehicle(),
+        "current_energy_percent": 180,
+        "safe_energy_reserve_percent": "unknown",
+        "battery_kwh": -1,
+        "consumption_per_100km": 0,
+    }
+
+    enriched, _ = enrich_deep_drive_plan(plans, vehicle, {}, 120)
+    estimate = enriched[0]["stages"][0]["energy_estimate"]
+    warning_codes = {item["code"] for item in enriched[0]["stages"][0]["warnings"]}
+
+    assert estimate["starting_percent"] == 100.0
+    assert estimate["amount"] == 3.6
+    assert "VEHICLE_ENERGY_DATA_NORMALIZED" in warning_codes
+
+
 def test_long_drive_is_split_into_rest_segments_and_day_has_three_meals():
     stage = _stage()
     stage["duration_minutes"] = 360
@@ -308,7 +525,7 @@ def test_long_drive_is_split_into_rest_segments_and_day_has_three_meals():
     activities = enriched[0]["activities"]
 
     assert len(stages) == 3
-    assert all(item["duration_minutes"] <= 120 for item in stages)
+    assert all(item["route_segments"][0]["duration_minutes"] <= 120 for item in stages)
     assert all(
         stages[index]["destination"]["name"] == stages[index + 1]["origin"]["name"]
         for index in range(len(stages) - 1)
@@ -394,7 +611,7 @@ def test_long_city_departure_recovers_from_missing_geometry_and_inserts_rest_poi
     stages = enriched[0]["stages"]
 
     assert len(stages) == 3
-    assert all(item["duration_minutes"] <= 120 for item in stages)
+    assert all(item["route_segments"][0]["duration_minutes"] <= 120 for item in stages)
     assert len(
         [
             item
@@ -438,7 +655,7 @@ def test_cross_day_city_departure_with_sparse_geometry_is_split_before_verificat
     stages = [item for day in enriched for item in day["stages"]]
 
     assert len(stages) >= 8
-    assert all(item["duration_minutes"] <= 120 for item in stages)
+    assert all(item["route_segments"][0]["duration_minutes"] <= 120 for item in stages)
     assert any(item["day_id"] == "day_2" for item in stages)
     assert not any(
         item["code"] == "CONTINUOUS_DRIVE"
@@ -505,7 +722,43 @@ def test_cross_day_drive_is_distributed_to_calendar_days_with_overnight_hotel():
     assert any(item["day_id"] == "day_2" for item in stages)
     assert overnight
     assert any("过夜" in item["user_note"] for item in overnight)
-    assert all(item["duration_minutes"] <= 120 for item in stages)
+    assert all(item["route_segments"][0]["duration_minutes"] <= 120 for item in stages)
+
+
+def test_calendar_normalization_rehomes_items_shifted_past_midnight():
+    stage = _stage()
+    stage["day_id"] = "day_2"
+    stage["planned_start"] = datetime(2026, 8, 3, 0, 15, tzinfo=SHANGHAI).isoformat()
+    stage["planned_end"] = datetime(2026, 8, 3, 1, 15, tzinfo=SHANGHAI).isoformat()
+    plans = [
+        {
+            "id": "day_1",
+            "day_index": 1,
+            "date": "2026-08-01",
+            "stages": [],
+            "activities": [],
+        },
+        {
+            "id": "day_2",
+            "day_index": 2,
+            "date": "2026-08-02",
+            "stages": [stage],
+            "activities": [],
+        },
+        {
+            "id": "day_3",
+            "day_index": 3,
+            "date": "2026-08-03",
+            "stages": [],
+            "activities": [],
+        },
+    ]
+
+    normalize_plan_calendar(plans)
+
+    assert not plans[1]["stages"]
+    assert plans[2]["stages"][0]["day_id"] == "day_3"
+    assert plans[2]["stages"][0]["planned_start"].startswith("2026-08-03")
 
 
 def test_unreasonable_walking_stage_is_blocked():

@@ -58,7 +58,16 @@ class SkillRegistry:
             return result
 
         cache_key = self._cache_key(name, adapter.version, validated)
-        cached = await self._cache.get(cache_key)
+        # Never serve a stale provider response when the adapter is currently
+        # unconfigured.  The cache is shared by the live API and deterministic
+        # degradation tests, so a successful response written while a key was
+        # present must not mask ``SKILL_NOT_CONFIGURED`` after that key is
+        # removed (or rotated).  Keyed adapters expose the credential as
+        # ``api_key``; adapters without credentials remain cacheable.
+        cache_allowed = not (
+            hasattr(adapter, "api_key") and not bool(getattr(adapter, "api_key"))
+        )
+        cached = await self._cache.get(cache_key) if cache_allowed else None
         if cached:
             result = cached.model_copy(update={"cache_hit": True})
             await self._audit(name, result, call_context)

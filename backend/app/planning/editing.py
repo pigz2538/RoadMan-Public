@@ -526,6 +526,23 @@ def decide_candidate_patch(
         if index is None:
             raise AppError("ACTIVITY_NOT_FOUND", "原安排已被修改，请重新预览", 409)
         original = day.activities[index]
+        # Replacement is an explicit user decision to remove the old place.
+        # Persist that exclusion before the next provider refresh; otherwise
+        # the old candidate can be discovered again alongside the replacement.
+        old_category = ACTIVITY_CATEGORY.get(original.type, original.type)
+        old_candidate = _candidate_for_activity(state, original, old_category)
+        remember_exclusion(
+            state,
+            original,
+            category=old_category,
+            candidate=old_candidate,
+        )
+        old_name = normalize_exclusion_name(original.place.name)
+        trip.request.must_visit = [
+            item
+            for item in trip.request.must_visit
+            if normalize_exclusion_name(item.name) != old_name
+        ]
         replacement = _activity_from_candidate(
             candidate,
             category,

@@ -1,0 +1,774 @@
+{
+  "generated_at": "2026-08-30T01:52:38.818542+08:00",
+  "base_url": "http://127.0.0.1:8000",
+  "scenario_count": 10,
+  "full_journey_count": 7,
+  "passed": 6,
+  "failed": 4,
+  "duration_seconds": 2980.22,
+  "results": [
+    {
+      "id": "v2-shanghai-suzhou-parents",
+      "input": "下个周末想带爸妈从上海去苏州转转，周六一早出发，周日吃完晚饭前回上海，园林挑经典的就好，别一上午赶四个地方，住一处舒服的不要拖着行李换来换去。",
+      "full_requested": true,
+      "preflight": {
+        "ready": false,
+        "confirmation_required": true,
+        "semantic_checked": true,
+        "issues": [],
+        "extracted": {
+          "start_date": "2026-08-29",
+          "end_date": "2026-08-30",
+          "origin_name": "上海",
+          "destination_name": "苏州",
+          "destination_names": [
+            "苏州"
+          ],
+          "destination_scope": "city",
+          "travel_intents": [
+            "经典园林",
+            "悠闲行程"
+          ],
+          "travelers": 3,
+          "preferences": [
+            "经典园林优先",
+            "行程宽松",
+            "同一住宿"
+          ],
+          "cross_sea_required": false,
+          "past_return_requested": false,
+          "stay_only_at_destination": false,
+          "cross_sea_mode": null,
+          "special_events": [],
+          "must_visit_names": [],
+          "transport_modes": [],
+          "time_window_minutes": null,
+          "_intent_status": "ok",
+          "_intent_source": "deepseek",
+          "_source_raw_text": "下个周末想带爸妈从上海去苏州转转，周六一早出发，周日吃完晚饭前回上海，园林挑经典的就好，别一上午赶四个地方，住一处舒服的不要拖着行李换来换去。"
+        }
+      },
+      "trip_id": "trip_c5b70f912a4c",
+      "progress": [
+        {
+          "value": 0,
+          "node": "queued"
+        },
+        {
+          "value": 5,
+          "node": "load_context"
+        },
+        {
+          "value": 15,
+          "node": "extract_trip_request"
+        },
+        {
+          "value": 64,
+          "node": "split_into_days"
+        },
+        {
+          "value": 69,
+          "node": "discover_tourism"
+        },
+        {
+          "value": 72,
+          "node": "build_local_routes"
+        },
+        {
+          "value": 81,
+          "node": "load_vehicle_profile"
+        },
+        {
+          "value": 85,
+          "node": "discover_services"
+        },
+        {
+          "value": 86,
+          "node": "sample_weather"
+        },
+        {
+          "value": 90,
+          "node": "enrich_deep_drive"
+        },
+        {
+          "value": 91,
+          "node": "schedule_tourism"
+        },
+        {
+          "value": 100,
+          "node": "persist_trip"
+        }
+      ],
+      "verification": {
+        "passed": true,
+        "issues": [
+          {
+            "code": "DESTINATION_HIGHLIGHTS_UNCOVERED",
+            "severity": "warning",
+            "description": "目的地研究标记的代表性景点未全部进入当前可执行时间窗：苏州园林博物馆、苏州博物馆西馆、金鸡湖景区、金鸡湖音乐喷泉、金鸡湖商业广场、金鸡湖大酒店；可延长天数、减少停留或在编辑面板中加入。"
+          }
+        ],
+        "auto_repair_attempts": 0,
+        "auto_repair_exhausted": false
+      },
+      "html_export_bytes": 3414358,
+      "failures": [],
+      "passed": true,
+      "latency_ms": 340995.85
+    },
+    {
+      "id": "v2-beijing-after-work",
+      "input": "我和对象下周五下班后从武汉去北京，周日晚上回，故宫和天安门一带想看，另外挑一两个不累的地方就行。高铁飞机卧铺你帮我比较，别刚下车就冲景点，更别凌晨三点去排队。",
+      "full_requested": true,
+      "preflight": {
+        "ready": false,
+        "confirmation_required": true,
+        "semantic_checked": true,
+        "issues": [],
+        "extracted": {
+          "start_date": "2026-09-04",
+          "end_date": "2026-09-06",
+          "origin_name": "武汉",
+          "destination_name": "北京",
+          "destination_names": [
+            "北京",
+            "故宫",
+            "天安门"
+          ],
+          "destination_scope": "city",
+          "travel_intents": [
+            "观光",
+            "休闲"
+          ],
+          "return_time": "19:00",
+          "travelers": 2,
+          "preferences": [
+            "比较交通方式",
+            "行程休闲",
+            "避免凌晨排队"
+          ],
+          "transport_modes": [
+            "train",
+            "flight"
+          ],
+          "cross_sea_required": false,
+          "past_return_requested": false,
+          "stay_only_at_destination": false,
+          "must_visit_names": [
+            "故宫",
+            "天安门"
+          ],
+          "cross_sea_mode": null,
+          "special_events": [],
+          "time_window_minutes": null,
+          "_intent_status": "ok",
+          "_intent_source": "deepseek",
+          "_source_raw_text": "我和对象下周五下班后从武汉去北京，周日晚上回，故宫和天安门一带想看，另外挑一两个不累的地方就行。高铁飞机卧铺你帮我比较，别刚下车就冲景点，更别凌晨三点去排队。"
+        }
+      },
+      "trip_id": "trip_58e8ed4442ed",
+      "progress": [
+        {
+          "value": 0,
+          "node": "queued"
+        },
+        {
+          "value": 5,
+          "node": "load_context"
+        },
+        {
+          "value": 28,
+          "node": "validate_required_fields"
+        },
+        {
+          "value": 64,
+          "node": "split_into_days"
+        },
+        {
+          "value": 69,
+          "node": "discover_tourism"
+        },
+        {
+          "value": 72,
+          "node": "build_local_routes"
+        },
+        {
+          "value": 85,
+          "node": "discover_services"
+        },
+        {
+          "value": 86,
+          "node": "sample_weather"
+        },
+        {
+          "value": 90,
+          "node": "enrich_deep_drive"
+        },
+        {
+          "value": 100,
+          "node": "persist_trip"
+        }
+      ],
+      "verification": {
+        "passed": true,
+        "issues": [
+          {
+            "code": "DESTINATION_HIGHLIGHTS_UNCOVERED",
+            "severity": "warning",
+            "description": "目的地研究标记的代表性景点未全部进入当前可执行时间窗：北京大栅栏、北京恭王府博物馆售票处、南锣鼓巷、国家体育场、国家体育场东(公交站)、国家体育场售票处、国家体育场地下停车场、国家奥林匹克体育中心P2停车场；可延长天数、减少停留或在编辑面板中加入。"
+          }
+        ],
+        "auto_repair_attempts": 0,
+        "auto_repair_exhausted": false
+      },
+      "html_export_bytes": 2883268,
+      "failures": [],
+      "passed": true,
+      "latency_ms": 354454.97
+    },
+    {
+      "id": "v2-changsha-slow-food",
+      "input": "周六临时想从武汉去长沙吃点好吃的顺便走走，周日晚上八点前回来。橘子洲和岳麓山看情况安排，餐馆别老是同一家，离得远的就别硬塞，晚上想回舒服的酒店睡。",
+      "full_requested": true,
+      "preflight": {
+        "ready": false,
+        "confirmation_required": true,
+        "semantic_checked": true,
+        "issues": [],
+        "extracted": {
+          "start_date": "2026-08-29",
+          "end_date": "2026-08-30",
+          "origin_name": "武汉",
+          "destination_name": "长沙",
+          "destination_names": [
+            "长沙"
+          ],
+          "destination_scope": "city",
+          "travel_intents": [
+            "美食",
+            "散步"
+          ],
+          "return_time": "20:00",
+          "preferences": [
+            "不要重复选择同一家餐馆",
+            "避免距离过远的餐馆",
+            "舒适的酒店"
+          ],
+          "cross_sea_required": false,
+          "past_return_requested": false,
+          "stay_only_at_destination": false,
+          "cross_sea_mode": null,
+          "special_events": [],
+          "must_visit_names": [],
+          "transport_modes": [],
+          "time_window_minutes": null,
+          "_intent_status": "ok",
+          "_intent_source": "deepseek",
+          "_source_raw_text": "周六临时想从武汉去长沙吃点好吃的顺便走走，周日晚上八点前回来。橘子洲和岳麓山看情况安排，餐馆别老是同一家，离得远的就别硬塞，晚上想回舒服的酒店睡。"
+        }
+      },
+      "trip_id": "trip_3677275ef0ad",
+      "progress": [
+        {
+          "value": 0,
+          "node": "queued"
+        },
+        {
+          "value": 5,
+          "node": "load_context"
+        },
+        {
+          "value": 28,
+          "node": "validate_required_fields"
+        },
+        {
+          "value": 64,
+          "node": "split_into_days"
+        },
+        {
+          "value": 69,
+          "node": "discover_tourism"
+        },
+        {
+          "value": 72,
+          "node": "build_local_routes"
+        },
+        {
+          "value": 78,
+          "node": "build_stages"
+        },
+        {
+          "value": 85,
+          "node": "discover_services"
+        },
+        {
+          "value": 86,
+          "node": "sample_weather"
+        },
+        {
+          "value": 90,
+          "node": "enrich_deep_drive"
+        },
+        {
+          "value": 100,
+          "node": "persist_trip"
+        }
+      ],
+      "verification": {
+        "passed": true,
+        "issues": [
+          {
+            "code": "DESTINATION_HIGHLIGHTS_UNCOVERED",
+            "severity": "warning",
+            "description": "目的地研究标记的代表性景点未全部进入当前可执行时间窗：天心阁、太平巷、太平街、太平街牌坊、太平路、岳麓书院、杜甫江阁、湖南省博物馆；可延长天数、减少停留或在编辑面板中加入。"
+          },
+          {
+            "code": "RETURN_WINDOW_FLEXIBLE",
+            "severity": "warning",
+            "description": "返程预计略晚于目标时间，但仍在半天弹性范围内；可按实际路况灵活抵达。"
+          }
+        ],
+        "auto_repair_attempts": 0,
+        "auto_repair_exhausted": false
+      },
+      "html_export_bytes": 2164858,
+      "failures": [],
+      "passed": true,
+      "latency_ms": 397184.73
+    },
+    {
+      "id": "v2-mixed-english-changsha",
+      "input": "Next Tue 到 Thu 我和对象从武汉飞长沙，想慢慢逛橘子洲和省博，Sunday night 不用回，别把英文日期理解错，也不要安排红眼后马上爬山。",
+      "full_requested": true,
+      "preflight": {
+        "ready": false,
+        "confirmation_required": true,
+        "semantic_checked": true,
+        "issues": [],
+        "extracted": {
+          "start_date": "2026-09-01",
+          "end_date": "2026-09-03",
+          "origin_name": "武汉",
+          "destination_name": "长沙",
+          "destination_names": [
+            "长沙"
+          ],
+          "destination_scope": "city",
+          "travel_intents": [
+            "慢慢逛"
+          ],
+          "travelers": 2,
+          "preferences": [
+            "慢慢逛",
+            "不要安排红眼后马上爬山"
+          ],
+          "transport_modes": [
+            "flight"
+          ],
+          "cross_sea_required": false,
+          "past_return_requested": false,
+          "stay_only_at_destination": false,
+          "must_visit_names": [
+            "橘子洲",
+            "省博"
+          ],
+          "cross_sea_mode": null,
+          "special_events": [],
+          "time_window_minutes": null,
+          "_intent_status": "ok",
+          "_intent_source": "deepseek",
+          "_source_raw_text": "Next Tue 到 Thu 我和对象从武汉飞长沙，想慢慢逛橘子洲和省博，Sunday night 不用回，别把英文日期理解错，也不要安排红眼后马上爬山。"
+        }
+      },
+      "trip_id": "trip_5a37ec19d5ae",
+      "passed": false,
+      "error": "status=failed: {\"passed\": false, \"issues\": [{\"code\": \"ROUTE_NOT_CLOSED\", \"severity\": \"blocker\", \"description\": \"行程终点未回到整体出发点，路线尚未形成闭环\"}, {\"code\": \"WEATHER_DEGRADED\", \"severity\": \"warning\", \"description\": \"城市出发 · 第 1/2 段 当前天气数据暂不可用，已按基础风险继续规划\"}, {\"code\": \"WEATHER_DEGRADED\", \"severity\": \"warning\", \"description\": \"城市出发 · 第 2/2 段 当前天气数据暂不可用，已按基础风险继续规划\"}, {\"code\": \"WEATHER_DEGRADED\", \"severity\": \"warning\", \"description\": \"入住酒店接驳 当前天气数据暂不可用，已按基础风险继续规划\"}, {\"code\": \"WEATHER_DEGRADED\", \"severity\": \"warning\", \"description\": \"公共交通前往景点 当前天气数据暂不可用，已按基础风险继续规划\"}, {\"code\": \"WEATHER_DEGRADED\", \"severity\": \"warning\", \"description\": \"骑行游览接驳 当前天气数据暂不可用，已按基础风险继续规划\"}, {\"code\": \"WEATHER_DEGRADED\", \"severity\": \"warning\", \"description\": \"返程接驳 当前天气数据暂不可用，已按基础风险继续规划\"}, {\"code\": \"WEATHER_DEGRADED\", \"severity\": \"warning\", \"description\": \"返程 当前天气数据暂不可用，已按基础风险继续规划\"}], \"auto_repair_attempts\": 4, \"auto_repair_exhausted\": true}",
+      "latency_ms": 428792.71
+    },
+    {
+      "id": "v2-xinjiang-roadtrip",
+      "input": "下周一想和对象从武汉一路自驾去新疆，十天左右，纯电车现在还有六成电。别把新疆烤肉店当成目的地，沿途该睡就睡、该充电就充电，喀纳斯和赛里木湖能安排就安排，太赶就诚实告诉我。",
+      "full_requested": true,
+      "preflight": {
+        "ready": false,
+        "confirmation_required": false,
+        "semantic_checked": false,
+        "issues": [
+          "MISSING_FIELD"
+        ],
+        "extracted": {
+          "start_date": "2026-08-31",
+          "origin_name": "武汉",
+          "destination_name": "新疆",
+          "destination_names": [
+            "新疆",
+            "喀纳斯",
+            "赛里木湖"
+          ],
+          "destination_scope": "province",
+          "travelers": 2,
+          "preferences": [],
+          "transport_modes": [
+            "driving"
+          ],
+          "cross_sea_required": false,
+          "past_return_requested": false,
+          "stay_only_at_destination": false,
+          "cross_sea_mode": null,
+          "travel_intents": [],
+          "special_events": [],
+          "must_visit_names": [],
+          "time_window_minutes": null,
+          "_intent_status": "ok",
+          "_intent_source": "deepseek",
+          "_source_raw_text": "下周一想和对象从武汉一路自驾去新疆，十天左右，纯电车现在还有六成电。别把新疆烤肉店当成目的地，沿途该睡就睡、该充电就充电，喀纳斯和赛里木湖能安排就安排，太赶就诚实告诉我。"
+        }
+      },
+      "failures": [
+        "not_ready",
+        "date_fields"
+      ],
+      "passed": false,
+      "latency_ms": 26986.45
+    },
+    {
+      "id": "v2-hainan-island-family",
+      "input": "10月1日到10月4日，一家三口先从武汉坐飞机到三亚，跨海这段乘船去蜈支洲岛，顺便看看呀诺达，别每天六点起床。岛上怎么接驳、船票和天气有什么风险你先查清楚，住同一家酒店更省心。",
+      "full_requested": true,
+      "preflight": {
+        "ready": false,
+        "confirmation_required": true,
+        "semantic_checked": true,
+        "issues": [],
+        "extracted": {
+          "start_date": "2026-10-01",
+          "end_date": "2026-10-04",
+          "cross_sea_required": true,
+          "cross_sea_mode": "ferry",
+          "origin_name": "武汉",
+          "destination_name": "三亚",
+          "destination_names": [
+            "三亚",
+            "蜈支洲岛",
+            "呀诺达"
+          ],
+          "destination_scope": "multi_destination",
+          "travelers": 3,
+          "preferences": [
+            "不早起",
+            "住同一家酒店"
+          ],
+          "transport_modes": [
+            "flight",
+            "ferry"
+          ],
+          "past_return_requested": false,
+          "stay_only_at_destination": false,
+          "must_visit_names": [
+            "蜈支洲岛",
+            "呀诺达"
+          ],
+          "travel_intents": [],
+          "special_events": [],
+          "time_window_minutes": null,
+          "_intent_status": "ok",
+          "_intent_source": "deepseek",
+          "_source_raw_text": "10月1日到10月4日，一家三口先从武汉坐飞机到三亚，跨海这段乘船去蜈支洲岛，顺便看看呀诺达，别每天六点起床。岛上怎么接驳、船票和天气有什么风险你先查清楚，住同一家酒店更省心。"
+        }
+      },
+      "trip_id": "trip_3cc1c5e21390",
+      "progress": [
+        {
+          "value": 0,
+          "node": "queued"
+        },
+        {
+          "value": 5,
+          "node": "load_context"
+        },
+        {
+          "value": 28,
+          "node": "validate_required_fields"
+        },
+        {
+          "value": 64,
+          "node": "split_into_days"
+        },
+        {
+          "value": 69,
+          "node": "discover_tourism"
+        },
+        {
+          "value": 72,
+          "node": "build_local_routes"
+        },
+        {
+          "value": 78,
+          "node": "build_stages"
+        },
+        {
+          "value": 85,
+          "node": "discover_services"
+        },
+        {
+          "value": 86,
+          "node": "sample_weather"
+        },
+        {
+          "value": 90,
+          "node": "enrich_deep_drive"
+        },
+        {
+          "value": 93,
+          "node": "review_daily_schedule"
+        },
+        {
+          "value": 100,
+          "node": "persist_trip"
+        }
+      ],
+      "verification": {
+        "passed": true,
+        "issues": [],
+        "auto_repair_attempts": 0,
+        "auto_repair_exhausted": false
+      },
+      "html_export_bytes": 4028770,
+      "failures": [],
+      "passed": true,
+      "latency_ms": 447915.32
+    },
+    {
+      "id": "v2-xian-luoyang-two-cities",
+      "input": "下周三从武汉出发，先去西安再去洛阳，周日回武汉，和对象边走边吃，肉夹馍和洛阳水席各安排一次就好。兵马俑、城墙和龙门石窟想看，城市之间坐高铁，别把餐馆名字当成景点或城市。",
+      "full_requested": true,
+      "preflight": {
+        "ready": false,
+        "confirmation_required": true,
+        "semantic_checked": true,
+        "issues": [],
+        "extracted": {
+          "start_date": "2026-09-02",
+          "end_date": "2026-09-06",
+          "origin_name": "武汉",
+          "destination_name": "西安",
+          "destination_names": [
+            "西安",
+            "洛阳"
+          ],
+          "destination_scope": "multi_destination",
+          "travel_intents": [
+            "美食",
+            "观光"
+          ],
+          "travelers": 2,
+          "preferences": [],
+          "transport_modes": [
+            "train"
+          ],
+          "cross_sea_required": false,
+          "past_return_requested": false,
+          "stay_only_at_destination": false,
+          "must_visit_names": [
+            "兵马俑",
+            "城墙",
+            "龙门石窟"
+          ],
+          "cross_sea_mode": null,
+          "special_events": [],
+          "time_window_minutes": null,
+          "_intent_status": "ok",
+          "_intent_source": "deepseek",
+          "_source_raw_text": "下周三从武汉出发，先去西安再去洛阳，周日回武汉，和对象边走边吃，肉夹馍和洛阳水席各安排一次就好。兵马俑、城墙和龙门石窟想看，城市之间坐高铁，别把餐馆名字当成景点或城市。"
+        }
+      },
+      "trip_id": "trip_54fe005a7289",
+      "progress": [
+        {
+          "value": 0,
+          "node": "queued"
+        },
+        {
+          "value": 5,
+          "node": "load_context"
+        },
+        {
+          "value": 28,
+          "node": "validate_required_fields"
+        },
+        {
+          "value": 64,
+          "node": "split_into_days"
+        },
+        {
+          "value": 69,
+          "node": "discover_tourism"
+        },
+        {
+          "value": 72,
+          "node": "build_local_routes"
+        },
+        {
+          "value": 78,
+          "node": "build_stages"
+        },
+        {
+          "value": 85,
+          "node": "discover_services"
+        },
+        {
+          "value": 86,
+          "node": "sample_weather"
+        },
+        {
+          "value": 90,
+          "node": "enrich_deep_drive"
+        },
+        {
+          "value": 91,
+          "node": "schedule_tourism"
+        },
+        {
+          "value": 100,
+          "node": "persist_trip"
+        }
+      ],
+      "verification": {
+        "passed": true,
+        "issues": [
+          {
+            "code": "DESTINATION_HIGHLIGHTS_UNCOVERED",
+            "severity": "warning",
+            "description": "目的地研究标记的代表性景点未全部进入当前可执行时间窗：西安城墙·碑林历史文化景区、陕西历史博物馆、西安城墙安远门、白马寺、新白马寺(北街店)、陕西历史博物馆游客服务中心、陕西历史博物馆停车场、陕西历史博物馆停车场(出入口)；可延长天数、减少停留或在编辑面板中加入。"
+          }
+        ],
+        "auto_repair_attempts": 0,
+        "auto_repair_exhausted": false
+      },
+      "html_export_bytes": 4136084,
+      "failures": [
+        "planned_must_visit:龙门石窟"
+      ],
+      "passed": false,
+      "latency_ms": 463167.49
+    },
+    {
+      "id": "v2-qinghai-stars-weather",
+      "input": "9月15日到9月18日想去青海看星星，带对象，从武汉出发，白天别排太满，晚上拍银河但不想看完还开长途。你把天气、海拔、月亮和高原休息一起考虑，阴天给我一个不扫兴的备选。",
+      "full_requested": true,
+      "preflight": {
+        "ready": false,
+        "confirmation_required": true,
+        "semantic_checked": true,
+        "issues": [],
+        "extracted": {
+          "start_date": "2026-09-15",
+          "end_date": "2026-09-18",
+          "origin_name": "武汉",
+          "destination_name": "青海",
+          "destination_names": [
+            "青海"
+          ],
+          "destination_scope": "province",
+          "travel_intents": [
+            "观星",
+            "银河拍摄"
+          ],
+          "travelers": 2,
+          "preferences": [
+            "白天行程宽松",
+            "夜间避免长途驾驶",
+            "综合考虑天气、海拔、月亮和高原休息",
+            "阴天提供备选方案"
+          ],
+          "special_events": [
+            "银河"
+          ],
+          "cross_sea_required": false,
+          "past_return_requested": false,
+          "stay_only_at_destination": false,
+          "cross_sea_mode": null,
+          "must_visit_names": [],
+          "transport_modes": [],
+          "time_window_minutes": null,
+          "_intent_status": "ok",
+          "_intent_source": "deepseek",
+          "_source_raw_text": "9月15日到9月18日想去青海看星星，带对象，从武汉出发，白天别排太满，晚上拍银河但不想看完还开长途。你把天气、海拔、月亮和高原休息一起考虑，阴天给我一个不扫兴的备选。"
+        }
+      },
+      "trip_id": "trip_15e0efa2635e",
+      "passed": false,
+      "error": "status=failed: {\"passed\": false, \"issues\": [{\"code\": \"DRIVING_STAGE_CALENDAR_MISMATCH\", \"severity\": \"blocker\", \"description\": \"返程（跨天第1段） · 第 1/4 段 已跨出所属日期，需减少当日驾驶或提前安排过夜\"}, {\"code\": \"DRIVING_STAGE_CALENDAR_MISMATCH\", \"severity\": \"blocker\", \"description\": \"返程（跨天第1段） · 第 2/4 段 已跨出所属日期，需减少当日驾驶或提前安排过夜\"}, {\"code\": \"DRIVING_STAGE_CALENDAR_MISMATCH\", \"severity\": \"blocker\", \"description\": \"返程（跨天第1段） · 第 3/4 段 已跨出所属日期，需减少当日驾驶或提前安排过夜\"}, {\"code\": \"DRIVING_STAGE_CALENDAR_MISMATCH\", \"severity\": \"blocker\", \"description\": \"返程（跨天第1段） · 第 4/4 段 已跨出所属日期，需减少当日驾驶或提前安排过夜\"}, {\"code\": \"DRIVING_STAGE_CALENDAR_MISMATCH\", \"severity\": \"blocker\", \"description\": \"返程（跨天第2段） · 第 4/4 段 已跨出所属日期，需减少当日驾驶或提前安排过夜\"}, {\"code\": \"ROUTE_DISCONTINUITY\", \"severity\": \"blocker\", \"description\": \"阶段“城市出发（跨天第2段） · 第 4/4 段”终点与“返程（跨天第1段） · 第 1/4 段”起点不连续\"}, {\"code\": \"ROUTE_DISCONTINUITY\", \"severity\": \"blocker\", \"description\": \"阶段“返程（跨天第1段） · 第 4/4 段”终点与“城市出发（跨天第3段）”起点不连续\"}, {\"code\": \"ROUTE_DISCONTINUITY\", \"severity\": \"blocker\", \"description\": \"阶段“城市出发（跨天第3段）”终点与“返程（跨天第2段） · 第 1/4 段”起点不连续\"}, {\"code\": \"WEATHER_DEGRADED\", \"severity\": \"warning\", \"description\": \"城市出发（跨天第1段） · 第 1/4 段 当前天气数据暂不可用，已按基础风险继续规划\"}, {\"code\": \"WEATHER_DEGRADED\", \"severity\": \"warning\", \"description\": \"城市出发（跨天第1段） · 第 2/4 段 当前天气数据暂不可用，已按基础风险继续规划\"}, {\"code\": \"WEATHER_DEGRADED\", \"severity\": \"warning\", \"description\": \"城市出发（跨天第1段） · 第 3/4 段 当前天气数据暂不可用，已按基础风险继续规划\"}, {\"code\": \"WEATHER_DEGRADED\", \"severity\": \"warning\", \"description\": \"城市出发（跨天第1段） · 第 4/4 段 当前天气数据暂不可用，已按基础风险继续规划\"}, {\"code\": \"WEATHER_DEGRADED\", \"severity\": \"warning\", \"description\": \"城市出发（跨天第2段） · 第 1/4 段 当前天气数据暂不可用，已按基础风险继续规划\"}, {\"code\": \"WEATHER_DEGRADED\", \"severity\": \"warning\", \"description\": \"城市出发（跨天第2段） · 第 2/4 段 当前天气数据暂不可用，已按基础风险继续规划\"}, {\"code\": \"WEATHER_DEGRADED\", \"severity\": \"warning\", \"description\": \"城",
+      "latency_ms": 456569.81
+    },
+    {
+      "id": "v2-vague-seaside",
+      "input": "这周末突然想去海边放空，开车就行，别太累，最好能吃点当地的。还没想好从哪里走，也不知道去哪片海，你先问我最关键的几个问题。",
+      "full_requested": false,
+      "preflight": {
+        "ready": false,
+        "confirmation_required": false,
+        "semantic_checked": false,
+        "issues": [
+          "MISSING_FIELD",
+          "MISSING_FIELD"
+        ],
+        "extracted": {
+          "start_date": "2026-08-29",
+          "end_date": "2026-08-30",
+          "destination_scope": "unknown",
+          "travel_intents": [
+            "海边放空",
+            "品尝当地美食"
+          ],
+          "max_days": 2,
+          "preferences": [
+            "轻松",
+            "当地美食"
+          ],
+          "transport_modes": [
+            "driving"
+          ],
+          "cross_sea_required": false,
+          "past_return_requested": false,
+          "stay_only_at_destination": false,
+          "cross_sea_mode": null,
+          "destination_names": [],
+          "special_events": [],
+          "must_visit_names": [],
+          "time_window_minutes": null,
+          "_intent_status": "ok",
+          "_intent_source": "deepseek",
+          "_source_raw_text": "这周末突然想去海边放空，开车就行，别太累，最好能吃点当地的。还没想好从哪里走，也不知道去哪片海，你先问我最关键的几个问题。"
+        }
+      },
+      "failures": [],
+      "passed": true,
+      "latency_ms": 12036.3
+    },
+    {
+      "id": "v2-impossible-short-window",
+      "input": "明早从武汉出发去乌鲁木齐，今晚一定回武汉，带对象想舒服一点，最好还看两个地方。你觉得不现实就直接说，不要为了完成规划硬编路线。",
+      "full_requested": false,
+      "preflight": {
+        "ready": false,
+        "confirmation_required": false,
+        "semantic_checked": false,
+        "issues": [
+          "REQUIREMENT_AGENT_UNAVAILABLE",
+          "MISSING_FIELD",
+          "MISSING_FIELD",
+          "MISSING_FIELD",
+          "MISSING_FIELD"
+        ],
+        "extracted": {
+          "_intent_status": "unavailable",
+          "_intent_error": "REQUIREMENT_AGENT_UNAVAILABLE"
+        }
+      },
+      "failures": [],
+      "passed": true,
+      "latency_ms": 51806.92
+    }
+  ]
+}

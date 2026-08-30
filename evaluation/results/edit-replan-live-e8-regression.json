@@ -1,0 +1,13 @@
+{
+  "base_url": "http://127.0.0.1:8000",
+  "trip_id": "trip_ac4d9884823a",
+  "cases": [
+    {
+      "index": 8,
+      "name": "自然语言替换景点",
+      "status": "passed",
+      "seconds": 334.53
+    }
+  ],
+  "status": "passed"
+}

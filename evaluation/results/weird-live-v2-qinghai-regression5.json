@@ -1,0 +1,127 @@
+{
+  "generated_at": "2026-08-30T04:49:23.109365+08:00",
+  "base_url": "http://127.0.0.1:8000",
+  "scenario_count": 1,
+  "full_journey_count": 1,
+  "passed": 1,
+  "failed": 0,
+  "duration_seconds": 404.26,
+  "results": [
+    {
+      "id": "v2-qinghai-stars-weather",
+      "input": "9月15日到9月18日想去青海看星星，带对象，从武汉出发，白天别排太满，晚上拍银河但不想看完还开长途。你把天气、海拔、月亮和高原休息一起考虑，阴天给我一个不扫兴的备选。",
+      "full_requested": true,
+      "preflight": {
+        "ready": false,
+        "confirmation_required": true,
+        "semantic_checked": true,
+        "issues": [],
+        "extracted": {
+          "start_date": "2026-09-15",
+          "end_date": "2026-09-18",
+          "origin_name": "武汉",
+          "destination_name": "青海",
+          "destination_names": [
+            "青海"
+          ],
+          "destination_scope": "province",
+          "travel_intents": [
+            "看星星",
+            "拍银河"
+          ],
+          "travelers": 2,
+          "max_days": 4,
+          "preferences": [
+            "白天行程不要太满",
+            "晚上观星后避免长途驾驶",
+            "阴天时提供备选方案"
+          ],
+          "special_events": [
+            "银河"
+          ],
+          "cross_sea_required": false,
+          "past_return_requested": false,
+          "stay_only_at_destination": false,
+          "cross_sea_mode": null,
+          "must_visit_names": [],
+          "transport_modes": [],
+          "time_window_minutes": null,
+          "_intent_status": "ok",
+          "_intent_source": "deepseek",
+          "_source_raw_text": "9月15日到9月18日想去青海看星星，带对象，从武汉出发，白天别排太满，晚上拍银河但不想看完还开长途。你把天气、海拔、月亮和高原休息一起考虑，阴天给我一个不扫兴的备选。"
+        }
+      },
+      "trip_id": "trip_19de2e48d871",
+      "progress": [
+        {
+          "value": 0,
+          "node": "queued"
+        },
+        {
+          "value": 5,
+          "node": "load_context"
+        },
+        {
+          "value": 15,
+          "node": "extract_trip_request"
+        },
+        {
+          "value": 28,
+          "node": "validate_required_fields"
+        },
+        {
+          "value": 64,
+          "node": "split_into_days"
+        },
+        {
+          "value": 69,
+          "node": "discover_tourism"
+        },
+        {
+          "value": 72,
+          "node": "build_local_routes"
+        },
+        {
+          "value": 78,
+          "node": "build_stages"
+        },
+        {
+          "value": 81,
+          "node": "load_vehicle_profile"
+        },
+        {
+          "value": 85,
+          "node": "discover_services"
+        },
+        {
+          "value": 86,
+          "node": "sample_weather"
+        },
+        {
+          "value": 90,
+          "node": "enrich_deep_drive"
+        },
+        {
+          "value": 100,
+          "node": "persist_trip"
+        }
+      ],
+      "verification": {
+        "passed": true,
+        "issues": [
+          {
+            "code": "RETURN_WINDOW_FLEXIBLE",
+            "severity": "warning",
+            "description": "返程预计略晚于目标时间，但仍在半天弹性范围内；可按实际路况灵活抵达。"
+          }
+        ],
+        "auto_repair_attempts": 0,
+        "auto_repair_exhausted": false
+      },
+      "html_export_bytes": 3942732,
+      "failures": [],
+      "passed": true,
+      "latency_ms": 404258.1
+    }
+  ]
+}

@@ -137,6 +137,18 @@ def test_structural_calendar_resolves_weekday_range_from_today():
     }
 
 
+def test_structural_calendar_resolves_abbreviated_english_weekdays():
+    extracted = extract_structural_constraints(
+        "Next Thu after work fly to Hangzhou, Sunday night return",
+        date(2026, 8, 29),
+    )
+
+    assert extracted == {
+        "start_date": "2026-09-03",
+        "end_date": "2026-09-06",
+    }
+
+
 def test_structural_constraints_preserve_explicit_cross_sea_and_zero_window():
     extracted = extract_structural_constraints(
         "2099-08-02从上海出发跨海去普陀山，下午3点出发到下午3点抵达",

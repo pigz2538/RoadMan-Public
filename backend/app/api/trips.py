@@ -70,6 +70,35 @@ def _safe_date(value: object) -> date | None:
         return None
 
 
+def _semantic_guard_issue_is_actionable(
+    item: dict[str, object],
+    extracted: dict[str, object],
+) -> bool:
+    """Reject only semantic Guard findings that require a user decision.
+
+    The requirement Agent remains the sole owner of intent extraction. This is
+    a consistency check on a second Agent's output: it must not reopen fields
+    that are already structurally complete, or confuse sightseeing days with
+    the inclusive arrival/departure calendar window.
+    """
+    code = str(item.get("code") or "").strip().upper()
+    if code == "SEMANTIC_DURATION_MISMATCH":
+        start = _safe_date(extracted.get("start_date"))
+        end = _safe_date(extracted.get("end_date"))
+        try:
+            duration = int(extracted.get("max_days") or 0)
+        except (TypeError, ValueError):
+            duration = 0
+        if start and end and end >= start and duration > 0:
+            return False
+    if code == "SEMANTIC_MISSING_INFO" and all(
+        extracted.get(field)
+        for field in ("origin_name", "destination_name", "start_date", "end_date")
+    ):
+        return False
+    return True
+
+
 def get_repo(session: AsyncSession = Depends(get_session)) -> TripRepository:
     return TripRepository(session)
 
@@ -492,6 +521,8 @@ async def preflight_trip(
             PreflightIssue.model_validate(item)
             for item in semantic_issues
             if (
+                _semantic_guard_issue_is_actionable(item, extracted)
+                and
                 str(item.get("field") or "preferences") not in answered_fields
                 and not answered(
                     str(item.get("code")),

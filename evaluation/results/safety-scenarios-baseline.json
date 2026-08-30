@@ -1,9 +1,11 @@
 {
-  "dataset_id": "roadman-safety-scenarios-v1",
-  "sample_count": 5,
+  "dataset_id": "roadman-safety-scenarios-v2",
+  "sample_count": 12,
   "task_completion_rate": 1.0,
-  "route_executability_rate": 0.8,
-  "average_latency_ms": 0.382,
+  "route_executability_rate": 0.9167,
+  "degradation_handled_rate": 1.0,
+  "p95_latency_ms": 0.46,
+  "average_latency_ms": 0.264,
   "passed": true,
   "cases": [
     {
@@ -20,8 +22,12 @@
       "route_executable": true,
       "route_executability_basis": "verified",
       "soc_continuous": true,
+      "energy_checks": {
+        "soc_never_exceeds_100": true
+      },
+      "dependency_state": "available",
       "blocker_codes": [],
-      "latency_ms": 0.755
+      "latency_ms": 0.747
     },
     {
       "id": "adverse-weather",
@@ -41,8 +47,12 @@
       "route_executable": true,
       "route_executability_basis": "verified",
       "soc_continuous": true,
+      "energy_checks": {
+        "soc_never_exceeds_100": true
+      },
+      "dependency_state": "available",
       "blocker_codes": [],
-      "latency_ms": 0.193
+      "latency_ms": 0.18
     },
     {
       "id": "energy-facilities-insufficient",
@@ -59,8 +69,12 @@
       "route_executable": false,
       "route_executability_basis": "补能设施仅有估算位置，需真实服务确认",
       "soc_continuous": true,
+      "energy_checks": {
+        "soc_never_exceeds_100": true
+      },
+      "dependency_state": "charging_provider_unavailable",
       "blocker_codes": [],
-      "latency_ms": 0.6
+      "latency_ms": 0.46
     },
     {
       "id": "vehicle-information-missing",
@@ -69,13 +83,18 @@
         "VEHICLE_DATA_MISSING"
       ],
       "observed_codes": [
-        "VEHICLE_DATA_MISSING"
+        "VEHICLE_DATA_MISSING",
+        "VEHICLE_ENERGY_DATA_NORMALIZED"
       ],
       "route_executable": true,
       "route_executability_basis": "verified",
       "soc_continuous": true,
+      "energy_checks": {
+        "soc_never_exceeds_100": true
+      },
+      "dependency_state": "vehicle_metadata_missing",
       "blocker_codes": [],
-      "latency_ms": 0.212
+      "latency_ms": 0.16
     },
     {
       "id": "external-services-error",
@@ -91,8 +110,155 @@
       "route_executable": true,
       "route_executability_basis": "verified",
       "soc_continuous": true,
+      "energy_checks": {
+        "soc_never_exceeds_100": true
+      },
+      "dependency_state": "weather_provider_unavailable",
       "blocker_codes": [],
-      "latency_ms": 0.151
+      "latency_ms": 0.139
+    },
+    {
+      "id": "overreported-charge-capped",
+      "passed": true,
+      "expected_codes": [
+        "ENERGY_STOP_SCHEDULED"
+      ],
+      "observed_codes": [
+        "ENERGY_STOP_SCHEDULED"
+      ],
+      "route_executable": true,
+      "route_executability_basis": "verified",
+      "soc_continuous": true,
+      "energy_checks": {
+        "soc_never_exceeds_100": true,
+        "calculation_basis": true
+      },
+      "dependency_state": "available",
+      "blocker_codes": [],
+      "latency_ms": 0.174
+    },
+    {
+      "id": "vehicle-charge-power-cap",
+      "passed": true,
+      "expected_codes": [
+        "ENERGY_STOP_SCHEDULED"
+      ],
+      "observed_codes": [
+        "ENERGY_STOP_SCHEDULED"
+      ],
+      "route_executable": true,
+      "route_executability_basis": "verified",
+      "soc_continuous": true,
+      "energy_checks": {
+        "soc_never_exceeds_100": true,
+        "calculation_basis": true,
+        "vehicle_power_cap": true
+      },
+      "dependency_state": "available",
+      "blocker_codes": [],
+      "latency_ms": 0.196
+    },
+    {
+      "id": "invalid-charger-metadata",
+      "passed": true,
+      "expected_codes": [
+        "CHARGING_POWER_ESTIMATED",
+        "ENERGY_STOP_SCHEDULED"
+      ],
+      "observed_codes": [
+        "CHARGING_POWER_ESTIMATED",
+        "ENERGY_STOP_SCHEDULED"
+      ],
+      "route_executable": true,
+      "route_executability_basis": "verified",
+      "soc_continuous": true,
+      "energy_checks": {
+        "soc_never_exceeds_100": true,
+        "calculation_basis": true,
+        "vehicle_power_cap": true
+      },
+      "dependency_state": "charging_metadata_partial",
+      "blocker_codes": [],
+      "latency_ms": 0.211
+    },
+    {
+      "id": "fuel-service-measured",
+      "passed": true,
+      "expected_codes": [
+        "ENERGY_STOP_SCHEDULED",
+        "REST_STOP_SCHEDULED"
+      ],
+      "observed_codes": [
+        "ENERGY_STOP_SCHEDULED",
+        "REST_STOP_SCHEDULED"
+      ],
+      "route_executable": true,
+      "route_executability_basis": "verified",
+      "soc_continuous": true,
+      "energy_checks": {
+        "soc_never_exceeds_100": true,
+        "calculation_basis": true,
+        "replenishment_unit": true
+      },
+      "dependency_state": "available",
+      "blocker_codes": [],
+      "latency_ms": 0.321
+    },
+    {
+      "id": "partial-weather-payload",
+      "passed": true,
+      "expected_codes": [
+        "HEAVY_PRECIPITATION",
+        "WEATHER_DATA_PARTIAL"
+      ],
+      "observed_codes": [
+        "HEAVY_PRECIPITATION",
+        "WEATHER_DATA_PARTIAL"
+      ],
+      "route_executable": true,
+      "route_executability_basis": "verified",
+      "soc_continuous": true,
+      "energy_checks": {
+        "soc_never_exceeds_100": true
+      },
+      "dependency_state": "weather_payload_partial",
+      "blocker_codes": [],
+      "latency_ms": 0.188
+    },
+    {
+      "id": "invalid-vehicle-energy-metadata",
+      "passed": true,
+      "expected_codes": [
+        "VEHICLE_ENERGY_DATA_NORMALIZED"
+      ],
+      "observed_codes": [
+        "VEHICLE_ENERGY_DATA_NORMALIZED"
+      ],
+      "route_executable": true,
+      "route_executability_basis": "verified",
+      "soc_continuous": true,
+      "energy_checks": {
+        "soc_never_exceeds_100": true,
+        "starting_soc_normalized": true
+      },
+      "dependency_state": "vehicle_metadata_invalid",
+      "blocker_codes": [],
+      "latency_ms": 0.147
+    },
+    {
+      "id": "short-trip-no-optional-services",
+      "passed": true,
+      "expected_codes": [],
+      "observed_codes": [],
+      "route_executable": true,
+      "route_executability_basis": "verified",
+      "soc_continuous": true,
+      "energy_checks": {
+        "soc_never_exceeds_100": true
+      },
+      "dependency_state": "optional_services_absent",
+      "blocker_codes": [],
+      "latency_ms": 0.247
     }
   ]
 }

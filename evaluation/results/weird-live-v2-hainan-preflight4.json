@@ -1,0 +1,62 @@
+{
+  "generated_at": "2026-08-30T00:59:32.056103+08:00",
+  "base_url": "http://127.0.0.1:8000",
+  "scenario_count": 1,
+  "full_journey_count": 0,
+  "passed": 1,
+  "failed": 0,
+  "duration_seconds": 30.38,
+  "results": [
+    {
+      "id": "v2-hainan-island-family",
+      "input": "10月1日到10月4日，一家三口先从武汉坐飞机到三亚，跨海这段乘船去蜈支洲岛，顺便看看呀诺达，别每天六点起床。岛上怎么接驳、船票和天气有什么风险你先查清楚，住同一家酒店更省心。",
+      "full_requested": true,
+      "preflight": {
+        "ready": false,
+        "confirmation_required": true,
+        "semantic_checked": true,
+        "issues": [],
+        "extracted": {
+          "start_date": "2026-10-01",
+          "end_date": "2026-10-04",
+          "cross_sea_required": true,
+          "cross_sea_mode": "ferry",
+          "origin_name": "武汉",
+          "destination_name": "三亚",
+          "destination_names": [
+            "三亚",
+            "蜈支洲岛",
+            "呀诺达"
+          ],
+          "destination_scope": "multi_destination",
+          "travelers": 3,
+          "max_days": 4,
+          "preferences": [
+            "不早起",
+            "住同一家酒店"
+          ],
+          "transport_modes": [
+            "flight",
+            "ferry"
+          ],
+          "past_return_requested": false,
+          "stay_only_at_destination": false,
+          "must_visit_names": [
+            "三亚",
+            "蜈支洲岛",
+            "呀诺达"
+          ],
+          "travel_intents": [],
+          "special_events": [],
+          "time_window_minutes": null,
+          "_intent_status": "ok",
+          "_intent_source": "deepseek",
+          "_source_raw_text": "10月1日到10月4日，一家三口先从武汉坐飞机到三亚，跨海这段乘船去蜈支洲岛，顺便看看呀诺达，别每天六点起床。岛上怎么接驳、船票和天气有什么风险你先查清楚，住同一家酒店更省心。"
+        }
+      },
+      "failures": [],
+      "passed": true,
+      "latency_ms": 30384.79
+    }
+  ]
+}

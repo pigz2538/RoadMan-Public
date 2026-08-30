@@ -1,0 +1,107 @@
+{
+  "generated_at": "2026-08-29T21:08:54.876509+08:00",
+  "base_url": "http://127.0.0.1:8000",
+  "scenario_count": 1,
+  "full_journey_count": 1,
+  "passed": 1,
+  "failed": 0,
+  "duration_seconds": 349.07,
+  "results": [
+    {
+      "id": "chengdu-worksites-and-cpi",
+      "input": "9月23号从武汉飞成都，麓湖CPI要去，还得跑一趟成都航天博目电子科技有限公司和中国电子科技集团有限公司第十研究所，26号回来，其他别塞太满",
+      "full_requested": true,
+      "preflight": {
+        "ready": false,
+        "confirmation_required": true,
+        "semantic_checked": true,
+        "issues": [],
+        "extracted": {
+          "origin_name": "武汉",
+          "destination_name": "成都",
+          "destination_names": [
+            "成都",
+            "麓湖CPI",
+            "成都航天博目电子科技有限公司",
+            "中国电子科技集团有限公司第十研究所"
+          ],
+          "destination_scope": "city",
+          "start_date": "2026-09-23",
+          "end_date": "2026-09-26",
+          "transport_modes": [
+            "flight"
+          ],
+          "cross_sea_required": false,
+          "past_return_requested": false,
+          "stay_only_at_destination": false,
+          "must_visit_names": [
+            "麓湖CPI",
+            "成都航天博目电子科技有限公司",
+            "中国电子科技集团有限公司第十研究所"
+          ],
+          "cross_sea_mode": null,
+          "travel_intents": [],
+          "preferences": [],
+          "special_events": [],
+          "time_window_minutes": null,
+          "_intent_status": "ok",
+          "_intent_source": "deepseek",
+          "_source_raw_text": "9月23号从武汉飞成都，麓湖CPI要去，还得跑一趟成都航天博目电子科技有限公司和中国电子科技集团有限公司第十研究所，26号回来，其他别塞太满"
+        }
+      },
+      "trip_id": "trip_bebb4db5317d",
+      "progress": [
+        {
+          "value": 0,
+          "node": "queued"
+        },
+        {
+          "value": 5,
+          "node": "load_context"
+        },
+        {
+          "value": 28,
+          "node": "validate_required_fields"
+        },
+        {
+          "value": 64,
+          "node": "split_into_days"
+        },
+        {
+          "value": 69,
+          "node": "discover_tourism"
+        },
+        {
+          "value": 72,
+          "node": "build_local_routes"
+        },
+        {
+          "value": 85,
+          "node": "discover_services"
+        },
+        {
+          "value": 86,
+          "node": "sample_weather"
+        },
+        {
+          "value": 90,
+          "node": "enrich_deep_drive"
+        },
+        {
+          "value": 100,
+          "node": "persist_trip"
+        }
+      ],
+      "verification": {
+        "passed": true,
+        "issues": [],
+        "auto_repair_attempts": 0,
+        "auto_repair_exhausted": false
+      },
+      "html_export_bytes": 4230817,
+      "failures": [],
+      "passed": true,
+      "latency_ms": 349072.19
+    }
+  ]
+}

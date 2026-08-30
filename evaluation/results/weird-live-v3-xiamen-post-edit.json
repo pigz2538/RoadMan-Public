@@ -1,0 +1,118 @@
+{
+  "generated_at": "2026-08-30T09:59:36.817212+08:00",
+  "base_url": "http://127.0.0.1:8000",
+  "scenario_count": 1,
+  "full_journey_count": 1,
+  "passed": 1,
+  "failed": 0,
+  "duration_seconds": 371.8,
+  "results": [
+    {
+      "id": "v3-xiamen-ferry-family",
+      "input": "9月18到20号一家三口从武汉去厦门，飞机高铁你帮我比较一下，鼓浪屿和环岛路想去，海上那段坐轮渡，别给我排凌晨的活动，酒店尽量只住一家。",
+      "full_requested": true,
+      "preflight": {
+        "ready": false,
+        "confirmation_required": true,
+        "semantic_checked": true,
+        "issues": [],
+        "extracted": {
+          "start_date": "2026-09-18",
+          "end_date": "2026-09-20",
+          "cross_sea_required": true,
+          "cross_sea_mode": "ferry",
+          "origin_name": "武汉",
+          "destination_name": "厦门",
+          "destination_names": [
+            "厦门"
+          ],
+          "destination_scope": "city",
+          "travel_intents": [
+            "乘坐轮渡"
+          ],
+          "travelers": 3,
+          "max_days": 3,
+          "preferences": [
+            "不要凌晨活动",
+            "尽量只住一家酒店"
+          ],
+          "transport_modes": [
+            "flight",
+            "train",
+            "ferry"
+          ],
+          "past_return_requested": false,
+          "stay_only_at_destination": false,
+          "must_visit_names": [
+            "鼓浪屿",
+            "环岛路"
+          ],
+          "special_events": [],
+          "time_window_minutes": null,
+          "_intent_status": "ok",
+          "_intent_source": "deepseek",
+          "_source_raw_text": "9月18到20号一家三口从武汉去厦门，飞机高铁你帮我比较一下，鼓浪屿和环岛路想去，海上那段坐轮渡，别给我排凌晨的活动，酒店尽量只住一家。"
+        }
+      },
+      "trip_id": "trip_715ac2d2f9c0",
+      "progress": [
+        {
+          "value": 0,
+          "node": "queued"
+        },
+        {
+          "value": 5,
+          "node": "load_context"
+        },
+        {
+          "value": 28,
+          "node": "validate_required_fields"
+        },
+        {
+          "value": 64,
+          "node": "split_into_days"
+        },
+        {
+          "value": 72,
+          "node": "build_local_routes"
+        },
+        {
+          "value": 81,
+          "node": "load_vehicle_profile"
+        },
+        {
+          "value": 85,
+          "node": "discover_services"
+        },
+        {
+          "value": 86,
+          "node": "sample_weather"
+        },
+        {
+          "value": 90,
+          "node": "enrich_deep_drive"
+        },
+        {
+          "value": 100,
+          "node": "persist_trip"
+        }
+      ],
+      "verification": {
+        "passed": true,
+        "issues": [
+          {
+            "code": "WEATHER_DEGRADED",
+            "severity": "warning",
+            "description": "公共交通前往景点 当前天气数据暂不可用，已按基础风险继续规划"
+          }
+        ],
+        "auto_repair_attempts": 0,
+        "auto_repair_exhausted": false
+      },
+      "html_export_bytes": 3116907,
+      "failures": [],
+      "passed": true,
+      "latency_ms": 371802.26
+    }
+  ]
+}

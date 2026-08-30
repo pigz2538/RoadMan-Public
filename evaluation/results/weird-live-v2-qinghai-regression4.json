@@ -1,0 +1,59 @@
+{
+  "generated_at": "2026-08-30T03:11:51.493230+08:00",
+  "base_url": "http://127.0.0.1:8000",
+  "scenario_count": 1,
+  "full_journey_count": 1,
+  "passed": 0,
+  "failed": 1,
+  "duration_seconds": 335.65,
+  "results": [
+    {
+      "id": "v2-qinghai-stars-weather",
+      "input": "9月15日到9月18日想去青海看星星，带对象，从武汉出发，白天别排太满，晚上拍银河但不想看完还开长途。你把天气、海拔、月亮和高原休息一起考虑，阴天给我一个不扫兴的备选。",
+      "full_requested": true,
+      "preflight": {
+        "ready": false,
+        "confirmation_required": true,
+        "semantic_checked": true,
+        "issues": [],
+        "extracted": {
+          "start_date": "2026-09-15",
+          "end_date": "2026-09-18",
+          "origin_name": "武汉",
+          "destination_name": "青海",
+          "destination_names": [
+            "青海"
+          ],
+          "destination_scope": "province",
+          "travel_intents": [
+            "看星星",
+            "拍银河"
+          ],
+          "travelers": 2,
+          "max_days": 4,
+          "preferences": [
+            "白天行程轻松",
+            "晚上观星后避免长途驾驶"
+          ],
+          "special_events": [
+            "银河"
+          ],
+          "cross_sea_required": false,
+          "past_return_requested": false,
+          "stay_only_at_destination": false,
+          "cross_sea_mode": null,
+          "must_visit_names": [],
+          "transport_modes": [],
+          "time_window_minutes": null,
+          "_intent_status": "ok",
+          "_intent_source": "deepseek",
+          "_source_raw_text": "9月15日到9月18日想去青海看星星，带对象，从武汉出发，白天别排太满，晚上拍银河但不想看完还开长途。你把天气、海拔、月亮和高原休息一起考虑，阴天给我一个不扫兴的备选。"
+        }
+      },
+      "trip_id": "trip_1ddd929ed26c",
+      "passed": false,
+      "error": "status=failed: {\"passed\": false, \"issues\": [{\"code\": \"EMPTY_DAY_STAGES\", \"severity\": \"blocker\", \"description\": \"第 3 天没有可执行的移动或本地活动节点\"}, {\"code\": \"DRIVING_STAGE_CALENDAR_MISMATCH\", \"severity\": \"blocker\", \"description\": \"返程接驳 已跨出所属日期，需减少当日驾驶或提前安排过夜\"}, {\"code\": \"OVERNIGHT_HOTEL_MISSING\", \"severity\": \"blocker\", \"description\": \"2026-09-16 未安排过夜住宿\"}, {\"code\": \"ACTIVITY_TIME_OVERLAP\", \"severity\": \"blocker\", \"description\": \"金海岸宾馆（化隆群科新区店） 与 金海岸宾馆（化隆群科新区店） 的活动时间重叠\"}, {\"code\": \"ATTRACTION_OUTSIDE_COMFORT_WINDOW\", \"severity\": \"blocker\", \"description\": \"马步芳公馆 被安排在 09月18日 00:24，景点仅允许在当天 07:00–22:00 的白天舒适窗口内游览\"}, {\"code\": \"ACTIVITY_TIME_OVERLAP\", \"severity\": \"blocker\", \"description\": \"金海岸宾馆（化隆群科新区店） 与 移动阶段“返回住宿或目的地核心区 · 第 1/2 段” 的活动时间重叠\"}, {\"code\": \"ACTIVITY_TIME_OVERLAP\", \"severity\": \"blocker\", \"description\": \"金海岸宾馆（化隆群科新区店） 与 移动阶段“返回住宿或目的地核心区 · 第 2/2 段” 的活动时间重叠\"}, {\"code\": \"ACTIVITY_TIME_OVERLAP\", \"severity\": \"blocker\", \"description\": \"移动阶段“返回住宿或目的地核心区 · 第 2/2 段” 与 青海湖附近早餐 的活动时间重叠\"}, {\"code\": \"RETURN_DEADLINE_UNACHIEVABLE\", \"severity\": \"blocker\", \"description\": \"返程预计 09月19日 12:11 抵达，晚于用户要求的 09月18日 20:00；请延长行程、提前离开或改用更快的交通方式。\"}, {\"code\": \"DESTINATION_HIGHLIGHTS_UNCOVERED\", \"severity\": \"warning\", \"description\": \"目的地研究标记的代表性景点未全部进入当前可执行时间窗：青海湖、茶卡盐湖、青海湖·黑马河、茶卡盐湖天空壹号、青海湖国家重点风景名胜区-月牙湖(不对外开放)、茶卡盐湖景区售票处、茶卡盐湖景区游客服务中心、塔尔寺；可延长天数、减少停留或在编辑面板中加入。\"}], \"auto_repair_attempts\": 4, \"auto_repair_exhausted\": true}",
+      "latency_ms": 335645.89
+    }
+  ]
+}

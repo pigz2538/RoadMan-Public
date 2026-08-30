@@ -1,0 +1,22 @@
+{
+  "trip_id": "trip_ac4d9884823a",
+  "status": "passed",
+  "total_cases": 10,
+  "passed_cases": 10,
+  "cases": [
+    {"index": 1, "status": "passed", "evidence": "edit-replan-live-final.json"},
+    {"index": 2, "status": "passed", "evidence": "edit-replan-live-final.json"},
+    {"index": 3, "status": "passed", "evidence": "edit-replan-live-final.json"},
+    {"index": 4, "status": "passed", "evidence": "edit-replan-live-final.json"},
+    {"index": 5, "status": "passed", "evidence": "edit-replan-live-final.json"},
+    {"index": 6, "status": "passed", "evidence": "edit-replan-live-final.json"},
+    {"index": 7, "status": "passed", "evidence": "edit-replan-live-final.json"},
+    {"index": 8, "status": "passed", "evidence": "edit-replan-live-e8-regression.json"},
+    {"index": 9, "status": "passed", "evidence": "edit-replan-live-e9-e10-regression.json"},
+    {"index": 10, "status": "passed", "evidence": "edit-replan-live-e9-e10-regression.json"}
+  ],
+  "notes": [
+    "E08 was rerun after replacement exclusions were persisted.",
+    "E09 and E10 were rerun on the restored baseline after the E08 fix."
+  ]
+}

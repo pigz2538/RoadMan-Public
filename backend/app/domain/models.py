@@ -279,7 +279,11 @@ class EnergyEstimate(BaseModel):
     amount: float = Field(ge=0)
     unit: Literal["kWh", "L"]
     starting_percent: float | None = Field(default=None, ge=0, le=100)
-    consumed_percent: float | None = Field(default=None, ge=0, le=100)
+    # Battery-equivalent energy consumed across a movement stage may exceed
+    # 100% when the stage contains one or more replenishment stops. Actual SOC
+    # fields remain bounded to 0–100; this value is an energy quantity, not a
+    # gauge reading.
+    consumed_percent: float | None = Field(default=None, ge=0)
     before_replenishment_percent: float | None = Field(default=None, ge=0, le=100)
     replenished_amount: float | None = Field(default=None, ge=0)
     replenished_unit: Literal["kWh", "L"] | None = None

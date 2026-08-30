@@ -1,0 +1,496 @@
+{
+  "generated_at": "2026-08-30T06:15:27.266137+08:00",
+  "base_url": "http://127.0.0.1:8000",
+  "scenario_count": 10,
+  "full_journey_count": 0,
+  "passed": 10,
+  "failed": 0,
+  "duration_seconds": 298.55,
+  "results": [
+    {
+      "id": "v3-huangshan-mobility-parent",
+      "input": "我妈腿脚不太好，9月12号早上从武汉去黄山，周日傍晚前回，想看一点秋景但别安排太多台阶，住一处舒服的酒店就好，不要每天拖着行李换地方。",
+      "full_requested": true,
+      "preflight": {
+        "ready": false,
+        "confirmation_required": true,
+        "semantic_checked": true,
+        "issues": [],
+        "extracted": {
+          "start_date": "2026-09-12",
+          "end_date": "2026-09-13",
+          "origin_name": "武汉",
+          "destination_name": "黄山",
+          "destination_names": [
+            "黄山"
+          ],
+          "destination_scope": "poi",
+          "travel_intents": [
+            "赏秋景"
+          ],
+          "travelers": 2,
+          "max_days": 2,
+          "preferences": [
+            "舒适酒店",
+            "少台阶",
+            "不换住宿",
+            "腿脚不便"
+          ],
+          "special_events": [
+            "秋景"
+          ],
+          "cross_sea_required": false,
+          "past_return_requested": false,
+          "stay_only_at_destination": false,
+          "cross_sea_mode": null,
+          "must_visit_names": [],
+          "transport_modes": [],
+          "time_window_minutes": null,
+          "_intent_status": "ok",
+          "_intent_source": "deepseek",
+          "_source_raw_text": "我妈腿脚不太好，9月12号早上从武汉去黄山，周日傍晚前回，想看一点秋景但别安排太多台阶，住一处舒服的酒店就好，不要每天拖着行李换地方。"
+        }
+      },
+      "failures": [],
+      "passed": true,
+      "latency_ms": 42324.59
+    },
+    {
+      "id": "v3-xiamen-ferry-family",
+      "input": "9月18到20号一家三口从武汉去厦门，飞机高铁你帮我比较一下，鼓浪屿和环岛路想去，海上那段坐轮渡，别给我排凌晨的活动，酒店尽量只住一家。",
+      "full_requested": true,
+      "preflight": {
+        "ready": false,
+        "confirmation_required": true,
+        "semantic_checked": true,
+        "issues": [],
+        "extracted": {
+          "start_date": "2026-09-18",
+          "end_date": "2026-09-20",
+          "cross_sea_required": true,
+          "cross_sea_mode": "ferry",
+          "origin_name": "武汉",
+          "destination_name": "厦门",
+          "destination_names": [
+            "厦门"
+          ],
+          "destination_scope": "city",
+          "travelers": 3,
+          "preferences": [
+            "不要安排凌晨的活动",
+            "酒店尽量只住一家"
+          ],
+          "transport_modes": [
+            "flight",
+            "train",
+            "ferry"
+          ],
+          "past_return_requested": false,
+          "stay_only_at_destination": false,
+          "must_visit_names": [
+            "鼓浪屿",
+            "环岛路"
+          ],
+          "travel_intents": [],
+          "special_events": [],
+          "time_window_minutes": null,
+          "_intent_status": "ok",
+          "_intent_source": "deepseek",
+          "_source_raw_text": "9月18到20号一家三口从武汉去厦门，飞机高铁你帮我比较一下，鼓浪屿和环岛路想去，海上那段坐轮渡，别给我排凌晨的活动，酒店尽量只住一家。"
+        }
+      },
+      "failures": [],
+      "passed": true,
+      "latency_ms": 26003.52
+    },
+    {
+      "id": "v3-yueyang-ev-dog",
+      "input": "这周六上午开电车带狗从武汉去岳阳，周一回来，路上要留充电和休息，晚上不要赶长途，想找能带狗住的地方和湖边散步的安排。",
+      "full_requested": true,
+      "preflight": {
+        "ready": false,
+        "confirmation_required": true,
+        "semantic_checked": true,
+        "issues": [],
+        "extracted": {
+          "start_date": "2026-08-29",
+          "end_date": "2026-08-31",
+          "origin_name": "武汉",
+          "destination_name": "岳阳",
+          "destination_names": [
+            "岳阳"
+          ],
+          "destination_scope": "city",
+          "travel_intents": [
+            "湖边散步",
+            "带狗住宿"
+          ],
+          "preferences": [
+            "路上预留充电时间",
+            "路上预留休息时间",
+            "不赶夜路"
+          ],
+          "transport_modes": [
+            "driving"
+          ],
+          "cross_sea_required": false,
+          "past_return_requested": false,
+          "stay_only_at_destination": false,
+          "cross_sea_mode": null,
+          "special_events": [],
+          "must_visit_names": [],
+          "time_window_minutes": null,
+          "_intent_status": "ok",
+          "_intent_source": "deepseek",
+          "_source_raw_text": "这周六上午开电车带狗从武汉去岳阳，周一回来，路上要留充电和休息，晚上不要赶长途，想找能带狗住的地方和湖边散步的安排。"
+        }
+      },
+      "failures": [],
+      "passed": true,
+      "latency_ms": 21266.76
+    },
+    {
+      "id": "v3-chengdu-night-flight",
+      "input": "9月22日下午下班后我和对象从武汉飞成都，25号晚上回，想慢慢逛市区，麓湖CPI一定要去，落地太晚就先住机场附近一晚，后面换到景点比较方便的酒店，别安排凌晨看景。",
+      "full_requested": true,
+      "preflight": {
+        "ready": false,
+        "confirmation_required": true,
+        "semantic_checked": true,
+        "issues": [],
+        "extracted": {
+          "start_date": "2026-09-22",
+          "origin_name": "武汉",
+          "destination_name": "成都",
+          "destination_names": [
+            "成都"
+          ],
+          "destination_scope": "city",
+          "travel_intents": [
+            "慢逛市区"
+          ],
+          "end_date": "2026-09-25",
+          "return_time": "19:00",
+          "travelers": 2,
+          "preferences": [
+            "落地太晚先住机场附近一晚",
+            "后面换到景点方便的酒店",
+            "不安排凌晨看景"
+          ],
+          "transport_modes": [
+            "flight"
+          ],
+          "cross_sea_required": false,
+          "past_return_requested": false,
+          "stay_only_at_destination": false,
+          "must_visit_names": [
+            "麓湖CPI"
+          ],
+          "cross_sea_mode": null,
+          "special_events": [],
+          "time_window_minutes": null,
+          "_intent_status": "ok",
+          "_intent_source": "deepseek",
+          "_source_raw_text": "9月22日下午下班后我和对象从武汉飞成都，25号晚上回，想慢慢逛市区，麓湖CPI一定要去，落地太晚就先住机场附近一晚，后面换到景点比较方便的酒店，别安排凌晨看景。"
+        }
+      },
+      "failures": [],
+      "passed": true,
+      "latency_ms": 25722.84
+    },
+    {
+      "id": "v3-xinjiang-ambiguous-region",
+      "input": "想在国庆前去新疆看喀纳斯和赛里木湖，先从武汉飞到合适的城市，再租车慢慢走，八九天吧，具体哪天出发可以按航班和天气帮我挑，别把新疆烤肉店当成目的地。",
+      "full_requested": false,
+      "preflight": {
+        "ready": false,
+        "confirmation_required": false,
+        "semantic_checked": false,
+        "issues": [
+          "MISSING_FIELD",
+          "MISSING_FIELD",
+          "MISSING_FIELD"
+        ],
+        "extracted": {
+          "origin_name": "武汉",
+          "destination_names": [
+            "喀纳斯",
+            "赛里木湖"
+          ],
+          "destination_scope": "multi_destination",
+          "travel_intents": [
+            "nature_sightseeing",
+            "road_trip"
+          ],
+          "max_days": 9,
+          "preferences": [
+            "slow_travel",
+            "flexible_departure"
+          ],
+          "transport_modes": [
+            "flight",
+            "driving"
+          ],
+          "cross_sea_required": false,
+          "past_return_requested": false,
+          "stay_only_at_destination": false,
+          "must_visit_names": [
+            "喀纳斯",
+            "赛里木湖"
+          ],
+          "cross_sea_mode": null,
+          "special_events": [],
+          "time_window_minutes": null,
+          "_intent_status": "ok",
+          "_intent_source": "deepseek",
+          "_source_raw_text": "想在国庆前去新疆看喀纳斯和赛里木湖，先从武汉飞到合适的城市，再租车慢慢走，八九天吧，具体哪天出发可以按航班和天气帮我挑，别把新疆烤肉店当成目的地。"
+        }
+      },
+      "failures": [],
+      "passed": true,
+      "latency_ms": 26788.9
+    },
+    {
+      "id": "v3-nanjing-famous-loop",
+      "input": "9月26日从武汉坐高铁去南京，玩到28号晚上回，和对象第一次去，秦淮河、中山陵、明孝陵都别漏了，南大东大挑一个看看，酒店找在景点之间，不想每天往车站跑。",
+      "full_requested": true,
+      "preflight": {
+        "ready": false,
+        "confirmation_required": true,
+        "semantic_checked": true,
+        "issues": [],
+        "extracted": {
+          "start_date": "2026-09-26",
+          "origin_name": "武汉",
+          "destination_name": "南京",
+          "destination_names": [
+            "南京"
+          ],
+          "destination_scope": "city",
+          "travel_intents": [
+            "sightseeing"
+          ],
+          "end_date": "2026-09-28",
+          "return_time": "19:00",
+          "travelers": 2,
+          "max_days": 3,
+          "preferences": [
+            "酒店在景点之间",
+            "不想每天往车站跑"
+          ],
+          "transport_modes": [
+            "train"
+          ],
+          "cross_sea_required": false,
+          "past_return_requested": false,
+          "stay_only_at_destination": false,
+          "must_visit_names": [
+            "秦淮河",
+            "中山陵",
+            "明孝陵"
+          ],
+          "cross_sea_mode": null,
+          "special_events": [],
+          "time_window_minutes": null,
+          "_intent_status": "ok",
+          "_intent_source": "deepseek",
+          "_source_raw_text": "9月26日从武汉坐高铁去南京，玩到28号晚上回，和对象第一次去，秦淮河、中山陵、明孝陵都别漏了，南大东大挑一个看看，酒店找在景点之间，不想每天往车站跑。"
+        }
+      },
+      "failures": [],
+      "passed": true,
+      "latency_ms": 31331.25
+    },
+    {
+      "id": "v3-mixed-language-relative",
+      "input": "Next weekend 我和朋友从武汉去长沙，two nights，想吃本地小吃但不要同一家重复，橘子洲安排白天，Sunday evening 回来，please compare flight and train，不要红眼行程。",
+      "full_requested": true,
+      "preflight": {
+        "ready": false,
+        "confirmation_required": true,
+        "semantic_checked": true,
+        "issues": [],
+        "extracted": {
+          "start_date": "2026-08-29",
+          "end_date": "2026-08-30",
+          "origin_name": "武汉",
+          "destination_name": "长沙",
+          "destination_names": [
+            "长沙"
+          ],
+          "destination_scope": "city",
+          "travel_intents": [
+            "品尝本地小吃"
+          ],
+          "return_time": "19:00",
+          "travelers": 2,
+          "preferences": [
+            "橘子洲安排在白天",
+            "不要红眼行程"
+          ],
+          "transport_modes": [
+            "flight",
+            "train"
+          ],
+          "cross_sea_required": false,
+          "past_return_requested": false,
+          "stay_only_at_destination": false,
+          "must_visit_names": [
+            "橘子洲"
+          ],
+          "cross_sea_mode": null,
+          "special_events": [],
+          "time_window_minutes": null,
+          "_intent_status": "ok",
+          "_intent_source": "deepseek",
+          "_source_raw_text": "Next weekend 我和朋友从武汉去长沙，two nights，想吃本地小吃但不要同一家重复，橘子洲安排白天，Sunday evening 回来，please compare flight and train，不要红眼行程。"
+        }
+      },
+      "failures": [],
+      "passed": true,
+      "latency_ms": 64667.56
+    },
+    {
+      "id": "v3-qingdao-weather-flex",
+      "input": "10月3号到6号去青岛，两个大人带一个小朋友，从武汉出发，天气不好就把海边换成室内，想吃海鲜也想留半天发呆，返程不要卡得只差几分钟。",
+      "full_requested": true,
+      "preflight": {
+        "ready": false,
+        "confirmation_required": true,
+        "semantic_checked": true,
+        "issues": [],
+        "extracted": {
+          "start_date": "2026-10-03",
+          "end_date": "2026-10-06",
+          "origin_name": "武汉",
+          "destination_name": "青岛",
+          "destination_names": [
+            "青岛"
+          ],
+          "destination_scope": "city",
+          "travel_intents": [
+            "海鲜",
+            "发呆"
+          ],
+          "travelers": 3,
+          "preferences": [
+            "天气不好时海边换成室内",
+            "返程不要太赶"
+          ],
+          "cross_sea_required": false,
+          "past_return_requested": false,
+          "stay_only_at_destination": false,
+          "cross_sea_mode": null,
+          "special_events": [],
+          "must_visit_names": [],
+          "transport_modes": [],
+          "time_window_minutes": null,
+          "_intent_status": "ok",
+          "_intent_source": "deepseek",
+          "_source_raw_text": "10月3号到6号去青岛，两个大人带一个小朋友，从武汉出发，天气不好就把海边换成室内，想吃海鲜也想留半天发呆，返程不要卡得只差几分钟。"
+        }
+      },
+      "failures": [],
+      "passed": true,
+      "latency_ms": 15669.85
+    },
+    {
+      "id": "v3-vague-coast-clarify",
+      "input": "突然想去海边放空两天，开车还是坐飞机都可以，想住得舒服、少走路、吃点当地的，地点和出发时间我还没想好，你先问我几个关键问题。",
+      "full_requested": false,
+      "preflight": {
+        "ready": false,
+        "confirmation_required": false,
+        "semantic_checked": false,
+        "issues": [
+          "MISSING_FIELD",
+          "MISSING_FIELD",
+          "MISSING_FIELD",
+          "MISSING_FIELD"
+        ],
+        "extracted": {
+          "destination_scope": "unknown",
+          "travel_intents": [
+            "放空",
+            "住得舒服",
+            "少走路",
+            "吃点当地的"
+          ],
+          "max_days": 2,
+          "preferences": [
+            "住得舒服",
+            "少走路",
+            "吃点当地的"
+          ],
+          "transport_modes": [
+            "driving",
+            "flight"
+          ],
+          "cross_sea_required": false,
+          "past_return_requested": false,
+          "stay_only_at_destination": false,
+          "cross_sea_mode": null,
+          "destination_names": [],
+          "special_events": [],
+          "must_visit_names": [],
+          "time_window_minutes": null,
+          "_intent_status": "ok",
+          "_intent_source": "deepseek",
+          "_source_raw_text": "突然想去海边放空两天，开车还是坐飞机都可以，想住得舒服、少走路、吃点当地的，地点和出发时间我还没想好，你先问我几个关键问题。"
+        }
+      },
+      "failures": [],
+      "passed": true,
+      "latency_ms": 18089.1
+    },
+    {
+      "id": "v3-conflicting-return-clarify",
+      "input": "明早从武汉去北京，晚上八点前回武汉，想看故宫和长城，带对象还要轻松一点；如果做不到就别硬排，先告诉我需要改哪条条件。",
+      "full_requested": false,
+      "preflight": {
+        "ready": false,
+        "confirmation_required": false,
+        "semantic_checked": true,
+        "issues": [
+          "SEMANTIC_INFEASIBLE"
+        ],
+        "extracted": {
+          "origin_name": "武汉",
+          "destination_name": "北京",
+          "destination_names": [
+            "北京"
+          ],
+          "destination_scope": "city",
+          "travel_intents": [
+            "轻松"
+          ],
+          "start_date": "2026-08-30",
+          "end_date": "2026-08-30",
+          "return_time": "20:00",
+          "travelers": 2,
+          "max_days": 1,
+          "preferences": [
+            "轻松"
+          ],
+          "cross_sea_required": false,
+          "past_return_requested": false,
+          "stay_only_at_destination": false,
+          "must_visit_names": [
+            "故宫",
+            "长城"
+          ],
+          "cross_sea_mode": null,
+          "special_events": [],
+          "transport_modes": [],
+          "time_window_minutes": null,
+          "_intent_status": "ok",
+          "_intent_source": "deepseek",
+          "_source_raw_text": "明早从武汉去北京，晚上八点前回武汉，想看故宫和长城，带对象还要轻松一点；如果做不到就别硬排，先告诉我需要改哪条条件。"
+        }
+      },
+      "failures": [],
+      "passed": true,
+      "latency_ms": 26686.58
+    }
+  ]
+}

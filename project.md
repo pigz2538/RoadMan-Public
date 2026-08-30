@@ -225,6 +225,8 @@ npm run test:e2e
 
 需要真实 provider 时，再执行 Docker 健康检查、`deploy/api_smoke.py` 和对应 Skill API 冒烟。没有凭据的环境也必须返回可解释的降级结果；语义智能体不可用时不能把关键词结果冒充模型理解。完整旅程与编辑重规划验收脚本见 `deploy/`；需求理解评测见 `evaluation/`。
 
+复赛评测新增 `deploy/semifinal-check.ps1` 统一入口：构建三类镜像，运行后端测试、续航误差与 12 个异常降级场景、前端单测和生产构建，并生成机器可读/人类可读 readiness 报告。`deploy/semifinal_evidence.mjs` 从运行中产品与评测 JSON 生成 2560×1440 证据截图，清单位于 `submission/GOAI_Boundless_Agents/semifinal/assets/screenshot-manifest.json`。续航模拟回放不能作为实车承诺；`--require-real` 会拒绝非 `real_vehicle_telemetry` 数据。
+
 ## 10. 维护原则
 
 1. 语义判断交给模型；显式日期、数值、坐标、路线、能耗和冲突必须经过结构化校验。

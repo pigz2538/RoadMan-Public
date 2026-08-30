@@ -1,0 +1,19 @@
+{
+  "base_url": "http://127.0.0.1:8000",
+  "trip_id": "trip_ac4d9884823a",
+  "cases": [
+    {
+      "index": 9,
+      "name": "批量新增后删除再统一重排",
+      "status": "passed",
+      "seconds": 239.83
+    },
+    {
+      "index": 10,
+      "name": "自然语言新增景点",
+      "status": "passed",
+      "seconds": 260.34
+    }
+  ],
+  "status": "passed"
+}

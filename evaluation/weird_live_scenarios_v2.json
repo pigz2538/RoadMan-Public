@@ -1,0 +1,110 @@
+[
+  {
+    "id": "v2-shanghai-suzhou-parents",
+    "input": "下个周末想带爸妈从上海去苏州转转，周六一早出发，周日吃完晚饭前回上海，园林挑经典的就好，别一上午赶四个地方，住一处舒服的不要拖着行李换来换去。",
+    "expect": {
+      "origin": "上海",
+      "destination": "苏州",
+      "travelers": 3,
+      "date_order_valid": true
+    },
+    "full": true
+  },
+  {
+    "id": "v2-beijing-after-work",
+    "input": "我和对象下周五下班后从武汉去北京，周日晚上回，故宫和天安门一带想看，另外挑一两个不累的地方就行。高铁飞机卧铺你帮我比较，别刚下车就冲景点，更别凌晨三点去排队。",
+    "expect": {
+      "origin": "武汉",
+      "destination": "北京",
+      "travelers": 2,
+      "must_visit": ["故宫", "天安门"],
+      "date_order_valid": true
+    },
+    "full": true
+  },
+  {
+    "id": "v2-changsha-slow-food",
+    "input": "周六临时想从武汉去长沙吃点好吃的顺便走走，周日晚上八点前回来。橘子洲和岳麓山看情况安排，餐馆别老是同一家，离得远的就别硬塞，晚上想回舒服的酒店睡。",
+    "expect": {
+      "origin": "武汉",
+      "destination": "长沙",
+      "date_order_valid": true
+    },
+    "full": true
+  },
+  {
+    "id": "v2-mixed-english-changsha",
+    "input": "Next Tue 到 Thu 我和对象从武汉飞长沙，想慢慢逛橘子洲和省博，Sunday night 不用回，别把英文日期理解错，也不要安排红眼后马上爬山。",
+    "expect": {
+      "origin": "武汉",
+      "destination": "长沙",
+      "travelers": 2,
+      "must_visit": ["橘子洲"],
+      "date_order_valid": true
+    },
+    "full": true
+  },
+  {
+    "id": "v2-xinjiang-roadtrip",
+    "input": "下周一想和对象从武汉一路自驾去新疆，十天左右，纯电车现在还有六成电。别把新疆烤肉店当成目的地，沿途该睡就睡、该充电就充电，喀纳斯和赛里木湖能安排就安排，太赶就诚实告诉我。",
+    "expect": {
+      "origin": "武汉",
+      "destination_any": ["新疆", "乌鲁木齐"],
+      "travelers": 2,
+      "must_visit": ["喀纳斯", "赛里木湖"],
+      "date_order_valid": true
+    },
+    "full": true
+  },
+  {
+    "id": "v2-hainan-island-family",
+    "input": "10月1日到10月4日，一家三口先从武汉坐飞机到三亚，跨海这段乘船去蜈支洲岛，顺便看看呀诺达，别每天六点起床。岛上怎么接驳、船票和天气有什么风险你先查清楚，住同一家酒店更省心。",
+    "expect": {
+      "origin": "武汉",
+      "destination_any": ["海南", "三亚"],
+      "travelers": 3,
+      "must_visit": ["蜈支洲岛", "呀诺达"],
+      "date_order_valid": true
+    },
+    "full": true
+  },
+  {
+    "id": "v2-xian-luoyang-two-cities",
+    "input": "下周三从武汉出发，先去西安再去洛阳，周日回武汉，和对象边走边吃，肉夹馍和洛阳水席各安排一次就好。兵马俑、城墙和龙门石窟想看，城市之间坐高铁，别把餐馆名字当成景点或城市。",
+    "expect": {
+      "origin": "武汉",
+      "destination_any": ["西安", "洛阳"],
+      "travelers": 2,
+      "must_visit": ["兵马俑", "龙门石窟"],
+      "date_order_valid": true
+    },
+    "full": true
+  },
+  {
+    "id": "v2-qinghai-stars-weather",
+    "input": "9月15日到9月18日想去青海看星星，带对象，从武汉出发，白天别排太满，晚上拍银河但不想看完还开长途。你把天气、海拔、月亮和高原休息一起考虑，阴天给我一个不扫兴的备选。",
+    "expect": {
+      "origin": "武汉",
+      "destination": "青海",
+      "travelers": 2,
+      "date_order_valid": true
+    },
+    "full": true
+  },
+  {
+    "id": "v2-vague-seaside",
+    "input": "这周末突然想去海边放空，开车就行，别太累，最好能吃点当地的。还没想好从哪里走，也不知道去哪片海，你先问我最关键的几个问题。",
+    "expect": {
+      "clarification_required": true
+    },
+    "full": false
+  },
+  {
+    "id": "v2-impossible-short-window",
+    "input": "明早从武汉出发去乌鲁木齐，今晚一定回武汉，带对象想舒服一点，最好还看两个地方。你觉得不现实就直接说，不要为了完成规划硬编路线。",
+    "expect": {
+      "clarification_required": true
+    },
+    "full": false
+  }
+]

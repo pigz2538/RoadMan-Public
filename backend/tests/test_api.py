@@ -12,6 +12,7 @@ from app.domain.models import SSEEvent
 from app.repositories import TripRepository
 from app.repositories.skill_calls import record_agent_call
 from app.services.sse import sse_manager
+from app.api.trips import _semantic_guard_issue_is_actionable
 
 
 @pytest.mark.asyncio
@@ -495,6 +496,40 @@ async def test_preflight_replaces_stale_end_date_for_relative_duration(client):
     assert body["extracted"]["start_date"] == expected_start.isoformat()
     assert body["extracted"]["end_date"] == (expected_start + timedelta(days=2)).isoformat()
     assert "INVALID_DATE_ORDER" not in {item["code"] for item in body["issues"]}
+
+
+def test_semantic_guard_does_not_reopen_complete_duration_request():
+    extracted = {
+        "origin_name": "武汉",
+        "destination_name": "成都",
+        "start_date": "2026-08-30",
+        "end_date": "2026-09-02",
+        "max_days": 3,
+    }
+
+    assert not _semantic_guard_issue_is_actionable(
+        {"code": "SEMANTIC_DURATION_MISMATCH", "field": "preferences"},
+        extracted,
+    )
+    assert not _semantic_guard_issue_is_actionable(
+        {"code": "SEMANTIC_MISSING_INFO", "field": "preferences"},
+        extracted,
+    )
+    assert _semantic_guard_issue_is_actionable(
+        {"code": "SEMANTIC_COMFORT_CONFLICT", "field": "preferences"},
+        extracted,
+    )
+
+
+def test_semantic_guard_keeps_missing_info_when_core_request_is_incomplete():
+    assert _semantic_guard_issue_is_actionable(
+        {"code": "SEMANTIC_MISSING_INFO", "field": "preferences"},
+        {
+            "origin_name": "武汉",
+            "destination_name": "新疆",
+            "start_date": "2026-09-01",
+        },
+    )
 
 
 @pytest.mark.asyncio

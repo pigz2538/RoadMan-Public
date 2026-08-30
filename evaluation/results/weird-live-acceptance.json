@@ -1,0 +1,529 @@
+{
+  "generated_at": "2026-08-29T19:52:49.496402+08:00",
+  "base_url": "http://127.0.0.1:8000",
+  "scenario_count": 10,
+  "full_journey_count": 1,
+  "passed": 7,
+  "failed": 3,
+  "duration_seconds": 808.03,
+  "results": [
+    {
+      "id": "casual-chengdu-couple-flight",
+      "input": "这周日到下周三想和对象从武汉坐飞机去成都玩三天，一定要去麓湖CPI",
+      "full_requested": true,
+      "preflight": {
+        "ready": false,
+        "confirmation_required": false,
+        "semantic_checked": true,
+        "issues": [
+          "SEMANTIC_DURATION_MISMATCH"
+        ],
+        "extracted": {
+          "start_date": "2026-08-30",
+          "end_date": "2026-09-02",
+          "origin_name": "武汉",
+          "destination_name": "成都",
+          "destination_names": [
+            "成都"
+          ],
+          "destination_scope": "city",
+          "travelers": 2,
+          "max_days": 3,
+          "transport_modes": [
+            "flight"
+          ],
+          "cross_sea_required": false,
+          "past_return_requested": false,
+          "stay_only_at_destination": false,
+          "must_visit_names": [
+            "麓湖CPI"
+          ],
+          "cross_sea_mode": null,
+          "travel_intents": [],
+          "preferences": [],
+          "special_events": [],
+          "time_window_minutes": null,
+          "_intent_status": "ok",
+          "_intent_source": "deepseek",
+          "_source_raw_text": "这周日到下周三想和对象从武汉坐飞机去成都玩三天，一定要去麓湖CPI"
+        }
+      },
+      "failures": [
+        "not_ready"
+      ],
+      "passed": false,
+      "latency_ms": 48375.18
+    },
+    {
+      "id": "three-days-from-next-wednesday",
+      "input": "下周三想和对象从武汉坐飞机去成都玩三天，一定要去麓湖CPI，别排得跟打卡比赛一样",
+      "full_requested": false,
+      "preflight": {
+        "ready": false,
+        "confirmation_required": true,
+        "semantic_checked": true,
+        "issues": [],
+        "extracted": {
+          "start_date": "2026-09-02",
+          "origin_name": "武汉",
+          "destination_name": "成都",
+          "destination_names": [
+            "成都"
+          ],
+          "destination_scope": "city",
+          "travelers": 2,
+          "max_days": 3,
+          "preferences": [
+            "行程轻松，不赶时间"
+          ],
+          "transport_modes": [
+            "flight"
+          ],
+          "cross_sea_required": false,
+          "past_return_requested": false,
+          "stay_only_at_destination": false,
+          "must_visit_names": [
+            "麓湖CPI"
+          ],
+          "cross_sea_mode": null,
+          "travel_intents": [],
+          "special_events": [],
+          "time_window_minutes": null,
+          "_intent_status": "ok",
+          "_intent_source": "deepseek",
+          "_source_raw_text": "下周三想和对象从武汉坐飞机去成都玩三天，一定要去麓湖CPI，别排得跟打卡比赛一样",
+          "end_date": "2026-09-04"
+        }
+      },
+      "failures": [],
+      "passed": true,
+      "latency_ms": 37751.54
+    },
+    {
+      "id": "harbin-six-day-roadtrip",
+      "input": "武汉到哈尔滨情侣自驾，6天，旅游，下周一出发，路上别让我俩一天硬开十几个小时",
+      "full_requested": true,
+      "preflight": {
+        "ready": false,
+        "confirmation_required": false,
+        "semantic_checked": true,
+        "issues": [
+          "SEMANTIC_MISSING_INFO"
+        ],
+        "extracted": {
+          "start_date": "2026-08-31",
+          "origin_name": "武汉",
+          "destination_name": "哈尔滨",
+          "destination_names": [
+            "哈尔滨"
+          ],
+          "destination_scope": "city",
+          "travelers": 2,
+          "max_days": 6,
+          "preferences": [
+            "不要一天硬开十几个小时"
+          ],
+          "transport_modes": [
+            "driving"
+          ],
+          "cross_sea_required": false,
+          "past_return_requested": false,
+          "stay_only_at_destination": false,
+          "cross_sea_mode": null,
+          "travel_intents": [],
+          "special_events": [],
+          "must_visit_names": [],
+          "time_window_minutes": null,
+          "_intent_status": "ok",
+          "_intent_source": "deepseek",
+          "_source_raw_text": "武汉到哈尔滨情侣自驾，6天，旅游，下周一出发，路上别让我俩一天硬开十几个小时",
+          "end_date": "2026-09-05"
+        }
+      },
+      "failures": [
+        "not_ready"
+      ],
+      "passed": false,
+      "latency_ms": 69590.11
+    },
+    {
+      "id": "chengdu-worksites-and-cpi",
+      "input": "9月23号从武汉飞成都，麓湖CPI要去，还得跑一趟成都航天博目电子科技有限公司和中国电子科技集团有限公司第十研究所，26号回来，其他别塞太满",
+      "full_requested": true,
+      "preflight": {
+        "ready": false,
+        "confirmation_required": true,
+        "semantic_checked": true,
+        "issues": [],
+        "extracted": {
+          "origin_name": "武汉",
+          "destination_name": "成都",
+          "destination_names": [
+            "成都",
+            "麓湖CPI",
+            "成都航天博目电子科技有限公司",
+            "中国电子科技集团有限公司第十研究所"
+          ],
+          "destination_scope": "city",
+          "start_date": "2026-09-23",
+          "end_date": "2026-09-26",
+          "preferences": [
+            "行程不要安排太满"
+          ],
+          "transport_modes": [
+            "flight"
+          ],
+          "cross_sea_required": false,
+          "past_return_requested": false,
+          "stay_only_at_destination": false,
+          "must_visit_names": [
+            "麓湖CPI",
+            "成都航天博目电子科技有限公司",
+            "中国电子科技集团有限公司第十研究所"
+          ],
+          "cross_sea_mode": null,
+          "travel_intents": [],
+          "special_events": [],
+          "time_window_minutes": null,
+          "_intent_status": "ok",
+          "_intent_source": "deepseek",
+          "_source_raw_text": "9月23号从武汉飞成都，麓湖CPI要去，还得跑一趟成都航天博目电子科技有限公司和中国电子科技集团有限公司第十研究所，26号回来，其他别塞太满"
+        }
+      },
+      "trip_id": "trip_3eb1e8bcf5a9",
+      "progress": [
+        {
+          "value": 0,
+          "node": "queued"
+        },
+        {
+          "value": 5,
+          "node": "load_context"
+        },
+        {
+          "value": 28,
+          "node": "validate_required_fields"
+        },
+        {
+          "value": 64,
+          "node": "split_into_days"
+        },
+        {
+          "value": 69,
+          "node": "discover_tourism"
+        },
+        {
+          "value": 72,
+          "node": "build_local_routes"
+        },
+        {
+          "value": 85,
+          "node": "discover_services"
+        },
+        {
+          "value": 86,
+          "node": "sample_weather"
+        },
+        {
+          "value": 90,
+          "node": "enrich_deep_drive"
+        },
+        {
+          "value": 91,
+          "node": "schedule_tourism"
+        },
+        {
+          "value": 100,
+          "node": "persist_trip"
+        }
+      ],
+      "verification": {
+        "passed": true,
+        "issues": [
+          {
+            "code": "DESTINATION_HIGHLIGHTS_UNCOVERED",
+            "severity": "warning",
+            "description": "目的地研究标记的代表性景点未全部进入当前可执行时间窗：宽窄巷子景区、宽窄巷子步行街、麓湖水线公园；可延长天数、减少停留或在编辑面板中加入。"
+          }
+        ],
+        "auto_repair_attempts": 0,
+        "auto_repair_exhausted": false
+      },
+      "html_export_bytes": 4783998,
+      "failures": [
+        "planned_must_visit:麓湖CPI",
+        "planned_must_visit:航天博目",
+        "planned_must_visit:第十研究所"
+      ],
+      "passed": false,
+      "latency_ms": 477631.67
+    },
+    {
+      "id": "mixed-english-hangzhou",
+      "input": "Next Thu after work 从武汉飞杭州，Sunday night回来，两个人，灵隐寺想慢慢逛3小时，不租车，酒店别天天换",
+      "full_requested": false,
+      "preflight": {
+        "ready": false,
+        "confirmation_required": true,
+        "semantic_checked": true,
+        "issues": [],
+        "extracted": {
+          "start_date": "2026-09-03",
+          "end_date": "2026-09-06",
+          "origin_name": "武汉",
+          "destination_name": "杭州",
+          "destination_names": [
+            "杭州"
+          ],
+          "destination_scope": "city",
+          "travel_intents": [
+            "慢游"
+          ],
+          "return_time": "19:00",
+          "travelers": 2,
+          "preferences": [
+            "不租车",
+            "酒店不要每天换"
+          ],
+          "transport_modes": [
+            "flight"
+          ],
+          "cross_sea_required": false,
+          "past_return_requested": false,
+          "stay_only_at_destination": false,
+          "must_visit_names": [
+            "灵隐寺"
+          ],
+          "cross_sea_mode": null,
+          "special_events": [],
+          "time_window_minutes": null,
+          "_intent_status": "ok",
+          "_intent_source": "deepseek",
+          "_source_raw_text": "Next Thu after work 从武汉飞杭州，Sunday night回来，两个人，灵隐寺想慢慢逛3小时，不租车，酒店别天天换"
+        }
+      },
+      "failures": [],
+      "passed": true,
+      "latency_ms": 34469.06
+    },
+    {
+      "id": "changsha-natural-weekend",
+      "input": "周六一早武汉出发去长沙，周日晚上八点之前回来吧，就想看看自然风景，吃点本地的，别一直赶路",
+      "full_requested": false,
+      "preflight": {
+        "ready": false,
+        "confirmation_required": true,
+        "semantic_checked": true,
+        "issues": [],
+        "extracted": {
+          "start_date": "2026-08-29",
+          "end_date": "2026-08-30",
+          "origin_name": "武汉",
+          "destination_name": "长沙",
+          "destination_names": [
+            "长沙"
+          ],
+          "destination_scope": "city",
+          "travel_intents": [
+            "自然风景",
+            "品尝本地美食"
+          ],
+          "return_time": "20:00",
+          "max_days": 2,
+          "preferences": [
+            "不赶路"
+          ],
+          "cross_sea_required": false,
+          "past_return_requested": false,
+          "stay_only_at_destination": false,
+          "cross_sea_mode": null,
+          "special_events": [],
+          "must_visit_names": [],
+          "transport_modes": [],
+          "time_window_minutes": null,
+          "_intent_status": "ok",
+          "_intent_source": "deepseek",
+          "_source_raw_text": "周六一早武汉出发去长沙，周日晚上八点之前回来吧，就想看看自然风景，吃点本地的，别一直赶路"
+        }
+      },
+      "failures": [],
+      "passed": true,
+      "latency_ms": 30054.81
+    },
+    {
+      "id": "two-provinces-not-restaurants",
+      "input": "想从武汉去新疆再去西藏，和对象一起，9月18号走，十天左右，不是找新疆菜馆哈，先看看这个时间够不够",
+      "full_requested": false,
+      "preflight": {
+        "ready": false,
+        "confirmation_required": true,
+        "semantic_checked": true,
+        "issues": [],
+        "extracted": {
+          "origin_name": "武汉",
+          "destination_name": "新疆",
+          "destination_names": [
+            "新疆",
+            "西藏"
+          ],
+          "destination_scope": "multi_destination",
+          "start_date": "2026-09-18",
+          "travelers": 2,
+          "max_days": 10,
+          "preferences": [],
+          "cross_sea_required": false,
+          "past_return_requested": false,
+          "stay_only_at_destination": false,
+          "must_visit_names": [
+            "新疆",
+            "西藏"
+          ],
+          "cross_sea_mode": null,
+          "travel_intents": [],
+          "special_events": [],
+          "transport_modes": [],
+          "time_window_minutes": null,
+          "_intent_status": "ok",
+          "_intent_source": "deepseek",
+          "_source_raw_text": "想从武汉去新疆再去西藏，和对象一起，9月18号走，十天左右，不是找新疆菜馆哈，先看看这个时间够不够",
+          "end_date": "2026-09-27"
+        }
+      },
+      "failures": [],
+      "passed": true,
+      "latency_ms": 27889.29
+    },
+    {
+      "id": "relative-day-nanjing",
+      "input": "后天晚上从合肥去南京，玩到下周天中午，爸妈也一起，住舒服点，钟山和秦淮河想去",
+      "full_requested": false,
+      "preflight": {
+        "ready": false,
+        "confirmation_required": true,
+        "semantic_checked": true,
+        "issues": [],
+        "extracted": {
+          "start_date": "2026-08-31",
+          "origin_name": "合肥",
+          "destination_name": "南京",
+          "destination_names": [
+            "南京"
+          ],
+          "destination_scope": "city",
+          "end_date": "2026-09-06",
+          "departure_time": "19:00",
+          "return_time": "12:00",
+          "travelers": 3,
+          "preferences": [
+            "舒适住宿"
+          ],
+          "cross_sea_required": false,
+          "past_return_requested": false,
+          "stay_only_at_destination": false,
+          "must_visit_names": [
+            "钟山",
+            "秦淮河"
+          ],
+          "cross_sea_mode": null,
+          "travel_intents": [],
+          "special_events": [],
+          "transport_modes": [],
+          "time_window_minutes": null,
+          "_intent_status": "ok",
+          "_intent_source": "deepseek",
+          "_source_raw_text": "后天晚上从合肥去南京，玩到下周天中午，爸妈也一起，住舒服点，钟山和秦淮河想去"
+        }
+      },
+      "failures": [],
+      "passed": true,
+      "latency_ms": 29166.57
+    },
+    {
+      "id": "xinjiang-impossible-six-day-drive",
+      "input": "武汉到新疆情侣自驾，6天，旅游，车是纯电的现在还剩47%，如果根本来不及你就直说",
+      "full_requested": false,
+      "preflight": {
+        "ready": false,
+        "confirmation_required": false,
+        "semantic_checked": false,
+        "issues": [
+          "MISSING_FIELD",
+          "MISSING_FIELD"
+        ],
+        "extracted": {
+          "origin_name": "武汉",
+          "destination_name": "新疆",
+          "destination_names": [
+            "新疆"
+          ],
+          "destination_scope": "region",
+          "travel_intents": [
+            "旅游"
+          ],
+          "travelers": 2,
+          "max_days": 6,
+          "preferences": [
+            "纯电车辆（当前电量47%）"
+          ],
+          "transport_modes": [
+            "driving"
+          ],
+          "cross_sea_required": false,
+          "past_return_requested": false,
+          "stay_only_at_destination": false,
+          "cross_sea_mode": null,
+          "special_events": [],
+          "must_visit_names": [],
+          "time_window_minutes": null,
+          "_intent_status": "ok",
+          "_intent_source": "deepseek",
+          "_source_raw_text": "武汉到新疆情侣自驾，6天，旅游，车是纯电的现在还剩47%，如果根本来不及你就直说"
+        }
+      },
+      "failures": [],
+      "passed": true,
+      "latency_ms": 39846.95
+    },
+    {
+      "id": "honest-clarification",
+      "input": "我妈说过阵子想出去看看花，我也没想好去哪，最好别太累",
+      "full_requested": false,
+      "preflight": {
+        "ready": false,
+        "confirmation_required": false,
+        "semantic_checked": false,
+        "issues": [
+          "MISSING_FIELD",
+          "MISSING_FIELD",
+          "MISSING_FIELD",
+          "MISSING_FIELD"
+        ],
+        "extracted": {
+          "destination_scope": "unknown",
+          "travel_intents": [
+            "赏花"
+          ],
+          "travelers": 2,
+          "preferences": [
+            "不要太累"
+          ],
+          "cross_sea_required": false,
+          "past_return_requested": false,
+          "stay_only_at_destination": false,
+          "cross_sea_mode": null,
+          "destination_names": [],
+          "special_events": [],
+          "must_visit_names": [],
+          "transport_modes": [],
+          "time_window_minutes": null,
+          "_intent_status": "ok",
+          "_intent_source": "deepseek",
+          "_source_raw_text": "我妈说过阵子想出去看看花，我也没想好去哪，最好别太累"
+        }
+      },
+      "failures": [],
+      "passed": true,
+      "latency_ms": 13221.07
+    }
+  ]
+}

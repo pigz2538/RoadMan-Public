@@ -1,0 +1,39 @@
+{
+  "generated_at": "2026-08-29T09:39:28.168Z",
+  "viewport": {
+    "width": 2560,
+    "height": 1440
+  },
+  "screenshots": [
+    {
+      "name": "01-home-2560x1440.png",
+      "width": 2560,
+      "height": 1440,
+      "source": "http://127.0.0.1:8080/home"
+    },
+    {
+      "name": "02-planning-workspace-2560x1440.png",
+      "width": 2560,
+      "height": 1440,
+      "source": "http://127.0.0.1:8080/trips/trip_wuhan_lushan_demo/plan"
+    },
+    {
+      "name": "03-map-focus-2560x1440.png",
+      "width": 2560,
+      "height": 1440,
+      "source": "http://127.0.0.1:8080/trips/trip_wuhan_lushan_demo/plan"
+    },
+    {
+      "name": "04-operations-2560x1440.png",
+      "width": 2560,
+      "height": 1440,
+      "source": "http://127.0.0.1:8080/ops"
+    },
+    {
+      "name": "05-evaluation-dashboard-2560x1440.png",
+      "width": 2560,
+      "height": 1440,
+      "source": "generated from evaluation results"
+    }
+  ]
+}

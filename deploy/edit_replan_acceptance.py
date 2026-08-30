@@ -216,7 +216,12 @@ def replan(session: requests.Session, base: str) -> dict[str, Any]:
     # used by the detail page instead of relying on a removed synchronous
     # ``editing/replan`` endpoint.
     request(session, "POST", f"{base}/planning/start", timeout=120)
-    deadline = time.monotonic() + 300
+    # A real edit replan performs the same multi-agent search, route and
+    # verification loop as a fresh plan.  External map/travel providers can
+    # legitimately take several minutes; timing out at five minutes leaves a
+    # still-running job and makes the next case mutate a dirty fixture.  Keep
+    # polling until the worker's normal acceptance window expires.
+    deadline = time.monotonic() + 900
     result: dict[str, Any] = {}
     while time.monotonic() < deadline:
         result = request(session, "GET", f"{base}/planning", timeout=30)
@@ -439,6 +444,144 @@ def case_semantic_add(ctx: CaseContext) -> None:
     assert_activity_present(updated, name)
 
 
+# The first generated version of this harness contained mojibake literals in
+# the three natural-language cases.  Keep the public API calls identical, but
+# use real Chinese user messages so these cases exercise the same intent
+# parser that the UI uses instead of testing an accidental gibberish fallback.
+def case_semantic_replace(ctx: CaseContext) -> None:
+    trip = get_trip(ctx.session, ctx.base)
+    day, target = optional_attraction(trip, preferred_day="day_2")
+    candidate = unused_candidate(ctx.session, ctx.base, trip, "attractions")
+    new_name = str((candidate.get("place") or {}).get("name") or "").strip()
+    result = request(
+        ctx.session, "POST", f"{ctx.base}/editing/interpret", timeout=180,
+        json={
+            "message": f"请把第{day['day_index']}天的{activity_name(target)}替换为{new_name}，其余安排不变。",
+            "current_day_id": day["id"],
+            "current_target_id": target["id"],
+        },
+    )
+    patch = result.get("patch")
+    if not patch or patch.get("operation") != "replace":
+        raise AcceptanceFailure(f"semantic replace did not return a delete preview: {result}")
+    ctx.track(patch)
+    apply(ctx.session, ctx.base, patch["id"])
+    updated = replan(ctx.session, ctx.base)["trip"]
+    assert_activity_present(updated, new_name)
+    assert_activity_absent(updated, activity_name(target))
+
+
+def case_batch_add_delete(ctx: CaseContext) -> None:
+    trip = get_trip(ctx.session, ctx.base)
+    longitude, latitude = map_point(trip, 0.005, -0.002)
+    add_patch = ctx.track(preview_map(
+        ctx.session, ctx.base,
+        day_id="day_2", category="attractions", name="批量编辑临时点",
+        longitude=longitude, latitude=latitude,
+    ))
+    applied = apply(ctx.session, ctx.base, add_patch["id"])
+    added = next(
+        (
+            activity
+            for day in applied["trip"].get("days") or []
+            for activity in day.get("activities") or []
+            if activity_name(activity) == "批量编辑临时点"
+        ),
+        None,
+    )
+    if not added:
+        raise AcceptanceFailure("batch add did not persist the map-selected activity")
+    delete_patch = ctx.track(preview_delete(
+        ctx.session, ctx.base, day_id="day_2", activity_id=added["id"],
+    ))
+    apply(ctx.session, ctx.base, delete_patch["id"])
+    updated = replan(ctx.session, ctx.base)["trip"]
+    assert_activity_absent(updated, "批量编辑临时点")
+
+
+def case_semantic_add(ctx: CaseContext) -> None:
+    trip = get_trip(ctx.session, ctx.base)
+    candidate = unused_candidate(ctx.session, ctx.base, trip, "attractions")
+    name = str((candidate.get("place") or {}).get("name") or "").strip()
+    result = request(
+        ctx.session, "POST", f"{ctx.base}/editing/interpret", timeout=180,
+        json={
+            "message": f"请在第2天加入{name}作为下午景点，先给我修改预览，不要删除其他必到安排。",
+            "current_day_id": "day_2",
+        },
+    )
+    patch = result.get("patch")
+    if not patch or patch.get("operation") not in {"add", "replace"}:
+        raise AcceptanceFailure(f"semantic add did not return an executable preview: {result}")
+    ctx.track(patch)
+    apply(ctx.session, ctx.base, patch["id"])
+    updated = replan(ctx.session, ctx.base)["trip"]
+    assert_activity_present(updated, name)
+
+
+# Keep the map/delete cases in the same human-readable form as the UI.  This
+# also prevents an old generated harness from accidentally exercising the
+# model's unknown-intent path with mojibake literals.
+def case_map_attraction(ctx: CaseContext) -> None:
+    trip = get_trip(ctx.session, ctx.base)
+    day = next(day for day in trip["days"] if day["id"] == "day_2")
+    longitude, latitude = map_point(trip, 0.004, 0.002)
+    patch = ctx.track(preview_map(
+        ctx.session, ctx.base,
+        day_id=day["id"], category="attractions", name="地图新增自然景点",
+        longitude=longitude, latitude=latitude,
+    ))
+    apply(ctx.session, ctx.base, patch["id"])
+    updated = replan(ctx.session, ctx.base)["trip"]
+    assert_activity_present(updated, "地图新增自然景点")
+
+
+def case_map_meal(ctx: CaseContext) -> None:
+    trip = get_trip(ctx.session, ctx.base)
+    longitude, latitude = map_point(trip, -0.003, 0.002)
+    patch = ctx.track(preview_map(
+        ctx.session, ctx.base,
+        day_id="day_2", category="meals", name="地图新增晚餐",
+        longitude=longitude, latitude=latitude,
+    ))
+    apply(ctx.session, ctx.base, patch["id"])
+    updated = replan(ctx.session, ctx.base)["trip"]
+    assert_activity_present(updated, "地图新增晚餐")
+
+
+def case_map_hotel(ctx: CaseContext) -> None:
+    trip = get_trip(ctx.session, ctx.base)
+    longitude, latitude = map_point(trip, 0.002, -0.003)
+    patch = ctx.track(preview_map(
+        ctx.session, ctx.base,
+        day_id="day_3", category="hotels", name="地图新增连续住宿",
+        longitude=longitude, latitude=latitude,
+    ))
+    apply(ctx.session, ctx.base, patch["id"])
+    updated = replan(ctx.session, ctx.base)["trip"]
+    assert_activity_present(updated, "地图新增连续住宿")
+
+
+def case_semantic_delete(ctx: CaseContext) -> None:
+    trip = get_trip(ctx.session, ctx.base)
+    day, target = optional_attraction(trip, preferred_day="day_3")
+    result = request(
+        ctx.session, "POST", f"{ctx.base}/editing/interpret", timeout=180,
+        json={
+            "message": f"请删除第{day['day_index']}天的{activity_name(target)}，其他安排保持不变。",
+            "current_day_id": day["id"],
+            "current_target_id": target["id"],
+        },
+    )
+    patch = result.get("patch")
+    if not patch or patch.get("operation") != "delete":
+        raise AcceptanceFailure(f"semantic delete did not return a delete preview: {result}")
+    ctx.track(patch)
+    apply(ctx.session, ctx.base, patch["id"])
+    updated = replan(ctx.session, ctx.base)["trip"]
+    assert_activity_absent(updated, activity_name(target))
+
+
 CASES: list[tuple[str, Callable[[CaseContext], None]]] = [
     ("地图选点新增景点", case_map_attraction),
     ("地图选点新增餐饮", case_map_meal),
@@ -458,6 +601,8 @@ def main() -> int:
     parser.add_argument("--base-url", default="http://127.0.0.1:8000")
     parser.add_argument("--trip-id", default=DEFAULT_TRIP_ID)
     parser.add_argument("--output", default="artifacts/edit-replan-acceptance.json")
+    parser.add_argument("--start-index", type=int, default=1)
+    parser.add_argument("--end-index", type=int, default=len(CASES))
     args = parser.parse_args()
     base = f"{args.base_url.rstrip('/')}/api/v1/trips/{args.trip_id}"
     session = requests.Session()
@@ -471,7 +616,14 @@ def main() -> int:
         original = get_trip(session, base)
         if original.get("status") != "completed":
             raise AcceptanceFailure(f"fixture status is not completed: {original.get('status')}")
-        for index, (name, function) in enumerate(CASES, start=1):
+        selected_cases = [
+            (index, name, function)
+            for index, (name, function) in enumerate(CASES, start=1)
+            if args.start_index <= index <= args.end_index
+        ]
+        if not selected_cases:
+            raise AcceptanceFailure("no edit cases selected")
+        for index, name, function in selected_cases:
             started = time.monotonic()
             context = CaseContext(session=session, base=base, original=original)
             try:
@@ -488,14 +640,28 @@ def main() -> int:
             except Exception:
                 # Restore anything that was applied before the failure so the
                 # next local run starts from the same fixture.
+                error = sys.exc_info()[1]
                 try:
                     context.finish_and_restore()
                 except Exception as restore_error:
                     print(f"[edit-replan] restore warning: {restore_error}", file=sys.stderr)
-                raise
-        evidence["status"] = "passed"
-        print(f"[edit-replan] PASS: {len(CASES)}/{len(CASES)} edit cases", flush=True)
-        return_code = 0
+                row = {
+                    "index": index,
+                    "name": name,
+                    "status": "failed",
+                    "error": str(error),
+                    "seconds": round(time.monotonic() - started, 2),
+                }
+                evidence["cases"].append(row)
+                print(f"[edit-replan] FAIL {index:02d} {name}: {error}", file=sys.stderr, flush=True)
+                # Keep executing the remaining cases. A broken edit should
+                # not hide independent failures, and every case is restored
+                # to the same completed fixture before the next one starts.
+        passed = sum(item.get("status") == "passed" for item in evidence["cases"])
+        failed = len(evidence["cases"]) - passed
+        evidence["status"] = "passed" if failed == 0 else "failed"
+        print(f"[edit-replan] RESULT: {passed}/{len(selected_cases)} edit cases passed", flush=True)
+        return_code = 0 if failed == 0 else 1
     except (requests.RequestException, AcceptanceFailure) as error:
         evidence["status"] = "failed"
         evidence["error"] = str(error)

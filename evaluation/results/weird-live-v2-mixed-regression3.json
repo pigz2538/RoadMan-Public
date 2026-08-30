@@ -1,0 +1,58 @@
+{
+  "generated_at": "2026-08-30T04:26:42.196088+08:00",
+  "base_url": "http://127.0.0.1:8000",
+  "scenario_count": 1,
+  "full_journey_count": 1,
+  "passed": 0,
+  "failed": 1,
+  "duration_seconds": 437.89,
+  "results": [
+    {
+      "id": "v2-mixed-english-changsha",
+      "input": "Next Tue 到 Thu 我和对象从武汉飞长沙，想慢慢逛橘子洲和省博，Sunday night 不用回，别把英文日期理解错，也不要安排红眼后马上爬山。",
+      "full_requested": true,
+      "preflight": {
+        "ready": false,
+        "confirmation_required": true,
+        "semantic_checked": true,
+        "issues": [],
+        "extracted": {
+          "start_date": "2026-09-01",
+          "end_date": "2026-09-03",
+          "origin_name": "武汉",
+          "destination_name": "长沙",
+          "destination_names": [
+            "长沙"
+          ],
+          "destination_scope": "city",
+          "travelers": 2,
+          "preferences": [
+            "慢慢逛",
+            "不要安排红眼后马上爬山"
+          ],
+          "transport_modes": [
+            "flight"
+          ],
+          "cross_sea_required": false,
+          "past_return_requested": false,
+          "stay_only_at_destination": false,
+          "must_visit_names": [
+            "橘子洲",
+            "省博"
+          ],
+          "cross_sea_mode": null,
+          "travel_intents": [],
+          "special_events": [],
+          "time_window_minutes": null,
+          "_intent_status": "ok",
+          "_intent_source": "deepseek",
+          "_source_raw_text": "Next Tue 到 Thu 我和对象从武汉飞长沙，想慢慢逛橘子洲和省博，Sunday night 不用回，别把英文日期理解错，也不要安排红眼后马上爬山。"
+        }
+      },
+      "trip_id": "trip_82e9fa5b3135",
+      "passed": false,
+      "error": "status=failed: {\"passed\": false, \"issues\": [{\"code\": \"REQUIRED_PLACES_UNSCHEDULED\", \"severity\": \"blocker\", \"description\": \"用户明确指定的地点尚未进入可执行日程：省博；规划智能体需要重新分配游览时段，不能静默替换成其他地点。\"}, {\"code\": \"DESTINATION_HIGHLIGHTS_UNCOVERED\", \"severity\": \"warning\", \"description\": \"目的地研究标记的代表性景点未全部进入当前可执行时间窗：天心阁、太平巷、太平街、太平街牌坊、太平路、杜甫江阁、毛泽东青年艺术雕塑、爱晚亭；可延长天数、减少停留或在编辑面板中加入。\"}, {\"code\": \"RETURN_WINDOW_FLEXIBLE\", \"severity\": \"warning\", \"description\": \"返程预计略晚于目标时间，但仍在半天弹性范围内；可按实际路况灵活抵达。\"}], \"auto_repair_attempts\": 4, \"auto_repair_exhausted\": true}",
+      "latency_ms": 437891.51
+    }
+  ]
+}

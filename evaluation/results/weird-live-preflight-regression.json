@@ -1,0 +1,147 @@
+{
+  "generated_at": "2026-08-29T20:58:09.659935+08:00",
+  "base_url": "http://127.0.0.1:8000",
+  "scenario_count": 3,
+  "full_journey_count": 0,
+  "passed": 3,
+  "failed": 0,
+  "duration_seconds": 76.72,
+  "results": [
+    {
+      "id": "casual-chengdu-couple-flight",
+      "input": "这周日到下周三想和对象从武汉坐飞机去成都玩三天，一定要去麓湖CPI",
+      "full_requested": true,
+      "preflight": {
+        "ready": false,
+        "confirmation_required": true,
+        "semantic_checked": true,
+        "issues": [],
+        "extracted": {
+          "start_date": "2026-08-30",
+          "end_date": "2026-09-02",
+          "origin_name": "武汉",
+          "destination_name": "成都",
+          "destination_names": [
+            "成都"
+          ],
+          "destination_scope": "city",
+          "travelers": 2,
+          "max_days": 3,
+          "transport_modes": [
+            "flight"
+          ],
+          "cross_sea_required": false,
+          "past_return_requested": false,
+          "stay_only_at_destination": false,
+          "must_visit_names": [
+            "麓湖CPI"
+          ],
+          "cross_sea_mode": null,
+          "travel_intents": [],
+          "preferences": [],
+          "special_events": [],
+          "time_window_minutes": null,
+          "_intent_status": "ok",
+          "_intent_source": "deepseek",
+          "_source_raw_text": "这周日到下周三想和对象从武汉坐飞机去成都玩三天，一定要去麓湖CPI"
+        }
+      },
+      "failures": [],
+      "passed": true,
+      "latency_ms": 32957.61
+    },
+    {
+      "id": "harbin-six-day-roadtrip",
+      "input": "武汉到哈尔滨情侣自驾，6天，旅游，下周一出发，路上别让我俩一天硬开十几个小时",
+      "full_requested": true,
+      "preflight": {
+        "ready": false,
+        "confirmation_required": true,
+        "semantic_checked": true,
+        "issues": [],
+        "extracted": {
+          "start_date": "2026-08-31",
+          "origin_name": "武汉",
+          "destination_name": "哈尔滨",
+          "destination_names": [
+            "哈尔滨"
+          ],
+          "destination_scope": "city",
+          "travel_intents": [
+            "自驾旅游"
+          ],
+          "travelers": 2,
+          "max_days": 6,
+          "preferences": [
+            "避免一天驾驶超过十几个小时"
+          ],
+          "transport_modes": [
+            "driving"
+          ],
+          "cross_sea_required": false,
+          "past_return_requested": false,
+          "stay_only_at_destination": false,
+          "cross_sea_mode": null,
+          "special_events": [],
+          "must_visit_names": [],
+          "time_window_minutes": null,
+          "_intent_status": "ok",
+          "_intent_source": "deepseek",
+          "_source_raw_text": "武汉到哈尔滨情侣自驾，6天，旅游，下周一出发，路上别让我俩一天硬开十几个小时",
+          "end_date": "2026-09-05"
+        }
+      },
+      "failures": [],
+      "passed": true,
+      "latency_ms": 23641.45
+    },
+    {
+      "id": "chengdu-worksites-and-cpi",
+      "input": "9月23号从武汉飞成都，麓湖CPI要去，还得跑一趟成都航天博目电子科技有限公司和中国电子科技集团有限公司第十研究所，26号回来，其他别塞太满",
+      "full_requested": true,
+      "preflight": {
+        "ready": false,
+        "confirmation_required": true,
+        "semantic_checked": true,
+        "issues": [],
+        "extracted": {
+          "origin_name": "武汉",
+          "destination_name": "成都",
+          "destination_names": [
+            "成都",
+            "麓湖CPI",
+            "成都航天博目电子科技有限公司",
+            "中国电子科技集团有限公司第十研究所"
+          ],
+          "destination_scope": "city",
+          "start_date": "2026-09-23",
+          "end_date": "2026-09-26",
+          "preferences": [
+            "宽松行程"
+          ],
+          "transport_modes": [
+            "flight"
+          ],
+          "cross_sea_required": false,
+          "past_return_requested": false,
+          "stay_only_at_destination": false,
+          "must_visit_names": [
+            "麓湖CPI",
+            "成都航天博目电子科技有限公司",
+            "中国电子科技集团有限公司第十研究所"
+          ],
+          "cross_sea_mode": null,
+          "travel_intents": [],
+          "special_events": [],
+          "time_window_minutes": null,
+          "_intent_status": "ok",
+          "_intent_source": "deepseek",
+          "_source_raw_text": "9月23号从武汉飞成都，麓湖CPI要去，还得跑一趟成都航天博目电子科技有限公司和中国电子科技集团有限公司第十研究所，26号回来，其他别塞太满"
+        }
+      },
+      "failures": [],
+      "passed": true,
+      "latency_ms": 20122.76
+    }
+  ]
+}

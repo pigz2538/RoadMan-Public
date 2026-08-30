@@ -1,0 +1,62 @@
+{
+  "generated_at": "2026-08-30T03:00:02.346597+08:00",
+  "base_url": "http://127.0.0.1:8000",
+  "scenario_count": 1,
+  "full_journey_count": 1,
+  "passed": 0,
+  "failed": 1,
+  "duration_seconds": 454.03,
+  "results": [
+    {
+      "id": "v2-qinghai-stars-weather",
+      "input": "9月15日到9月18日想去青海看星星，带对象，从武汉出发，白天别排太满，晚上拍银河但不想看完还开长途。你把天气、海拔、月亮和高原休息一起考虑，阴天给我一个不扫兴的备选。",
+      "full_requested": true,
+      "preflight": {
+        "ready": false,
+        "confirmation_required": true,
+        "semantic_checked": true,
+        "issues": [],
+        "extracted": {
+          "start_date": "2026-09-15",
+          "end_date": "2026-09-18",
+          "origin_name": "武汉",
+          "destination_name": "青海",
+          "destination_names": [
+            "青海"
+          ],
+          "destination_scope": "province",
+          "travel_intents": [
+            "看星星",
+            "拍银河"
+          ],
+          "travelers": 2,
+          "max_days": 4,
+          "preferences": [
+            "白天别排太满",
+            "晚上拍完银河不想开长途",
+            "考虑高原休息",
+            "需要阴天备用方案"
+          ],
+          "special_events": [
+            "看星星",
+            "拍银河"
+          ],
+          "cross_sea_required": false,
+          "past_return_requested": false,
+          "stay_only_at_destination": false,
+          "cross_sea_mode": null,
+          "must_visit_names": [],
+          "transport_modes": [],
+          "time_window_minutes": null,
+          "_intent_status": "ok",
+          "_intent_source": "deepseek",
+          "_source_raw_text": "9月15日到9月18日想去青海看星星，带对象，从武汉出发，白天别排太满，晚上拍银河但不想看完还开长途。你把天气、海拔、月亮和高原休息一起考虑，阴天给我一个不扫兴的备选。"
+        }
+      },
+      "trip_id": "trip_4fcea7fed50c",
+      "passed": false,
+      "error": "status=failed: {\"passed\": false, \"issues\": [{\"code\": \"STAGE_OVERLAP\", \"severity\": \"blocker\", \"description\": \"返程（跨天第3段） 与前一移动阶段时间重叠\"}, {\"code\": \"STAGE_OVERLAP\", \"severity\": \"blocker\", \"description\": \"返程（跨天第1段） · 第 2/4 段 与前一移动阶段时间重叠\"}, {\"code\": \"STAGE_OVERLAP\", \"severity\": \"blocker\", \"description\": \"返程（跨天第2段） · 第 4/4 段 与前一移动阶段时间重叠\"}, {\"code\": \"ROUTE_DISCONTINUITY\", \"severity\": \"blocker\", \"description\": \"阶段“城市出发（跨天第2段） · 第 4/4 段”终点与“返程（跨天第1段） · 第 4/4 段”起点不连续\"}, {\"code\": \"ROUTE_DISCONTINUITY\", \"severity\": \"blocker\", \"description\": \"阶段“返程（跨天第1段） · 第 4/4 段”终点与“城市出发（跨天第3段）”起点不连续\"}, {\"code\": \"ROUTE_DISCONTINUITY\", \"severity\": \"blocker\", \"description\": \"阶段“城市出发（跨天第3段）”终点与“返程（跨天第2段） · 第 1/4 段”起点不连续\"}, {\"code\": \"ROUTE_DISCONTINUITY\", \"severity\": \"blocker\", \"description\": \"阶段“返程（跨天第2段） · 第 3/4 段”终点与“返程（跨天第1段） · 第 1/4 段”起点不连续\"}, {\"code\": \"ROUTE_DISCONTINUITY\", \"severity\": \"blocker\", \"description\": \"阶段“返程（跨天第1段） · 第 1/4 段”终点与“返程（跨天第3段）”起点不连续\"}, {\"code\": \"ROUTE_DISCONTINUITY\", \"severity\": \"blocker\", \"description\": \"阶段“返程（跨天第3段）”终点与“返程（跨天第1段） · 第 2/4 段”起点不连续\"}, {\"code\": \"ROUTE_NOT_CLOSED\", \"severity\": \"blocker\", \"description\": \"行程终点未回到整体出发点，路线尚未形成闭环\"}, {\"code\": \"ACTIVITY_TIME_OVERLAP\", \"severity\": \"blocker\", \"description\": \"沿途住宿点 1（需预订） 与 移动阶段“返程（跨天第2段） · 第 2/4 段” 的活动时间重叠\"}, {\"code\": \"ACTIVITY_TIME_OVERLAP\", \"severity\": \"blocker\", \"description\": \"沿途住宿点 1（需预订） 与 移动阶段“返程（跨天第2段） · 第 3/4 段” 的活动时间重叠\"}, {\"code\": \"ACTIVITY_TIME_OVERLAP\", \"severity\": \"blocker\", \"description\": \"沿途住宿点 1（需预订） 与 沿途住宿点 2（需预订） 的活动时间重叠\"}, {\"code\": \"ACTIVITY_TIME_OVERLAP\", \"severity\": \"blocker\", \"description\": \"移动阶段“返程（跨天第1段） · 第 1/4 段” 与 沿途住宿点 2（需预订）附近早餐 的活动时间重叠\"}, {\"code\": \"ACTIVITY_TIME_OVERLAP\", \"severity\": \"blocker\", \"description\": \"移动阶段“返程（跨天第1段） · 第 1/4 段” 与 移动阶段“返程（跨天第3段）” 的活动时间重叠\"}, {\"code\": \"ACTIVITY_TIME_OVERLAP\", \"severi",
+      "latency_ms": 454026.71
+    }
+  ]
+}

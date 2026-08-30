@@ -1,0 +1,209 @@
+{
+  "generated_at": "2026-08-30T00:38:33.817596+08:00",
+  "base_url": "http://127.0.0.1:8000",
+  "scenario_count": 4,
+  "full_journey_count": 0,
+  "passed": 2,
+  "failed": 2,
+  "duration_seconds": 140.18,
+  "results": [
+    {
+      "id": "v2-xinjiang-roadtrip",
+      "input": "下周一想和对象从武汉一路自驾去新疆，十天左右，纯电车现在还有六成电。别把新疆烤肉店当成目的地，沿途该睡就睡、该充电就充电，喀纳斯和赛里木湖能安排就安排，太赶就诚实告诉我。",
+      "full_requested": true,
+      "preflight": {
+        "ready": false,
+        "confirmation_required": true,
+        "semantic_checked": true,
+        "issues": [],
+        "extracted": {
+          "start_date": "2026-08-31",
+          "origin_name": "武汉",
+          "destination_name": "新疆",
+          "destination_names": [
+            "新疆",
+            "喀纳斯",
+            "赛里木湖"
+          ],
+          "destination_scope": "multi_destination",
+          "travelers": 2,
+          "max_days": 10,
+          "transport_modes": [
+            "driving"
+          ],
+          "cross_sea_required": false,
+          "past_return_requested": false,
+          "stay_only_at_destination": false,
+          "cross_sea_mode": null,
+          "travel_intents": [],
+          "preferences": [],
+          "special_events": [],
+          "must_visit_names": [],
+          "time_window_minutes": null,
+          "_intent_status": "ok",
+          "_intent_source": "deepseek",
+          "_source_raw_text": "下周一想和对象从武汉一路自驾去新疆，十天左右，纯电车现在还有六成电。别把新疆烤肉店当成目的地，沿途该睡就睡、该充电就充电，喀纳斯和赛里木湖能安排就安排，太赶就诚实告诉我。",
+          "end_date": "2026-09-09"
+        }
+      },
+      "failures": [],
+      "passed": true,
+      "latency_ms": 27780.83
+    },
+    {
+      "id": "v2-hainan-island-family",
+      "input": "国庆第一天到第四天，一家三口从武汉去海南玩几天，飞机或者船都可以，想去蜈支洲岛和呀诺达，别每天六点起床。岛上怎么接驳、船票和天气有什么风险你先查清楚，住同一家酒店更省心。",
+      "full_requested": true,
+      "preflight": {
+        "ready": false,
+        "confirmation_required": false,
+        "semantic_checked": false,
+        "issues": [
+          "CROSS_SEA_MODE_REQUIRED"
+        ],
+        "extracted": {
+          "origin_name": "武汉",
+          "destination_name": "海南",
+          "destination_names": [
+            "海南",
+            "蜈支洲岛",
+            "呀诺达"
+          ],
+          "destination_scope": "multi_destination",
+          "start_date": "2026-10-01",
+          "end_date": "2026-10-04",
+          "travelers": 3,
+          "max_days": 4,
+          "preferences": [
+            "不早起",
+            "住同一家酒店"
+          ],
+          "transport_modes": [
+            "flight",
+            "ferry"
+          ],
+          "cross_sea_required": true,
+          "past_return_requested": false,
+          "stay_only_at_destination": false,
+          "must_visit_names": [
+            "蜈支洲岛",
+            "呀诺达"
+          ],
+          "cross_sea_mode": null,
+          "travel_intents": [],
+          "special_events": [],
+          "time_window_minutes": null,
+          "_intent_status": "ok",
+          "_intent_source": "deepseek",
+          "_source_raw_text": "国庆第一天到第四天，一家三口从武汉去海南玩几天，飞机或者船都可以，想去蜈支洲岛和呀诺达，别每天六点起床。岛上怎么接驳、船票和天气有什么风险你先查清楚，住同一家酒店更省心。"
+        }
+      },
+      "failures": [
+        "not_ready"
+      ],
+      "passed": false,
+      "latency_ms": 35845.06
+    },
+    {
+      "id": "v2-xian-luoyang-two-cities",
+      "input": "下周三从武汉出发，先去西安再去洛阳，周日回武汉，和对象边走边吃，肉夹馍和洛阳水席各安排一次就好。兵马俑、城墙和龙门石窟想看，城市之间坐高铁，别把餐馆名字当成景点或城市。",
+      "full_requested": true,
+      "preflight": {
+        "ready": false,
+        "confirmation_required": true,
+        "semantic_checked": true,
+        "issues": [],
+        "extracted": {
+          "start_date": "2026-09-02",
+          "end_date": "2026-09-06",
+          "origin_name": "武汉",
+          "destination_name": "西安",
+          "destination_names": [
+            "西安",
+            "洛阳"
+          ],
+          "destination_scope": "multi_destination",
+          "travel_intents": [
+            "美食",
+            "观光"
+          ],
+          "travelers": 2,
+          "transport_modes": [
+            "train"
+          ],
+          "cross_sea_required": false,
+          "past_return_requested": false,
+          "stay_only_at_destination": false,
+          "must_visit_names": [
+            "兵马俑",
+            "城墙",
+            "龙门石窟"
+          ],
+          "cross_sea_mode": null,
+          "preferences": [],
+          "special_events": [],
+          "time_window_minutes": null,
+          "_intent_status": "ok",
+          "_intent_source": "deepseek",
+          "_source_raw_text": "下周三从武汉出发，先去西安再去洛阳，周日回武汉，和对象边走边吃，肉夹馍和洛阳水席各安排一次就好。兵马俑、城墙和龙门石窟想看，城市之间坐高铁，别把餐馆名字当成景点或城市。"
+        }
+      },
+      "failures": [],
+      "passed": true,
+      "latency_ms": 31741.37
+    },
+    {
+      "id": "v2-qinghai-stars-weather",
+      "input": "9月15日左右想去青海看星星，带对象，从武汉出发，白天别排太满，晚上拍银河但不想看完还开长途。你把天气、海拔、月亮和高原休息一起考虑，阴天给我一个不扫兴的备选。",
+      "full_requested": true,
+      "preflight": {
+        "ready": false,
+        "confirmation_required": false,
+        "semantic_checked": false,
+        "issues": [
+          "MISSING_FIELD"
+        ],
+        "extracted": {
+          "start_date": "2026-09-15",
+          "origin_name": "武汉",
+          "destination_name": "青海",
+          "destination_names": [
+            "青海"
+          ],
+          "destination_scope": "province",
+          "travel_intents": [
+            "看星星",
+            "拍银河"
+          ],
+          "travelers": 2,
+          "preferences": [
+            "白天行程不宜太满",
+            "考虑天气、海拔、月亮条件",
+            "需注意高原休息",
+            "不希望看完后长途驾驶",
+            "需提供阴天备选方案"
+          ],
+          "special_events": [
+            "银河"
+          ],
+          "cross_sea_required": false,
+          "past_return_requested": false,
+          "stay_only_at_destination": false,
+          "cross_sea_mode": null,
+          "must_visit_names": [],
+          "transport_modes": [],
+          "time_window_minutes": null,
+          "_intent_status": "ok",
+          "_intent_source": "deepseek",
+          "_source_raw_text": "9月15日左右想去青海看星星，带对象，从武汉出发，白天别排太满，晚上拍银河但不想看完还开长途。你把天气、海拔、月亮和高原休息一起考虑，阴天给我一个不扫兴的备选。"
+        }
+      },
+      "failures": [
+        "not_ready",
+        "date_fields"
+      ],
+      "passed": false,
+      "latency_ms": 44812.17
+    }
+  ]
+}
