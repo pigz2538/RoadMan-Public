@@ -2,17 +2,21 @@
 
 # RoadMan
 
-**把一句「我想去哪」，变成一本可执行的自驾路书**
+**Turn "I want to go somewhere" into an executable road trip guide**
 
-> 多智能体自驾与中短途旅行规划工作台 —— 需求理解 · 目的地研究 · 真实路线 · 逐日编排 · 自动复核修复 · 可编辑可导出
+> Multi-agent road trip & short-trip planning workbench — requirement understanding · destination research · real routes · day-by-day orchestration · automatic re-verification & repair · editable & exportable
 
 </div>
 
 ---
 
-## 技术栈
+**🌐 Language / 语言：** **English** | [**中文**](README.zh-CN.md)
 
-**后端 · 编排**
+---
+
+## Tech Stack
+
+**Backend · Orchestration**
 
 [![Python](https://img.shields.io/badge/Python-3.11-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
@@ -23,7 +27,7 @@
 [![ARQ](https://img.shields.io/badge/ARQ-0.26-5275E9?style=flat-square&logo=redis&logoColor=white)](https://arq-docs.helpmanual.io/)
 [![Uvicorn](https://img.shields.io/badge/Uvicorn-0.34-499848?style=flat-square&logo=uvicorn&logoColor=white)](https://www.uvicorn.org/)
 
-**数据 · 基础设施**
+**Data · Infrastructure**
 
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-17-4169E1?style=flat-square&logo=postgresql&logoColor=white)](https://www.postgresql.org/)
 [![Redis](https://img.shields.io/badge/Redis-7.4-DC382D?style=flat-square&logo=redis&logoColor=white)](https://redis.io/)
@@ -33,7 +37,7 @@
 [![SSE](https://img.shields.io/badge/SSE-Event%20Stream-4169E1?style=flat-square)](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events)
 [![OpenAPI](https://img.shields.io/badge/OpenAPI-3-6BA539?style=flat-square&logo=swagger&logoColor=white)](https://swagger.io/)
 
-**前端 · 交互**
+**Frontend · Interaction**
 
 [![Vue](https://img.shields.io/badge/Vue-3.5-4FC08D?style=flat-square&logo=vuedotjs&logoColor=white)](https://vuejs.org/)
 [![Vite](https://img.shields.io/badge/Vite-8-646CFF?style=flat-square&logo=vite&logoColor=white)](https://vitejs.dev/)
@@ -44,7 +48,7 @@
 [![AMap JSAPI](https://img.shields.io/badge/AMap%20JSAPI-1.x-2899F5?style=flat-square)](https://lbs.amap.com/api/javascript-api-v2/summary)
 [![Model Viewer](https://img.shields.io/badge/Model%20Viewer-4.3-60C0EB?style=flat-square&logo=google&logoColor=white)](https://modelviewer.dev/)
 
-**质量 · 测试**
+**Quality · Testing**
 
 [![Playwright](https://img.shields.io/badge/Playwright-1.62-2EAD33?style=flat-square&logo=playwright&logoColor=white)](https://playwright.dev/)
 [![Vitest](https://img.shields.io/badge/Vitest-4.1-6E9F18?style=flat-square&logo=vitest&logoColor=white)](https://vitest.dev/)
@@ -52,7 +56,7 @@
 [![vue-tsc](https://img.shields.io/badge/vue--tsc-3.3-4FC08D?style=flat-square&logo=vuedotjs&logoColor=white)](https://github.com/vuejs/language-tools)
 [![SQLite](https://img.shields.io/badge/SQLite-dev-003B57?style=flat-square&logo=sqlite&logoColor=white)](https://www.sqlite.org/)
 
-**外部能力**
+**External Capabilities**
 
 [![DeepSeek](https://img.shields.io/badge/DeepSeek-V4-4D6BFE?style=flat-square&logo=deepseek&logoColor=white)](https://www.deepseek.com/)
 [![Open-Meteo](https://img.shields.io/badge/Open--Meteo-Free-14A0A5?style=flat-square&logo=sun&logoColor=white)](https://open-meteo.com/)
@@ -61,121 +65,123 @@
 
 ---
 
-## RoadMan 在解决什么问题
+## What Problem Does RoadMan Solve?
 
-规划一次自驾旅行，通常要在地图、攻略、天气、酒店、充电桩和班次表之间来回切换，手动拼出一条「能走」的行程。真正恶心的是：拼完之后它可能 **根本走不了** —— 凌晨三点参观、全天空白、三餐缺失、酒店天天换、一天 18 小时车程、电量到不了下一个充电站。这些「好看但不可执行」的行程，正是大模型一次性生成的老毛病。
+Planning a road trip usually means switching back and forth between maps, guides, weather, hotels, charging stations and schedules to manually stitch together a trip that "works". The really frustrating part: once stitched together, it might **not work at all** — visiting at 3 a.m., blank full days, missing meals, a different hotel every night, 18 hours of driving in one day, or running out of battery before the next charging station. These "nice-looking but unexecutable" itineraries are exactly the classic failure of one-shot large-model generation.
 
-RoadMan 的做法是：**把「内容建议」放进可执行工作流**。一句话需求交给一群分工明确的智能体去理解、研究、取舍、编排，而路线坐标、时间窗口、连续驾驶、电量余量、三餐住宿、返程闭环这些硬规则由确定性程序兜底；确认、复核不通过就自动重排修复；用户改一句「把第二天换成更安静的地方」，系统先给出影响预览，确认后统一重算，再校验一遍才允许导出。
+RoadMan's approach: **put "content suggestions" into an executable workflow**. A one-line requirement is handed to a team of specialized agents that understand, research, curate and orchestrate — while hard rules like route coordinates, time windows, continuous driving, battery margins, meals & lodging, and the return loop are enforced by deterministic code. Failed confirmation or re-verification triggers automatic replanning and repair; when you say "make day 2 a quieter place", the system first shows an impact preview, then recomputes everything after confirmation and re-validates before allowing export.
 
-它不是实时导航，也不是车辆控制 —— 而是出发前与途中调整的**规划助手**：懂车、懂路、懂天气，也懂你。
+It is not real-time navigation, nor vehicle control — it is a **planning assistant** for pre-departure and mid-trip adjustments: it understands cars, roads, weather, and you.
 
-## 完整旅程，一次看完
+## The Full Journey at a Glance
 
-从「自然语言需求」到「可执行、可修改、可验证的行程」，再落到 Markdown / HTML / PDF / PPTX / 长图多格式交付：
+From a "natural language requirement" to an "executable, editable, verifiable itinerary", delivered in Markdown / HTML / PDF / PPTX / long-image formats:
 
 <!--
-  ██ 预留位置：Agent 规划过程动态 GIF ██
-  1) 录制需求输入 → 预检确认 → 后台渐进规划（地图逐段出现、阶段卡片逐项生成）
-     → 复核修复提示 → 完成后的语义编辑预览与导出过程；
-  2) 将 gif 文件保存为 docs/screenshots/agent-planning.gif；
-  3) 取消下方两行注释（去掉 <div align="center"> 与 </div> 行首的 HTML 注释标记）即可显示。
-  建议宽度 width="85%"，保持与页面其他截图比例一致。
+  ██ Reserved: Agent planning process GIF ██
+  1) Record requirement input → preflight confirmation → progressive background planning
+     (map segments appear one by one, stage cards generate item by item)
+     → re-verification & repair hints → semantic edit preview & export flow;
+  2) Save the gif as docs/screenshots/agent-planning.gif;
+  3) Uncomment the two lines below (remove the HTML comment markers around
+     <div align="center"> and </div>) to display it.
+  Recommended width="85%" to keep proportions consistent with other screenshots.
 -->
 <!--
 <div align="center">
-  <img src="docs/screenshots/agent-planning.gif" alt="RoadMan Agent 规划过程" width="85%"/>
+  <img src="docs/screenshots/agent-planning.gif" alt="RoadMan Agent Planning Process" width="85%"/>
 </div>
 -->
 
-## 功能亮点
+## Feature Highlights
 
-### 一句话，开始出发
+### One Sentence to Get Started
 
-用自然语言说出「**周六早上从武汉出发，去庐山两天一夜，周日晚八点前回来，喜欢自然景观**」。系统先做需求核对与逐项追问，确认后才启动后台规划；也可以附加图片、PDF、DOCX、Markdown 或 XLSX 作为上下文。理解「新疆」「南京」「西藏和新疆」这类行政区、城市与多目的地，不会把目的地猜成同名餐馆或校园。
+Say in natural language: "**Depart Wuhan Saturday morning, two days and one night at Lushan, back before 8 p.m. Sunday, love natural scenery**". The system first reviews the requirement with item-by-item clarifying questions, and only starts background planning after confirmation; you can also attach images, PDFs, DOCX, Markdown or XLSX as context. It understands administrative regions, cities and multi-destination requests like "Xinjiang", "Nanjing" or "Tibet and Xinjiang", and won't mistake a destination for a same-named restaurant or campus.
 
-![一句话出发与快捷入口](docs/screenshots/home.png)
+![One-sentence start & quick entries](docs/screenshots/home.png)
 
-### 后台渐进规划，实时可见
+### Progressive Background Planning, Visible in Real Time
 
-规划是持续数分钟的长任务：Redis + ARQ 执行 LangGraph 工作流，SSE 把每个节点的进度实时推送到详情页——顶部进度条、地图逐段出现路线、阶段卡与活动逐项生成、右侧智能体协作消息实时滚动。前端动画节奏与后台速度分离，历史行程直接从数据库恢复，不重播「生成中」。
+Planning is a long-running task lasting minutes: Redis + ARQ execute the LangGraph workflow, and SSE pushes each node's progress to the detail page in real time — top progress bar, route segments appearing on the map one by one, stage cards and activities generating item by item, and agent collaboration messages scrolling live on the right. Frontend animation pacing is decoupled from backend speed; historical trips are restored straight from the database without replaying "generating".
 
-![渐进规划进度视图](docs/screenshots/plan_planning.png)
+![Progressive planning progress view](docs/screenshots/plan_planning.png)
 
-### 地图与逐日编排，看起来就懂
+### Map & Day-by-Day Orchestration, Understandable at a Glance
 
-每一天是一条完整时间线：早餐、出发、沿途服务区休息与充电、景点停留、餐饮、住宿，附带路况、天气、路费与能耗估算。当前阶段路线高亮、其他灰显，支持平移缩放、阶段切换与地图选点。规划页左侧日程、右侧行程助理和底部阶段详情都可独立收起；底栏收起后只保留上一段、当前序号和下一段，让地图获得更大空间，折叠状态会在本机浏览器保留。
+Each day is a complete timeline: breakfast, departure, service-area rest and charging along the way, sightseeing stops, dining, lodging — with traffic, weather, tolls and energy estimates attached. The current stage's route is highlighted while others are dimmed; pan/zoom, stage switching and map point picking are supported. The planning page's left itinerary, right trip assistant and bottom stage details can each collapse independently; when the bottom bar is collapsed only the previous stage, current index and next stage remain, giving the map more space. Collapse state is remembered in the local browser.
 
-![规划详情 · 地图与阶段编排](docs/screenshots/plan_lushan.png)
+![Planning detail · map & stage orchestration](docs/screenshots/plan_lushan.png)
 
-### 长途自驾，自动拆成从容的跨天
+### Long-Distance Drives, Automatically Split into Relaxed Days
 
-新能源长途最考验「能不能顺利到达下一个充电站」。RoadMan 按每日驾驶上限拆分跨天路段，沿途插入服务区休息、加油/充电补能与过夜住宿，次日再继续，不会把 24 小时以上驾驶压在第一天。每段按起始 SOC、实际能耗、站点功率与停留时间连续计算充前/充后/到达 SOC，不再把充电后电量固定重置为 80%。补能不足、连续驾驶过久、强降水等风险会以警告与修复建议的形式出现在行程里。
+The biggest challenge for long EV trips is "can I actually reach the next charging station". RoadMan splits cross-day legs by a daily driving cap, inserting service-area rest, fuel/charge stops and overnight lodging along the way, continuing the next day — never cramming 24+ hours of driving into day one. Each leg continuously computes SOC before/after charging and at arrival from starting SOC, actual energy consumption, station power and dwell time, instead of resetting post-charge SOC to a fixed 80%. Risks like insufficient charging, overly long continuous driving or heavy rain appear in the itinerary as warnings and repair suggestions.
 
-![跨天驾驶拆分与补能安排](docs/screenshots/plan_harbin.png)
+![Cross-day driving split & charging plan](docs/screenshots/plan_harbin.png)
 
-### 历史规划，随时接着用
+### Historical Plans, Pick Up Anytime
 
-所有行程自动保存为历史规划，秒开恢复，支持批量删除与全选操作；进行中的行程可继续追踪，失败或待继续的会明确标注。
+All trips are automatically saved as history and restored in seconds; batch delete and select-all are supported. In-progress trips can keep being tracked; failed or pending ones are clearly labeled.
 
-![历史规划面板](docs/screenshots/home_history.png)
+![Historical plans panel](docs/screenshots/home_history.png)
 
-### 车辆与能源上下文
+### Vehicle & Energy Context
 
-车型管理支持从真实车型目录搜索并保存车辆（续航、电量、座位数等），规划时按车辆上下文计算可用续航与补能节点——纯电、燃油、混动的规划策略各不相同。
+The vehicle manager searches a real vehicle catalog and saves vehicles (range, battery capacity, seat count, etc.); planning uses the vehicle context to compute usable range and charging stops — EV, fuel and hybrid each get different planning strategies.
 
-![车型管理与续航估算](docs/screenshots/home_vehicle.png)
+![Vehicle management & range estimation](docs/screenshots/home_vehicle.png)
 
-### 可观测、可追溯
+### Observable & Traceable
 
-每一次外部能力调用都记录来源、时间与降级状态；运行监控页给出请求量、延迟、Skill 调用与缓存命中，以及全部外部服务健康状况。不把估算点冒充实时事实，不伪造成功。
+Every external capability call records its source, time and degradation status; the operations monitoring page shows request volume, latency, Skill calls and cache hits, plus the health of all external services. Estimates are never disguised as live facts, and success is never faked.
 
-![运行监控与外部服务健康](docs/screenshots/ops.png)
+![Ops monitoring & external service health](docs/screenshots/ops.png)
 
-## 功能特写
+## Feature Close-ups
 
-从「看起来像样的行程」到「真实可执行」，藏在每个功能细节里：
+From a "decent-looking itinerary" to "actually executable" — hidden in every functional detail:
 
-| 阶段卡片 · 真实道路轨迹 | 跨天驾驶拆分 |
+| Stage Card · Real Road Tracks | Cross-Day Driving Split |
 | :---: | :---: |
-| 起点/终点、道路、路况、天气、路费与能耗估算一卡俱全；连续驾驶超时自动插入休息 | 长途按每日驾驶上限拆成多段，沿途休息点与补能站逐项排入 |
-| <img src="docs/screenshots/feature-route-card.png" alt="路线阶段卡片" width="88%"/> | <img src="docs/screenshots/feature-crossday-card.png" alt="跨天驾驶拆分卡片" width="88%"/> |
+| Origin/destination, roads, traffic, weather, tolls & energy estimates in one card; automatic rest insertion on driving-time overruns | Long trips split into multiple legs by the daily driving cap, with rest stops and charging stations scheduled item by item |
+| <img src="docs/screenshots/feature-route-card.png" alt="Route stage card" width="88%"/> | <img src="docs/screenshots/feature-crossday-card.png" alt="Cross-day driving split card" width="88%"/> |
 
-| 风险与自驾校验 | 自动复核修复 |
+| Risk & Self-Driving Checks | Automatic Re-verification & Repair |
 | :---: | :---: |
-| 连续驾驶、强降水、电量余量、夜间驾驶逐项列出，风险可追可解释 | 多源信息核验：来源数、核验时间、票价区间、预约与营业状态逐项标注 |
-| <img src="docs/screenshots/feature-risk-card.png" alt="风险与自驾校验" width="96%"/> | <img src="docs/screenshots/feature-day-sidebar.png" alt="全天时间线与多源核验" width="52%"/> |
+| Continuous driving, heavy rain, battery margin and night driving listed item by item; risks are traceable and explainable | Multi-source verification: source count, verification time, ticket price ranges, reservation & opening status annotated item by item |
+| <img src="docs/screenshots/feature-risk-card.png" alt="Risk & self-driving checks" width="96%"/> | <img src="docs/screenshots/feature-day-sidebar.png" alt="Full-day timeline & multi-source verification" width="52%"/> |
 
-| 智能体协作 · 行程助理 | 地图选点与一键导出 |
+| Agent Collaboration · Trip Assistant | Map Point Picking & One-Click Export |
 | :---: | :---: |
-| 快捷指令一键唤起，自然语言修改 → 预览 → 确认应用，失败不落库 | 地图加点选点；Markdown / PDF / PPT / 长图 / HTML 多格式导出 |
-| <img src="docs/screenshots/feature-agent-panel.png" alt="行程助理智能体面板" width="52%"/> | <img src="docs/screenshots/feature-map-pick.png" alt="地图加点工具条" width="70%"/> |
+| One-click quick commands; natural-language edits → preview → confirm & apply; failures never persist to the database | Add points via map picking; export in Markdown / PDF / PPT / long image / HTML |
+| <img src="docs/screenshots/feature-agent-panel.png" alt="Trip assistant agent panel" width="52%"/> | <img src="docs/screenshots/feature-map-pick.png" alt="Map point-picking toolbar" width="70%"/> |
 
-![一键导出工具栏](docs/screenshots/feature-export-bar.png)
+![One-click export toolbar](docs/screenshots/feature-export-bar.png)
 
 ---
 
-## 架构总览
+## Architecture Overview
 
 ```mermaid
 flowchart TB
-    subgraph Browser["浏览器 Vue 3"]
-        H["首页：需求录入 / 预检问答 / 历史行程 / 车型管理 / 3D 车辆 / 天气"]
-        P["规划页：SSE 进度 / 地图 / 阶段卡片 / 活动列表 / Agent 面板 / 导出"]
+    subgraph Browser["Browser Vue 3"]
+        H["Home: requirement input / preflight Q&A / history / vehicle mgmt / 3D vehicle / weather"]
+        P["Planning: SSE progress / map / stage cards / activity list / agent panel / export"]
     end
 
     subgraph API["FastAPI API"]
-        R["HTTP / SSE 路由"]
-        DB[("PostgreSQL / SQLite<br/>Trip · 版本 · 任务 · 调用审计")]
-        Q["Redis + ARQ<br/>异步规划任务"]
-        SK["Skill Registry<br/>地图 / 天气 / 旅行搜索 / 开放数据 / 车型目录"]
+        R["HTTP / SSE routes"]
+        DB[("PostgreSQL / SQLite<br/>Trip · versions · tasks · call audit")]
+        Q["Redis + ARQ<br/>async planning tasks"]
+        SK["Skill Registry<br/>maps / weather / travel search / open data / vehicle catalog"]
     end
 
-    subgraph Workflow["LangGraph 规划工作流（22 节点）"]
-        S["语义智能体"]
-        D["确定性调度 / 复核 / 修复"]
+    subgraph Workflow["LangGraph planning workflow (22 nodes)"]
+        S["Semantic agents"]
+        D["Deterministic scheduling / re-verification / repair"]
     end
 
-    subgraph Export["统一冻结 Trip 快照"]
+    subgraph Export["Frozen Trip snapshot"]
         E["Markdown / HTML / PDF / PPTX / PNG"]
     end
 
@@ -189,81 +195,83 @@ flowchart TB
     Workflow --> Export
 ```
 
-**双层架构**：语义智能体负责理解、研究、取舍与协作（需求抽取、目的地研究、POI 策展、适配复核、行程编辑、事件研究）；确定性程序负责坐标、路线、时间、能耗、冲突与硬安全规则。模型可以提建议，但不能覆盖路线闭环与车辆安全结论。
+**Two-layer architecture**: semantic agents handle understanding, research, curation and collaboration (requirement extraction, destination research, POI curation, fitness re-verification, itinerary editing, event research); deterministic code handles coordinates, routes, time, energy, conflicts and hard safety rules. The model may make suggestions, but cannot override route closure or vehicle-safety conclusions.
 
-**状态所有权**：`Trip` 是 canonical 行程；`RoadManState` 保存图执行中的候选与修复轮次；ARQ job 在后台执行，API 不在请求线程内跑完整规划；SSE 只推送可展示状态，不暴露密钥或模型原始输出。
+**State ownership**: `Trip` is the canonical itinerary; `RoadManState` holds candidates and repair rounds during graph execution; ARQ jobs run in the background — the API never runs full planning inside a request thread; SSE only pushes displayable state, never keys or raw model output.
 
-## 快速开始（Docker Compose）
+## Quick Start (Docker Compose)
 
-> 前置要求：安装并启动 [Docker Desktop](https://www.docker.com/products/docker-desktop/)。
+> Prerequisite: install and start [Docker Desktop](https://www.docker.com/products/docker-desktop/).
 
 ```powershell
-# 1. 准备配置
-Copy-Item .env.example .env
+# 1. Prepare configuration
+if (!(Test-Path .env)) { Copy-Item .env.example .env }
 
-# 2. 修改 .env，至少填入两项（其余按需，见下方配置表）
-#    DEEPSEEK_API_KEY=你的 DeepSeek API Key
-#    AMAP_WEBSERVICE_KEY=你的高德 WebService Key
+# 2. Edit .env, fill in at least two items (the rest as needed, see config table below)
+#    DEEPSEEK_API_KEY=your DeepSeek API Key
+#    AMAP_WEBSERVICE_KEY=your AMap WebService Key
 
-# 3. 启动（首次构建镜像并初始化数据库，耗时几分钟）
+# 3. Start (first build builds images and initializes the DB, takes a few minutes)
 docker compose up -d --build
 
-# 4. 验证
+# 4. Verify
 python deploy/api_smoke.py
 ```
 
-冒烟脚本通过即表示容器、数据库、队列、接口契约和当前可访问的外部能力已完成逐项检查。它不会把「旅行信息服务合法无库存」误判成故障；需求理解/语义编辑会用有效的 DeepSeek Key 单独验证。
+Both `backend` and `worker` read `DEEPSEEK_API_KEY` from the `.env` at the project root — it is not overridden by an identically-named legacy environment variable on the host; both are pinned to the official Chat Completions endpoint and `deepseek-v4-flash`. `.env` is in the ignore rules; never commit or print the key.
 
-**使用入口**
+A passing smoke script means containers, database, queue, API contract and currently reachable external capabilities have all been checked item by item. It does not mistake "travel information service legitimately has no inventory" for a failure; requirement understanding / semantic edits are validated separately with a valid DeepSeek key.
 
-- Web 工作台：<http://localhost:8080>
-- 局域网内其他设备：`http://本机局域网IP:8080`
-- 后端接口文档：<http://localhost:8000/docs>
+**Entry Points**
 
-**模型 Key 最小验证**（只检查状态，不打印 Key）：
+- Web workbench: <http://localhost:8080>
+- Other devices on the LAN: `http://<host-LAN-IP>:8080`
+- Backend API docs: <http://localhost:8000/docs>
+
+**Minimal model-key check** (checks status only, never prints the key):
 
 ```powershell
 Invoke-RestMethod https://api.deepseek.com/chat/completions -Method Post -Headers @{ Authorization = "Bearer $env:DEEPSEEK_API_KEY"; "Content-Type" = "application/json" } -Body (@{ model = "deepseek-v4-flash"; messages = @(@{ role = "user"; content = "return JSON: { ok: true }" }); response_format = @{ type = "json_object" }; thinking = @{ type = "enabled" }; reasoning_effort = "max" } | ConvertTo-Json -Depth 5)
 ```
 
-返回 401/403 说明账号授权或额度不可用；RoadMan 会明确暂停语义步骤，不会用关键词猜地点。
+A 401/403 means the account authorization or quota is unavailable; RoadMan will explicitly pause semantic steps rather than guessing locations by keywords.
 
-**常用运维命令**
+**Common Ops Commands**
 
 ```powershell
-docker compose ps                 # 查看服务状态
-docker compose logs -f backend    # 跟踪后端日志
-docker compose down               # 停止全部服务
-docker compose up -d --build      # 更新代码后重新构建
+docker compose ps                 # view service status
+docker compose logs -f backend    # follow backend logs
+docker compose down               # stop all services
+docker compose up -d --build      # rebuild after code changes
 ```
 
-数据库备份与恢复、HTTPS、局域网与排障详见 [docs/operations.md](docs/operations.md)。
+Database backup & restore, HTTPS, LAN and troubleshooting: see [docs/operations.md](docs/operations.md).
 
-## 配置项
+## Configuration
 
-所有配置写入根目录 `.env` 文件，完整模板与注释见 [.env.example](.env.example)。
+All configuration lives in the root `.env` file; the full template with comments is in [.env.example](.env.example).
 
-| 变量 | 用途 | 是否必需 |
+| Variable | Purpose | Required |
 | --- | --- | --- |
-| `DEEPSEEK_API_KEY` | 需求理解、目的地研究、语义编辑等云端智能体 | 是 |
-| `AMAP_WEBSERVICE_KEY` | 地理编码、POI、真实路线查询 | 是 |
-| `VITE_AMAP_JSAPI_KEY` | 浏览器端真实地图（构建时注入，改动后需重新构建） | 推荐 |
-| `VITE_AMAP_SECURITY_JS_CODE` | 浏览器地图安全密钥 | 推荐 |
-| `FLYAI_API_KEY` | 旅行搜索、住宿、餐饮补充 | 推荐 |
-| `OPENTRIPMAP_API_KEY` | 国际/开放景点数据补充 | 可选 |
-| `DEEPSEEK_MODEL` | 模型名，默认 `deepseek-v4-flash` | 可选 |
-| `DEEPSEEK_REASONING_EFFORT` | 思考深度，默认 `max` | 可选 |
-| `DEEPSEEK_THINKING` | 是否启用思考模式，默认 `true` | 可选 |
-| `DEEPSEEK_API_URL` | Chat Completions 地址 | 可选 |
-| `ROADMAN_HTTP_PROXY` | 容器访问外网所需的宿主机代理，如 `http://host.docker.internal:7890` | 可选 |
+| `DEEPSEEK_API_KEY` | Cloud agents for requirement understanding, destination research, semantic edits, etc. | Yes |
+| `AMAP_WEBSERVICE_KEY` | Geocoding, POI, real route queries | Yes |
+| `VITE_AMAP_JSAPI_KEY` | Real browser map (injected at build time; rebuild after changes) | Recommended |
+| `VITE_AMAP_SECURITY_JS_CODE` | Browser map security key | Recommended |
+| `FLYAI_API_KEY` | Travel search, lodging, dining supplement | Recommended |
+| `OPENTRIPMAP_API_KEY` | International/open attraction data supplement | Optional |
+| `DEEPSEEK_MODEL` | Model name, default `deepseek-v4-flash` | Optional |
+| `DEEPSEEK_REASONING_EFFORT` | Reasoning depth, default `max` | Optional |
+| `DEEPSEEK_THINKING` | Enable thinking mode, default `true` | Optional |
+| `DEEPSEEK_API_URL` | Chat Completions endpoint | Optional |
+| `ROADMAN_HTTP_PROXY` | Host proxy needed by containers to reach the internet, e.g. `http://host.docker.internal:7890` | Optional |
 
-缺少非必需 Key 时对应能力自动降级（例如无浏览器地图 Key 时使用简化地图视图），不影响主流程。
+Missing non-required keys cause the corresponding capability to degrade automatically (e.g. a simplified map view when no browser map key is present) without affecting the main flow.
 
-DeepSeek 接口采用 OpenAI 兼容 Chat Completions 协议：请求使用 `messages`、`response_format=json_object`、`thinking=enabled` 与 `reasoning_effort=max`，响应读取 `choices[0].message.content`；模型私有思维链不保存。详见 [Chat Completions API](https://api-docs.deepseek.com/api/create-chat-completion/) 与 [思考模式](https://api-docs.deepseek.com/guides/thinking_mode/)。
+The DeepSeek API uses the OpenAI-compatible Chat Completions protocol: requests use `messages`, `response_format=json_object`, `thinking=enabled` and `reasoning_effort=max`; the response is read from `choices[0].message.content`; the model's private chain-of-thought is never stored. See [Chat Completions API](https://api-docs.deepseek.com/api/create-chat-completion/) and [Thinking Mode](https://api-docs.deepseek.com/guides/thinking_mode/).
 
-## 本地开发
+## Local Development
 
-后端（Conda）：
+Backend (Conda):
 
 ```powershell
 conda env create -f environment.yml
@@ -274,7 +282,7 @@ alembic -c backend/alembic.ini upgrade head
 uvicorn app.main:app --reload --port 8000
 ```
 
-前端（另开终端）：
+Frontend (separate terminal):
 
 ```powershell
 cd frontend
@@ -282,65 +290,65 @@ npm install
 npm run dev
 ```
 
-本地开发默认使用 SQLite。异步规划依赖 Redis 与 worker，建议用 Compose 跑基础设施，只在宿主机启动需要调试的服务：
+Local development defaults to SQLite. Async planning depends on Redis and a worker; it's recommended to run infrastructure with Compose and only start services you need to debug on the host:
 
 ```powershell
 docker compose up -d postgres redis worker
 ```
 
-## 测试与验收
+## Testing & Acceptance
 
 ```powershell
 $env:PYTHONPATH = 'backend'
-pytest backend/tests -q                  # 后端测试
+pytest backend/tests -q                  # backend tests
 
 cd frontend
-npm run test                             # 前端单元测试
-npm run build                            # 前端生产构建
-npm run test:e2e                         # 前端 E2E（Playwright）
+npm run test                             # frontend unit tests
+npm run build                            # frontend production build
+npm run test:e2e                         # frontend E2E (Playwright)
 
-python deploy/api_smoke.py               # 运行中容器 API 冒烟
-python deploy/full_journey_acceptance.py # 完整旅程验收（建行程→规划→修改→导出）
-python evaluation/run_evals.py           # 需求理解评测（12 条场景）
-python evaluation/range_accuracy.py      # 能耗、等效续航与到达 SOC 误差基准
-python evaluation/safety_scenarios.py    # 12 类低电量、异常元数据、恶劣天气与服务失败
-.\deploy\semifinal-check.ps1             # 复赛一键构建、测试、评测与证据报告
-node deploy/semifinal_evidence.mjs       # 生成 2560×1440 复赛产品/指标截图
+python deploy/api_smoke.py               # API smoke test against running containers
+python deploy/full_journey_acceptance.py # full-journey acceptance (create→plan→edit→export)
+python evaluation/run_evals.py           # requirement understanding evals (12 scenarios)
+python evaluation/range_accuracy.py      # energy, equivalent range & arrival-SOC error baselines
+python evaluation/safety_scenarios.py    # 12 categories: low battery, bad metadata, bad weather, service failures
+.\deploy\semifinal-check.ps1             # one-click semifinal build, test, eval & evidence report
+node deploy/semifinal_evidence.mjs       # generate 2560×1440 semifinal product/metric screenshots
 ```
 
-复赛专项材料见 [submission/GOAI_Boundless_Agents/semifinal/README.md](submission/GOAI_Boundless_Agents/semifinal/README.md)。续航基准明确标记为模拟传感器回放；需要审核真实道路数据时使用 `python evaluation/range_accuracy.py --input <real.json> --require-real`，模拟输入会被拒绝。
+Semifinal materials: [submission/GOAI_Boundless_Agents/semifinal/README.md](submission/GOAI_Boundless_Agents/semifinal/README.md). The range baseline is explicitly marked as simulated sensor replay; to audit real road data use `python evaluation/range_accuracy.py --input <real.json> --require-real` — simulated input is rejected.
 
-真实云端智能体的浏览器验收默认不阻断离线回归；配置有效 Key 后显式开启：
+Browser acceptance with real cloud agents does not block offline regression by default; enable explicitly once a valid key is configured:
 
 ```powershell
 $env:ROADMAN_RUN_LIVE_AGENT_E2E = '1'
 npm run test:e2e --prefix frontend -- tests/e2e/planning-agent.spec.ts
 ```
 
-## 项目结构
+## Project Structure
 
 ```text
-backend/     FastAPI + LangGraph 后端、ARQ worker、数据库迁移、测试
-frontend/    Vue 3 + Vite 前端、E2E 测试
-shared/      前后端共享的 JSON Schema 契约与示例行程
-Skills/      外部能力技能包（高德、天气、旅行搜索、车型、景点）
-deploy/      冒烟与验收脚本、Nginx 配置、备份恢复
-evaluation/  需求理解、续航误差、安全降级与完整旅程评测
-docs/        接口契约、领域模型、部署运维等文档
-submission/  参赛方案书与生成审计工具
+backend/     FastAPI + LangGraph backend, ARQ worker, DB migrations, tests
+frontend/    Vue 3 + Vite frontend, E2E tests
+shared/      JSON Schema contracts & example trips shared by frontend/backend
+Skills/      External capability skill packs (AMap, weather, travel search, vehicles, attractions)
+deploy/      Smoke & acceptance scripts, Nginx config, backup/restore
+evaluation/  Requirement understanding, range error, safety degradation & full-journey evals
+docs/        API contract, domain model, deployment & ops docs
+submission/  Competition proposal & generated-audit tooling
 ```
 
-## 文档
+## Documentation
 
-- [project.md](project.md)：系统架构、规划工作流、接口与数据边界
-- [docs/README.md](docs/README.md)：全部维护文档索引
-- [docs/api-contract.md](docs/api-contract.md)：HTTP/SSE 接口契约
-- [docs/mobility-and-poi-data-contract.md](docs/mobility-and-poi-data-contract.md)：地点事实、票务预约、停车、公共交通与跨城班次数据契约
-- [docs/operations.md](docs/operations.md)：部署运维、备份恢复与排障
-- [docs/safety-and-data-boundary.md](docs/safety-and-data-boundary.md)：安全、降级与数据边界
+- [project.md](project.md): system architecture, planning workflow, API & data boundaries
+- [docs/README.md](docs/README.md): index of all maintenance docs
+- [docs/api-contract.md](docs/api-contract.md): HTTP/SSE API contract
+- [docs/mobility-and-poi-data-contract.md](docs/mobility-and-poi-data-contract.md): place facts, ticketing/reservation, parking, public transit & intercity schedule data contract
+- [docs/operations.md](docs/operations.md): deployment, ops, backup/restore & troubleshooting
+- [docs/safety-and-data-boundary.md](docs/safety-and-data-boundary.md): safety, degradation & data boundaries
 
-## 使用边界
+## Usage Boundaries
 
-路线、天气、开放时间、票务、班次、路况与价格可能变化。RoadMan 会记录来源、时间和降级状态，但导出结果不能替代景区、交通运营方、道路管理部门或车辆厂商的实时信息。出发前请再次核对预约、封路、恶劣天气、补能可用性及交通班次。
+Routes, weather, opening hours, tickets, schedules, traffic and prices may change. RoadMan records sources, times and degradation status, but exported results cannot replace real-time information from scenic areas, transport operators, road authorities or vehicle manufacturers. Please re-check reservations, road closures, severe weather, charging availability and transport schedules before departure.
 
-RoadMan 不连接或控制车辆。天气、补能与路线服务失败时会显示可解释降级，不把估算点或示意路线冒充实时事实；数据收集、30 天附件保留和行程级联删除范围见 [docs/safety-and-data-boundary.md](docs/safety-and-data-boundary.md)。
+RoadMan does not connect to or control vehicles. When weather, charging or route services fail, it shows explainable degradation and never presents estimated points or schematic routes as live facts; data collection, the 30-day attachment retention and cascade trip deletion are covered in [docs/safety-and-data-boundary.md](docs/safety-and-data-boundary.md).
