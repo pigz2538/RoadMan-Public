@@ -24,3 +24,6 @@ playwright-report/
 data/
 .history/
 artifacts/
+# Live acceptance runs can generate many timestamped reports. Keep them
+# available locally while committing only the curated evidence reports.
+evaluation/results/*.json
