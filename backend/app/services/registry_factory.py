@@ -18,6 +18,12 @@ from ..skills.flyai import (
     FlyAISemanticSearchAdapter,
     FlyAITrainAdapter,
 )
+from ..skills.fallbacks import (
+    FreeApiOilAdapter,
+    FreeApiTrainAdapter,
+    OpenStreetMapGeocodeAdapter,
+    SixApiFlightAdapter,
+)
 from ..skills.opentripmap import OpenTripMapNearbyAdapter
 from ..skills.registry import SkillRegistry
 from ..skills.weather import OpenMeteoForecastAdapter
@@ -48,5 +54,12 @@ def build_skill_registry(settings: Settings | None = None) -> SkillRegistry:
     registry.register(FlyAIFerryAdapter())
     registry.register(FlyAIKeywordSearchAdapter())
     registry.register(FlyAISemanticSearchAdapter())
+    # Primary travel search remains FlyAI.  These adapters are only consulted
+    # after a provider outage or empty response and return the same normalized
+    # ``data.items`` contract, so route selection does not fabricate tickets.
+    registry.register(FreeApiTrainAdapter(config.train_fallback_url))
+    registry.register(SixApiFlightAdapter(config.flight_fallback_url, config.flight_fallback_api_key))
+    registry.register(FreeApiOilAdapter(config.oil_api_url, config.oil_app_id, config.oil_app_secret))
+    registry.register(OpenStreetMapGeocodeAdapter())
     registry.register(OpenTripMapNearbyAdapter(config.opentripmap_api_key))
     return registry

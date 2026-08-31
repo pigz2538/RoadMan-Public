@@ -92,6 +92,13 @@ class PlanWarning(BaseModel):
     estimated: bool = False
 
 
+class VehicleSpecification(BaseModel):
+    """One verified specification label/value returned by the vehicle Skill."""
+
+    name: str = Field(min_length=1, max_length=120)
+    value: str = Field(min_length=1, max_length=300)
+
+
 class VehicleProfile(BaseModel):
     id: str = Field(default_factory=lambda: f"vehicle_{uuid4().hex[:10]}")
     brand: str
@@ -112,6 +119,15 @@ class VehicleProfile(BaseModel):
     mountain_ready: bool = True
     unpaved_ready: bool = False
     safe_energy_reserve_percent: float = Field(default=15, ge=5, le=40)
+    # Keep the provider identity and detailed evidence with the saved vehicle
+    # so a later plan can show exactly which trim was selected. These fields
+    # are stored inside the existing JSON document; no SQL migration is needed.
+    source_id: str | None = None
+    source_url: str | None = None
+    detail_source_url: str | None = None
+    price_min_cny: float | None = Field(default=None, ge=0)
+    price_max_cny: float | None = Field(default=None, ge=0)
+    specifications: list[VehicleSpecification] = Field(default_factory=list, max_length=160)
 
 
 class VehicleUpdate(BaseModel):
@@ -133,6 +149,12 @@ class VehicleUpdate(BaseModel):
     mountain_ready: bool | None = None
     unpaved_ready: bool | None = None
     safe_energy_reserve_percent: float | None = Field(default=None, ge=5, le=40)
+    source_id: str | None = None
+    source_url: str | None = None
+    detail_source_url: str | None = None
+    price_min_cny: float | None = Field(default=None, ge=0)
+    price_max_cny: float | None = Field(default=None, ge=0)
+    specifications: list[VehicleSpecification] | None = Field(default=None, max_length=160)
 
 
 class FileStatus(StrEnum):

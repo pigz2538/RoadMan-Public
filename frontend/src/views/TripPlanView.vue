@@ -95,20 +95,62 @@ const planningProgress = computed(() => {
   const value = store.planningEvent?.progress ?? planningSnapshot.value?.progress.value ?? 1
   return Math.max(0, Math.min(100, Number(value) || 1))
 })
+const planningScenes = [
+  { key: 'understand', until: 29, title: '正在理解这次旅行', caption: '识别同行人、日期、城市与必去地点' },
+  { key: 'intercity', until: 59, title: '正在连接出发地与目的地', caption: '比较跨城交通并预留机场或车站接驳' },
+  { key: 'discover', until: 69, title: '正在点亮目的地', caption: '检索景点、餐饮、住宿与公开信息来源' },
+  { key: 'connect', until: 78, title: '正在编织每日路线', caption: '把酒店、景点和交通节点连成连续路径' },
+  { key: 'context', until: 89, title: '正在补齐旅行上下文', caption: '检查天气、开放信息、服务设施与适配性' },
+  { key: 'schedule', until: 94, title: '正在编排全天节奏', caption: '安排三餐、停留、休息、住宿与返程时间' },
+  { key: 'verify', until: 100, title: '正在做最后复核', caption: '逐段核验时间重叠、路线连续和必去地点' },
+] as const
+const planningScene = computed(() => {
+  const index = planningScenes.findIndex((scene) => planningProgress.value <= scene.until)
+  const sceneIndex = index < 0 ? planningScenes.length - 1 : index
+  return { ...planningScenes[sceneIndex], index: sceneIndex + 1 }
+})
 const visiblePlanningEvents = computed(() => store.planningEvents.slice(-7))
+function humanizePlanningIssue(issue: { code: string; description: string }) {
+  const description = String(issue.description || '').trim()
+  const messages: Record<string, string> = {
+    STAGE_OVERLAP: `同一天的移动时间发生冲突：${description.replace(/与前一移动阶段时间重叠$/, '没有在上一段结束后再出发')}`,
+    ACTIVITY_TIME_OVERLAP: `行程时间线存在重叠：${description}`,
+    ROUTE_DISCONTINUITY: `路线中间出现断点：${description.replace(/^阶段/, '在阶段')}`,
+    ROUTE_NOT_CLOSED: '返程没有正确接回最初的出发点，当前路线还未闭合。',
+    REQUIRED_PLACES_UNSCHEDULED: description,
+    OVERNIGHT_HOTEL_MISSING: `住宿没有完整落到日程中：${description}`,
+    RETURN_DEADLINE_UNACHIEVABLE: description,
+    DRIVING_STAGE_CALENDAR_MISMATCH: `一段移动跨出了当天可用时间：${description}`,
+    EMPTY_DAY_STAGES: `有一天没有形成可执行路线：${description}`,
+  }
+  return messages[issue.code] || description || '规划结果仍有一项未解决的约束。'
+}
 const planningFailure = computed(() => {
   if (planningSnapshot.value?.status !== 'failed') return null
   const issues = planningSnapshot.value.verification_result?.issues ?? []
   // A missing forecast is a non-blocking warning.  When another constraint
   // fails, show that actionable blocker first instead of misleadingly
   // presenting the weather warning as the reason the plan stopped.
-  const issue = issues.find((item) => item.severity === 'blocker') || issues[0]
-  const description = issue?.description
+  const blockers = issues.filter((item) => item.severity === 'blocker')
+  const visibleIssues = (blockers.length ? blockers : issues).slice(0, 4)
+  const details = [...new Set(visibleIssues.map(humanizePlanningIssue))]
+  const repairAttempts = planningSnapshot.value.verification_result?.auto_repair_attempts ?? 0
+  const plannerDefectCodes = new Set([
+    'STAGE_OVERLAP', 'ACTIVITY_TIME_OVERLAP', 'ROUTE_DISCONTINUITY', 'ROUTE_NOT_CLOSED',
+    'REQUIRED_PLACES_UNSCHEDULED', 'OVERNIGHT_HOTEL_MISSING', 'DRIVING_STAGE_CALENDAR_MISMATCH',
+    'EMPTY_DAY_STAGES',
+  ])
+  const plannerDefect = blockers.some((item) => plannerDefectCodes.has(item.code))
   const preferences = store.trip?.request?.preferences ?? []
-  const hint = preferences.length
-    ? `已保留你的偏好：${preferences.slice(0, 3).join('、')}。可先放宽时间窗口或减少连续移动，再重新规划。`
-    : '可以先放宽时间窗口、减少连续移动，或补充明确的交通方式后重新规划。'
-  return { description: description || '当前时间、地点或交通安排无法同时满足。', hint }
+  const hint = plannerDefect
+    ? '这是规划器内部仍未消解的路线或时间冲突，不代表你的需求不合理。你可以重试；系统不会要求你为内部排程错误放宽需求。'
+    : preferences.length
+      ? `已保留你的偏好：${preferences.slice(0, 3).join('、')}。上面的具体限制仍无法同时满足。`
+      : '上面的具体限制仍无法同时满足，可返回需求页调整对应时间或交通条件。'
+  const description = repairAttempts
+    ? `系统已自动重排 ${repairAttempts} 次，仍有 ${blockers.length || visibleIssues.length} 项没有解决。`
+    : '行程在最终复核中发现了尚未解决的问题。'
+  return { description, details, hint, repairAttempts }
 })
 
 const filteredActivities = computed(() => {
@@ -715,9 +757,25 @@ watch(bottomPanelCollapsed, (collapsed) => window.localStorage.setItem(panelStor
     <Transition name="planning-overlay">
       <div v-if="planningBusy" class="planning-overlay" role="status" aria-live="polite">
         <section class="planning-wait-dialog glass-card">
-          <span class="planning-spinner" aria-hidden="true" />
-          <strong>{{ planningRestarting ? '正在重新规划整段行程…' : '智能体正在完善行程…' }}</strong>
-          <small>路线、景点、餐饮、住宿与补能安排会逐项复核，请稍候</small>
+          <div class="planning-map-animation" :data-scene="planningScene.key" aria-hidden="true">
+            <span class="planning-map-grid" />
+            <svg viewBox="0 0 360 170" preserveAspectRatio="none">
+              <path class="planning-map-route route-main" d="M28 132 C76 126 78 70 132 82 S202 148 246 93 S300 39 337 47" />
+              <path class="planning-map-route route-branch" d="M132 82 C158 44 191 34 226 57" />
+              <path class="planning-map-route route-return" d="M246 93 C220 120 180 139 143 130" />
+            </svg>
+            <span v-for="index in 6" :key="index" :class="`planning-map-pin pin-${index}`"><i /></span>
+            <span class="planning-map-traveller">➤</span>
+            <span class="planning-map-scan" />
+            <span class="planning-map-card card-hotel">住</span>
+            <span class="planning-map-card card-meal">餐</span>
+            <span class="planning-map-card card-weather">☀</span>
+          </div>
+          <div class="planning-scene-copy">
+            <span>{{ planningScene.index }}/{{ planningScenes.length }} · {{ planningAgentName(store.planningEvent || {}) }}</span>
+            <strong>{{ planningRestarting ? '正在重新规划整段行程' : planningScene.title }}</strong>
+            <small>{{ planningScene.caption }}</small>
+          </div>
           <div class="planning-overlay-meter" aria-hidden="true"><i :style="{ width: `${planningProgress}%` }" /></div>
           <b>{{ planningProgress }}%</b>
         </section>
@@ -793,9 +851,10 @@ watch(bottomPanelCollapsed, (collapsed) => window.localStorage.setItem(panelStor
         <span v-for="item in planningSnapshot.defaults_applied" :key="item">{{ humanizeDefault(item) }}</span>
       </div>
       <div v-if="planningSnapshot.status === 'failed'" class="planning-recovery">
-        <p class="planning-error-detail">
-          {{ planningFailure?.description || '请调整时间、交通方式或停留安排后重新规划。' }}
-        </p>
+        <p class="planning-error-detail">{{ planningFailure?.description || '行程仍有未解决的问题。' }}</p>
+        <ul v-if="planningFailure?.details.length" class="planning-failure-details">
+          <li v-for="detail in planningFailure.details" :key="detail">{{ detail }}</li>
+        </ul>
         <div class="preflight-actions">
           <button class="secondary-button" @click="router.push('/home')">返回修改需求</button>
           <button class="primary-button" @click="retryPlanning">重新规划</button>
@@ -1056,6 +1115,9 @@ watch(bottomPanelCollapsed, (collapsed) => window.localStorage.setItem(panelStor
             <span class="failure-dialog-kicker">规划校验未通过</span>
             <h2 id="planning-failure-title">这次安排需要调整</h2>
             <p>{{ planningFailure.description }}</p>
+            <ul class="planning-failure-details">
+              <li v-for="detail in planningFailure.details" :key="detail">{{ detail }}</li>
+            </ul>
             <div class="failure-dialog-hint">{{ planningFailure.hint }}</div>
           </div>
           <div class="failure-dialog-actions">

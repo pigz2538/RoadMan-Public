@@ -34,7 +34,7 @@ RoadMan 只把第三方返回的真实道路/步行/骑行/公交 geometry 当�
 
 ## 火车/飞机/轮渡跨城阶段
 
-跨城班次落为 `MovementStage`，`mode` 为 `train`/`flight`/`ferry`，可带 `service_number`、`service_operator`（车次/航班/船班）、`departure_terminal`、`arrival_terminal`、`service_detail_url` 等班次字段。跨海语义（船/渡轮/跨海大桥/飞机等）在 `build_base_route` 归一化为 ferry/flight/bridge 决策，驱动是否启用跨城班次。
+跨城班次落为 `MovementStage`，`mode` 为 `train`/`flight`/`ferry`，可带 `service_number`、`service_operator`（车次/航班/船班）、`departure_terminal`、`arrival_terminal`、`service_detail_url` 等班次字段。主旅行信息服务无结果时，火车会顺序尝试公开车次备选，航班会在配置备用密钥后尝试公开航班服务；所有备选都保留来源、服务状态和失败原因，不把“高铁/航班”写成虚构编号。跨海语义（船/渡轮/跨海大桥/飞机等）在 `build_base_route` 归一化为 ferry/flight/bridge 决策，驱动是否启用跨城班次。
 
 ## 返程闭环与坐标容差
 

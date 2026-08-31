@@ -36,6 +36,16 @@
 
 火车和飞机阶段保留真实的 `service_number`（如 G11、CA123）、运营方、出发/到达站或机场、座席、出发/到达时间、价格和详情链接。多段联程会以 `A123 / B456` 保留全部编号。接口没有返回编号时，`service_status=unavailable`，不会把“高铁”或“航班”伪装成车次号。
 
+## 公开备选查询
+
+主旅行信息服务失败或返回空集合时，规划器会自动按以下顺序降级：
+
+1. 火车/高铁：`flyai.train` → `freeapi.train`（公开车次接口）。备选结果仍需通过日期、起终点、到发时间和车次号校验；无法解析时继续返回不可用，不生成假班次。
+2. 航班：`flyai.flight` → `sixapi.flight`。备用服务需要 `FLIGHT_FALLBACK_API_KEY`，且仅对可确定机场代码的城市调用；未配置或城市未知时保留主服务错误。
+3. 油价：`freeapi.oil` 是规划上下文的可选查询，不参与路线可行性判定。没有 `OIL_APP_ID/OIL_APP_SECRET` 时跳过，并在能力健康检查中标为未配置。
+
+每次降级都会写入技能调用审计、来源 URL 和 `TRANSPORT_FALLBACK_USED` 警告。接口文档：[公开车次查询](https://www.free-api.com/doc/675)、[公开油价查询](https://www.free-api.com/doc/592)、[航班备选服务](https://www.6api.net/api/flight/)。
+
 轮船目前来自语义检索，时间和船名必须标记为 `estimated`，并在阶段警告出发前向船公司核实；系统不会伪造船班号。
 
 ## 对外 API 与审计

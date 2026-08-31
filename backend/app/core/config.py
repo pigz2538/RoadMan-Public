@@ -15,6 +15,15 @@ class Settings(BaseSettings):
     amap_webservice_key: str = ""
     opentripmap_api_key: str = ""
     flyai_api_key: str = ""
+    # Optional public-data fallbacks.  They are deliberately opt-in for
+    # credentialed services; the train endpoint is usable without a key.
+    train_fallback_url: str = "https://api.lolimi.cn/API/hc/api"
+    mcp_12306_url: str = ""
+    flight_fallback_url: str = "https://open.6api.net/flight/getTicket"
+    flight_fallback_api_key: str = ""
+    oil_api_url: str = "https://www.mxnzp.com/api/oil/search"
+    oil_app_id: str = ""
+    oil_app_secret: str = ""
     load_local_skill_credentials: bool = True
     cors_origins: str = "http://localhost:5173"
     upload_dir: str = "./data/uploads"
@@ -33,8 +42,11 @@ class Settings(BaseSettings):
     deepseek_api_url: str = "https://api.deepseek.com/chat/completions"
     deepseek_api_key: str = ""
     deepseek_model: str = "deepseek-v4-flash"
-    deepseek_reasoning_effort: str = "max"
-    deepseek_thinking: bool = True
+    # Fast non-thinking mode is the product default.  A deployment can opt
+    # into deeper reasoning for a specific evaluation run, but ordinary
+    # planning and fallback lookups must not silently wait on it.
+    deepseek_reasoning_effort: str = "low"
+    deepseek_thinking: bool = False
     deepseek_max_tokens: int = 32768
     deepseek_timeout_seconds: float = 180
 

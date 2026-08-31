@@ -82,6 +82,22 @@ const availableRange = computed(() => {
   return Math.max(0, Math.round(vehicle.rated_range_km * vehicle.current_energy_percent / 100))
 })
 
+function catalogSpec(item: VehicleCatalogItem, ...labels: string[]): string | null {
+  const specs = item.specifications || []
+  const match = specs.find((spec) => labels.some((label) => spec.name.includes(label)))
+  return match ? `${match.name} ${match.value}` : null
+}
+
+function catalogSummary(item: VehicleCatalogItem): string {
+  const summary = [
+    item.rated_range_km ? `续航 ${item.rated_range_km} km` : catalogSpec(item, '续航'),
+    item.consumption_per_100km ? `能耗 ${item.consumption_per_100km}/100km` : catalogSpec(item, '耗电', '油耗'),
+    item.battery_kwh ? `电池 ${item.battery_kwh} kWh` : catalogSpec(item, '电池能量', '电池容量'),
+    item.seats ? `${item.seats} 座` : catalogSpec(item, '车身结构', '座位数'),
+  ].filter(Boolean)
+  return summary.length ? summary.join(' · ') : '已获取详细参数，可展开查看'
+}
+
 function newVehicleDraft(): VehicleInput {
   return {
     brand: 'RoadMan',
@@ -246,6 +262,12 @@ function applyVehicleCatalogItem(item: VehicleCatalogItem) {
     width_m: item.width_m ?? (editing ? existing.width_m : undefined),
     seats: item.seats ?? existing.seats ?? 5,
     current_energy_percent: item.current_energy_percent ?? existing.current_energy_percent ?? 80,
+    source_id: item.source_id,
+    source_url: item.source_url,
+    detail_source_url: item.detail_source_url,
+    price_min_cny: item.price_min_cny,
+    price_max_cny: item.price_max_cny,
+    specifications: item.specifications || existing.specifications || [],
   }
   vehicleCatalogError.value = item.specs_missing?.length
     ? `已填入 ${item.brand} ${item.model}。${item.specs_missing.join('、')}需按具体配置确认。`
@@ -894,6 +916,11 @@ function activate(label: string) {
               <div><dt>估算可用</dt><dd>{{ availableRange }} km</dd></div>
               <div><dt>座位数</dt><dd>{{ currentVehicle.seats }}</dd></div>
             </dl>
+            <div v-if="currentVehicle.specifications?.length" class="vehicle-specifications" aria-label="已获取的车型参数">
+              <span v-for="spec in currentVehicle.specifications.slice(0, 12)" :key="`${spec.name}-${spec.value}`">
+                {{ spec.name }}：{{ spec.value }}
+              </span>
+            </div>
           </template>
           <form v-if="vehicleFormOpen" class="vehicle-form" @submit.prevent="saveVehicle">
             <strong>{{ vehicleEditingId ? '编辑车型' : '添加车型' }}</strong>
@@ -925,6 +952,7 @@ function activate(label: string) {
                     <span>
                     <strong>{{ item.brand }} · {{ item.series }}</strong>
                     <small>{{ item.model }} · {{ item.year || '年款待核实' }} · {{ item.state_label || '状态待核实' }}</small>
+                    <small class="vehicle-catalog-specs">{{ catalogSummary(item) }}</small>
                     </span>
                     <em>填入</em>
                   </button>

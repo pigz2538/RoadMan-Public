@@ -2,6 +2,12 @@ import { defineConfig, devices } from '@playwright/test'
 
 export default defineConfig({
   testDir: './tests/e2e',
+  // The plan page mounts a model-viewer and a large map canvas.  Running two
+  // browser workers concurrently can starve the browser's rendering queue and
+  // make an otherwise healthy page miss Playwright's navigation timeout.  A
+  // single worker keeps the acceptance suite deterministic; it still covers
+  // every configured viewport and browser.
+  workers: 1,
   use: {
     baseURL: 'http://127.0.0.1:5173',
     screenshot: 'only-on-failure',

@@ -515,6 +515,30 @@ def test_tourism_scheduler_reuses_comfortable_hotel_in_same_city_and_filters_hos
     assert all("旅舍" not in name and "青年" not in name for name in hotel_names)
 
 
+def test_tourism_scheduler_filters_all_hostel_name_variants_including_youth_inn():
+    days = [
+        {
+            "id": "day_1",
+            "date": "2026-08-02",
+            "items": [],
+            "activities": [],
+            "stages": [],
+        }
+    ]
+    candidates = {
+        "attractions": [],
+        "meals": [],
+        "hotels": [
+            {"place": {"name": "城市青年旅店", "city": "成都"}, "rating": 5},
+            {"place": {"name": "城市舒适酒店", "city": "成都"}, "rating": 4.6},
+        ],
+    }
+
+    scheduled = schedule_tourism_activities(days, candidates)
+    hotel = next(item for item in scheduled[0]["activities"] if item["type"] == "hotel")
+    assert hotel["place"]["name"] == "城市舒适酒店"
+
+
 def test_tourism_scheduler_rotates_high_quality_meals_across_days():
     days = [
         {"id": f"day_{index}", "date": f"2026-08-{index + 1:02d}", "items": [], "activities": [], "stages": []}

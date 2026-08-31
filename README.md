@@ -350,3 +350,6 @@ submission/  参赛方案书与生成审计工具
 路线、天气、开放时间、票务、班次、路况与价格可能变化。RoadMan 会记录来源、时间和降级状态，但导出结果不能替代景区、交通运营方、道路管理部门或车辆厂商的实时信息。出发前请再次核对预约、封路、恶劣天气、补能可用性及交通班次。
 
 RoadMan 不连接或控制车辆。天气、补能与路线服务失败时会显示可解释降级，不把估算点或示意路线冒充实时事实；数据收集、30 天附件保留和行程级联删除范围见 [docs/safety-and-data-boundary.md](docs/safety-and-data-boundary.md)。
+### 交通与油价公开备选
+
+主旅行信息服务没有返回有效班次时，系统会自动尝试公开车次接口（`TRAIN_FALLBACK_URL`）；航班备选需要配置 `FLIGHT_FALLBACK_API_KEY`，油价查询需要 `OIL_APP_ID` 与 `OIL_APP_SECRET`。所有备选结果都会保留来源、真实车次/航班号和可用状态，未配置或无结果时只提示降级，不生成虚假班次。默认使用非思考模式（`DEEPSEEK_THINKING=false`、`DEEPSEEK_REASONING_EFFORT=low`），需要专项深度评测时再显式开启。

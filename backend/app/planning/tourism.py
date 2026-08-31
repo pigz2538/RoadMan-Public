@@ -13,6 +13,14 @@ _INCOMFORTABLE_LODGING_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Keep the comfort filter semantic rather than tied to one provider's spelling.
+# Search providers use several variants for dormitory/hostel-style properties;
+# all of them must be excluded from the default comfortable base selection.
+_DISALLOWED_COMFORT_LODGING_RE = re.compile(
+    r"(?:青年旅店|青年旅馆|青年客栈|学生宿舍|宿舍型|床位房|胶囊旅馆|太空舱)",
+    re.IGNORECASE,
+)
+
 # An airport/railway hotel is a useful fallback for a very early departure,
 # but it is a poor default base for a multi-day city itinerary.  Previously a
 # provider could return a property whose name contained ``双流国际机场`` or
@@ -42,7 +50,7 @@ def _comfortable_hotel(
     traveller explicitly confirmed that property or there is no alternative.
     """
     text = _hotel_text(candidate)
-    if _INCOMFORTABLE_LODGING_RE.search(text):
+    if _INCOMFORTABLE_LODGING_RE.search(text) or _DISALLOWED_COMFORT_LODGING_RE.search(text):
         return False
     if (
         not allow_transit
@@ -330,16 +338,108 @@ def select_primary_hotel(
         transit_penalty = 1000.0 if _TRANSIT_FOCUSED_LODGING_RE.search(_hotel_text(item)) else 0.0
         return typical + transit_penalty, _candidate_quality(item)
 
-    return min(pool, key=key)
+    selected = min(pool, key=key)
+    selected_distance = _place_distance_km(selected.get("place"), destination)
+    if (
+        selected_distance is not None
+        and selected_distance > 120
+        and not selected.get("user_confirmed")
+        and not selected.get("user_requested")
+    ):
+        # A remote provider hit is not a usable city base. Returning ``None``
+        # lets the graph create a route-derived core-area lodging placeholder
+        # at the actual gateway instead of forcing a 200+ km hotel transfer.
+        return None
+    return selected
 
 
 def schedule_tourism_activities(
     day_plans: list[dict[str, Any]],
     candidates: dict[str, list[dict[str, Any]]],
     confirmed_additions: list[dict[str, Any]] | None = None,
+    destination: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Attach executable attraction and overnight hotel activities to day plans."""
+    # A confirmed edit is a user decision, not merely another provider hit.
+    # Mark it before selecting the base hotel so a map-selected property wins
+    # the same pass that builds movement stages. Otherwise the route can use
+    # one hotel while the visible activity silently uses another (or a hotel
+    # selected on the return day is dropped as a non-overnight item).
+    for record in confirmed_additions or []:
+        if not isinstance(record, dict):
+            continue
+        category = str(record.get("category") or "").strip()
+        candidate = record.get("candidate")
+        if category not in {"hotels", "meals", "attractions"} or not isinstance(candidate, dict):
+            continue
+        candidate["user_confirmed"] = True
+        candidate["user_requested"] = True
+        candidate_id = str(candidate.get("candidate_id") or "")
+        name = str((candidate.get("place") or {}).get("name") or "").strip()
+        for existing in candidates.setdefault(category, []):
+            if (
+                candidate_id
+                and str(existing.get("candidate_id") or "") == candidate_id
+            ) or (
+                name
+                and str((existing.get("place") or {}).get("name") or "").strip() == name
+            ):
+                existing.update(candidate)
+                break
     hotels = [item for item in candidates.get("hotels", []) if _comfortable_hotel(item)]
+    # A travel-platform result can be a valid hotel but still be hundreds of
+    # kilometres from the selected gateway (common when the destination is a
+    # province/region). Do not use that outlier as the daily base. The graph
+    # passes the resolved destination so a local estimated hotel can be used
+    # instead of creating a midnight arrival or a map jump.
+    if destination and hotels:
+        nearest = min(
+            (
+                _place_distance_km(item.get("place"), destination)
+                for item in hotels
+                if _place_distance_km(item.get("place"), destination) is not None
+            ),
+            default=None,
+        )
+        if nearest is not None and nearest > 120 and not any(
+            item.get("user_confirmed") or item.get("user_requested") for item in hotels
+        ):
+            hotels = []
+    if not hotels:
+        # Keep accommodation visible even during provider degradation. This
+        # is an estimated booking placeholder at the resolved destination
+        # anchor, never an invented named property or a hostel.
+        fallback_place = dict(destination or {})
+        if not fallback_place.get("coordinates"):
+            fallback_place = {}
+            for day in day_plans:
+                for stage in day.get("stages", []):
+                    candidate_place = stage.get("destination") or stage.get("origin") or {}
+                    if candidate_place.get("coordinates"):
+                        fallback_place = dict(candidate_place)
+                        break
+                if fallback_place:
+                    break
+        if fallback_place.get("coordinates"):
+            fallback_name = str(
+                fallback_place.get("city") or fallback_place.get("name") or "目的地"
+            ).strip()
+            hotels = [
+                {
+                    "place": {
+                        "id": "estimated-destination-hotel",
+                        "name": f"{fallback_name}核心区住宿点（需预订）",
+                        "city": fallback_place.get("city") or fallback_name,
+                        "address": fallback_place.get("address"),
+                        "coordinates": fallback_place.get("coordinates"),
+                        "source_id": "estimated-destination-hotel",
+                    },
+                    "provider": "RoadMan planner",
+                    "source_records": [],
+                    "estimated": True,
+                    "user_requested": False,
+                }
+            ]
     attraction_sources = {
         item["place"]["name"]: item
         for item in candidates.get("attractions", [])
@@ -825,8 +925,12 @@ def schedule_tourism_activities(
                 used_attraction_names.add(name)
 
         if (
-            day_index < len(day_plans) - 1
-            and hotels
+            hotels
+            # A one-day preview still needs a visible overnight option.  For
+            # multi-day trips the final day is the return/departure day and
+            # therefore does not create a new night after the traveller has
+            # left the destination.
+            and (day_index < len(day_plans) - 1 or len(day_plans) == 1)
             and not any(item.get("type") == "hotel" for item in activities)
         ):
             hotel_anchor = next(
@@ -957,34 +1061,156 @@ def _apply_confirmed_additions(
         if existing is not None:
             existing["user_confirmed"] = True
             continue
-        if activity_type != "meal":
-            # Attractions and hotels are inserted by their route-aware passes;
-            # do not invent a disconnected activity here.
-            continue
         target_day = target_days[0] if target_days else None
         if target_day is None:
             continue
-        meal = next(
-            (
-                activity for activity in target_day.get("activities", [])
-                if activity.get("type") == "meal" and not activity.get("locked")
-            ),
-            None,
+        if activity_type == "meal":
+            meal = next(
+                (
+                    activity for activity in target_day.get("activities", [])
+                    if activity.get("type") == "meal" and not activity.get("locked")
+                ),
+                None,
+            ) or next(
+                (
+                    activity for activity in target_day.get("activities", [])
+                    if activity.get("type") == "meal"
+                ),
+                None,
+            )
+            if meal is None:
+                day_date = datetime.fromisoformat(
+                    f"{target_day['date']}T00:00:00+08:00"
+                ).date()
+                slot = _closest_free_slot(
+                    datetime.combine(day_date, time(11, 0), tzinfo=SHANGHAI),
+                    datetime.combine(day_date, time(14, 30), tzinfo=SHANGHAI),
+                    preferred=datetime.combine(day_date, time(12, 0), tzinfo=SHANGHAI),
+                    duration_minutes=45,
+                    occupied=[
+                        *[
+                            (
+                                datetime.fromisoformat(stage["planned_start"]),
+                                datetime.fromisoformat(stage["planned_end"]),
+                            )
+                            for stage in target_day.get("stages", [])
+                            if stage.get("planned_start") and stage.get("planned_end")
+                        ],
+                        *_occupied_ranges(target_day.get("activities", [])),
+                    ],
+                    minimum_minutes=30,
+                )
+                if slot:
+                    start_at, duration = slot
+                    meal = _activity(
+                        day=target_day,
+                        sequence=len(target_day.get("activities", [])),
+                        activity_type="meal",
+                        candidate=candidate,
+                        place=place,
+                        start_at=start_at,
+                        duration_minutes=duration,
+                        sources=candidate.get("source_records", []),
+                        opening_text="营业时间与排队情况以当天为准",
+                        user_note=candidate.get("user_note") or "用户已确认的餐饮安排",
+                    )
+                    target_day.setdefault("activities", []).append(meal)
+            if meal is not None:
+                # Retain the legal schedule slot and replace only the
+                # place/evidence fields with the explicit user choice.
+                meal["place"] = dict(place)
+                meal["user_confirmed"] = True
+                meal["source_records"] = list(candidate.get("source_records") or [])
+                for key in (
+                    "description", "image_url", "detail_url", "ticket_or_price",
+                    "parking_or_price", "parking_note", "opening_hours",
+                    "reservation_status", "reservation_note",
+                ):
+                    if candidate.get(key) is not None:
+                        meal[key] = candidate[key]
+                meal["user_note"] = candidate.get("user_note") or "用户已确认的餐饮安排"
+        elif activity_type == "hotel":
+            hotel = next(
+                (
+                    activity for activity in target_day.get("activities", [])
+                    if activity.get("type") == "hotel"
+                ),
+                None,
+            ) or next(
+                (
+                    activity for day in day_plans
+                    for activity in day.get("activities", [])
+                    if activity.get("type") == "hotel"
+                ),
+                None,
+            )
+            if hotel is not None:
+                # A hotel selected on the final/return day should still be
+                # visible and should become the same base used on prior days.
+                hotel["place"] = dict(place)
+                hotel["user_confirmed"] = True
+                hotel["required"] = True
+                hotel["source_records"] = list(candidate.get("source_records") or [])
+                for key in (
+                    "description", "image_url", "detail_url", "opening_hours",
+                    "reservation_status", "reservation_note",
+                ):
+                    if candidate.get(key) is not None:
+                        hotel[key] = candidate[key]
+                hotel["user_note"] = candidate.get("user_note") or "用户已确认的住宿安排"
+            else:
+                day_date = datetime.fromisoformat(
+                    f"{target_day['date']}T00:00:00+08:00"
+                ).date()
+                slot = _closest_free_slot(
+                    datetime.combine(day_date, time(17, 0), tzinfo=SHANGHAI),
+                    datetime.combine(day_date, time(22, 30), tzinfo=SHANGHAI),
+                    preferred=datetime.combine(day_date, time(19, 30), tzinfo=SHANGHAI),
+                    duration_minutes=60,
+                    occupied=[
+                        *[
+                            (
+                                datetime.fromisoformat(stage["planned_start"]),
+                                datetime.fromisoformat(stage["planned_end"]),
+                            )
+                            for stage in target_day.get("stages", [])
+                            if stage.get("planned_start") and stage.get("planned_end")
+                        ],
+                        *_occupied_ranges(target_day.get("activities", [])),
+                    ],
+                    minimum_minutes=30,
+                )
+                if slot:
+                    start_at, duration = slot
+                    target_day.setdefault("activities", []).append(
+                        _activity(
+                            day=target_day,
+                            sequence=len(target_day.get("activities", [])),
+                            activity_type="hotel",
+                            candidate=candidate,
+                            place=place,
+                            start_at=start_at,
+                            duration_minutes=duration,
+                            sources=candidate.get("source_records", []),
+                            opening_text="入住时间与房态以酒店实时信息为准",
+                            required=True,
+                            user_note=candidate.get("user_note") or "用户已确认的住宿安排",
+                        )
+                    )
+
+        # Keep item references deterministic after replacing/materializing a
+        # confirmed activity.  This also makes the map and left timeline use
+        # the same order immediately after a replan.
+        target_day["activities"] = sorted(
+            target_day.get("activities", []),
+            key=lambda item: str(item.get("planned_start") or ""),
         )
-        if meal is None:
-            continue
-        # Retain the schedule slot and replace only the place/evidence fields.
-        meal["place"] = dict(place)
-        meal["user_confirmed"] = True
-        meal["source_records"] = list(candidate.get("source_records") or [])
-        for key in (
-            "description", "image_url", "detail_url", "ticket_or_price",
-            "parking_or_price", "parking_note", "opening_hours",
-            "reservation_status", "reservation_note",
-        ):
-            if candidate.get(key) is not None:
-                meal[key] = candidate[key]
-        meal["user_note"] = candidate.get("user_note") or "用户已确认的餐饮安排"
+        for sequence, activity in enumerate(target_day["activities"]):
+            activity["sequence"] = sequence
+        target_day["items"] = [
+            *[{"type": "stage", "id": stage["id"]} for stage in target_day.get("stages", [])],
+            *[{"type": "activity", "id": activity["id"]} for activity in target_day["activities"]],
+        ]
 
 
 def _meal_fallback_slot(
@@ -1258,6 +1484,7 @@ def review_daily_schedule(
     day_plans: list[dict[str, Any]],
     candidates: dict[str, list[dict[str, Any]]],
     confirmed_additions: list[dict[str, Any]] | None = None,
+    destination: dict[str, Any] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Run a second pass over every day and phase after the first schedule.
 
@@ -1272,6 +1499,7 @@ def review_daily_schedule(
         day_plans,
         candidates,
         confirmed_additions,
+        destination,
     )
     notes: list[dict[str, Any]] = []
     for day in reviewed:

@@ -194,11 +194,28 @@ async def run_planning(
                     None,
                 )
             elif trip.status == TripStatus.failed:
+                # 100% is reserved for an itinerary that passed verification
+                # and was persisted as usable.  A failed terminal event means
+                # the workflow stopped after its repair budget; publishing it
+                # as 100% made the UI look successful for a moment before the
+                # failure dialog appeared.
+                result["progress"] = {
+                    "node": "verify_plan",
+                    "value": 99,
+                    "label": "自动复核结束，仍有冲突",
+                    "failed": True,
+                }
+                await repo.save_planning_result(
+                    trip,
+                    _json_safe_state(result),
+                    result.get("plan_markdown"),
+                    result.get("messages", []),
+                )
                 await _publish_progress(
                     trip_id,
-                    "persist_trip",
-                    "规划校验未通过",
-                    100,
+                    "verify_plan",
+                    "自动复核结束，仍有冲突",
+                    99,
                     "planning_failed",
                     None,
                 )

@@ -6,6 +6,9 @@
 | --- | --- | --- |
 | POST | `/api/v1/skills/amap/poi-detail` | 按 POI ID 查询营业时间、价格、停车、电话、官网和图片 |
 | POST | `/api/v1/skills/flyai/train` | 返回具体车次号、站点、时间、座席、价格和详情链接 |
+| POST | `/api/v1/skills/transport/train-fallback` | 主车次服务失败时查询公开车次备选，返回同一 `data.items` 合同 |
+| POST | `/api/v1/skills/transport/flight-fallback` | 配置备用密钥后查询公开航班备选，未配置时明确返回不可用 |
+| POST | `/api/v1/skills/travel/oil-price` | 可选查询省份今日油价，不参与路线可行性判定 |
 | POST | `/api/v1/skills/flyai/flight` | 返回具体航班号、机场、时间、座席、价格和详情链接 |
 | POST | `/api/v1/skills/flyai/ferry` | 返回轮船语义候选，时间和班次明确标记为估算 |
 
@@ -84,7 +87,7 @@
 
 所有导出只在行程状态为 `completed` 时开放，否则返回 `409 PLANNING_NOT_COMPLETED`；快照尚未生成时返回 `409 ROADBOOK_NOT_READY`。
 
-规划图在最终校验发现可修复问题时，会自动执行最多 4 轮 `verify_plan ⇄ repair_plan` 闭环并逐轮通过 SSE 展示重排进度。`verification_result.auto_repair_exhausted=true` 表示自动修复轮次耗尽，此时才向用户展示人工调整入口。
+规划图在最终校验发现可修复问题时，会自动执行最多 3 轮 `verify_plan ⇄ repair_plan` 闭环并逐轮通过 SSE 展示重排进度。只有验证通过才会发送 100%；`verification_result.auto_repair_exhausted=true` 表示三轮自动修复仍未解决，此时才向用户展示人工调整入口与可读的冲突摘要。
 
 ### SSE 事件协议
 

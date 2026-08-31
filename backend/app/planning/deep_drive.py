@@ -1395,7 +1395,7 @@ def _split_long_driving_stages(
             if index < part_count - 1:
                 kind, place = selected[index]
                 energy_minutes = (
-                    piece.get("energy_estimate", {}).get("replenishment_minutes")
+                    (piece.get("energy_estimate") or {}).get("replenishment_minutes")
                     if kind in {"charging", "fueling"}
                     else None
                 )

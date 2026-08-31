@@ -216,6 +216,18 @@ class DeepSeekRequirementExtractor:
                     raw_text,
                     parsed,
                 )
+            # A successful semantic response can still omit one of the route
+            # anchors (for example it may return destination=三亚 but leave
+            # origin empty).  Do not infer the missing value with a keyword
+            # table or a nearby geocoder result.  Give the same Requirement
+            # Agent one focused repair turn and merge only fields that were
+            # actually missing from the first response.  If the repair call
+            # is unavailable, the original response remains intact and the
+            # normal clarification flow is allowed to ask the user plainly.
+            parsed, semantic_repair_used = await self._repair_missing_core_fields(
+                raw_text,
+                parsed,
+            )
             merged = _merge_extraction(structural, parsed)
             if isinstance(parsed, dict):
                 # Literal calendar tokens are hard user constraints. Do not
@@ -337,7 +349,11 @@ class DeepSeekRequirementExtractor:
                     merged.get("time_window_minutes")
                 )
                 merged["_intent_status"] = "ok"
-                merged["_intent_source"] = "deepseek"
+                merged["_intent_source"] = (
+                    "deepseek_repair" if semantic_repair_used else "deepseek"
+                )
+                if semantic_repair_used:
+                    merged["_intent_repair_attempted"] = True
             merged["_source_raw_text"] = raw_text
             return merged
         except (httpx.HTTPError, ValueError, TypeError, json.JSONDecodeError):
@@ -382,6 +398,87 @@ class DeepSeekRequirementExtractor:
         if _destination_payload_needs_repair(repaired):
             raise ValueError("LLM returned an invalid destination shape after repair")
         return repaired
+
+    async def _repair_missing_core_fields(
+        self,
+        raw_text: str,
+        parsed: dict[str, Any],
+    ) -> tuple[dict[str, Any], bool]:
+        """Ask the semantic Agent to fill route anchors omitted in one turn.
+
+        This is intentionally a semantic retry rather than a deterministic
+        extraction fallback.  The retry is only made when a core field is
+        absent, keeps all fields returned by the first turn, and is forbidden
+        from overwriting an existing value.  That makes transient partial
+        JSON responses recoverable without allowing a random POI search result
+        to become the user's origin or destination.
+        """
+        if not isinstance(parsed, dict):
+            return {}, False
+
+        missing: list[str] = []
+        if not str(parsed.get("origin_name") or "").strip():
+            missing.append("origin_name")
+        if (
+            not str(parsed.get("destination_name") or "").strip()
+            and not _normalize_destination_names(parsed.get("destination_names"))
+        ):
+            missing.extend(["destination_name", "destination_names"])
+        if not missing:
+            return parsed, False
+
+        repair_prompt = (
+            "You are the RoadMan Requirement Agent on a focused semantic repair turn. "
+            "The first extraction was valid JSON but omitted one or more route-anchor fields. "
+            "Read the user's full natural-language request again and fill ONLY the missing fields. "
+            "Do not use a keyword table, nearby search result, restaurant, hotel, school or campus "
+            "as a substitute for a city/province/region. Do not invent a place. "
+            "Return one JSON object only with these keys: origin_name, destination_name, "
+            "destination_names, destination_scope. Use null for an unknown scalar and [] for an "
+            "unknown list. Preserve the administrative name when the user names a city, province "
+            "or region; preserve every explicitly requested destination in order. "
+            f"Missing fields: {json.dumps(missing, ensure_ascii=False)}. "
+            f"First extraction: {json.dumps(parsed, ensure_ascii=False)}. "
+            f"User request: {raw_text}"
+        )
+        try:
+            repaired = _parse_json_object(
+                await deepseek_complete(
+                    self.settings,
+                    repair_prompt,
+                    timeout=min(self.settings.deepseek_timeout_seconds, 45),
+                    agent_name="requirement_repair",
+                )
+            )
+        except (httpx.HTTPError, ValueError, TypeError, json.JSONDecodeError):
+            return parsed, False
+
+        if _destination_payload_needs_repair(repaired):
+            return parsed, False
+
+        result = dict(parsed)
+        changed = False
+        for field in ("origin_name", "destination_name", "destination_scope"):
+            if field not in missing:
+                continue
+            value = repaired.get(field)
+            if isinstance(value, str) and value.strip():
+                result[field] = value.strip()[:120]
+                changed = True
+        if "destination_names" in missing:
+            names = _normalize_destination_names(repaired.get("destination_names"))
+            if names:
+                result["destination_names"] = names
+                changed = True
+        # A repair that supplied one canonical destination may omit the list;
+        # that one-item list is still a typed Agent decision and can be used as
+        # the route anchor during normal normalization below.
+        if "destination_names" in missing and "destination_name" in missing:
+            canonical = str(result.get("destination_name") or "").strip()
+            if canonical and not _normalize_destination_names(result.get("destination_names")):
+                result["destination_names"] = [canonical]
+                changed = True
+        return result, changed
 
 
 class DeepSeekRequirementValidator:
@@ -1449,7 +1546,13 @@ def _weekday_date(match: re.Match[str], today: date) -> date:
     scope = match.group("scope")
     if scope in {"下周", "下星期"}:
         candidate += timedelta(days=7)
-    elif scope in {"周", "星期"} and candidate < today:
+    elif scope in {"周", "星期", "本周", "这周"} and candidate < today:
+        # A travel request is prospective unless the user explicitly says it
+        # is historical.  On Monday, "这周日" must therefore mean the coming
+        # Sunday, not yesterday.  Keeping this legacy resolver aligned with
+        # ``_chinese_weekday_date`` also prevents the two overlapping regexes
+        # from producing an artificial Sunday-to-Wednesday range that starts
+        # in the past.
         candidate += timedelta(days=7)
     return candidate
 

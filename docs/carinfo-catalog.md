@@ -1,40 +1,50 @@
-# 车型目录
+# 车型目录与车辆入库
 
-车型搜索能力由 `backend/app/skills/carinfo.py` 的 `CarInfoCatalogAdapter`（注册名 `carinfo.catalog`）提供，经 Skill Registry 暴露为：
+车型搜索由 `backend/app/skills/carinfo.py` 的 `CarInfoCatalogAdapter` 提供，接口为：
 
 ```text
 POST /api/v1/skills/carinfo/search
 ```
 
-`backend/app/api/skills.py` 的 `carinfo_search` 端点按入参决定走哪个 Adapter：`query` 非空时路由到真实的 `carinfo.catalog`（具体车型库），`query` 为空时路由到确定性的 `carinfo.demo`（用于旧规划调用里只按动力类型过滤的场景）。
-
-## 请求
+请求示例：
 
 ```json
 { "query": "特斯拉 Model 3", "limit": 12 }
 ```
 
-- `query`：必填，2–80 字符的品牌/车系/车型关键词。
-- `limit`：可选，默认 12，范围 1–30。
+## 查询链路
 
-## 目录响应
+1. 先调用公开车型目录的 `type=info&keyword=...`，取得品牌、车系、具体年款、在售状态和价格区间。
+2. 对候选年款并发调用 `type=detail&id=...`，解析供应商返回的参数分组，保留原始参数名称和值，并映射续航、电池、能耗、快充功率、尺寸和座位数。
+3. 按“有可核验详情优先、在售和年款优先”排序，再返回用户请求的数量。每条记录都带 `source_id`、`source_url`、`detail_source_url` 和 `specifications`，前端可以追溯详情来源。
+4. 供应商搜索对“品牌 + 车型”有时过于严格。例如“特斯拉 Model 3”可能搜不到而“Model 3”可以命中。适配器会在原词失败时最多尝试两个安全的后缀变体，并在响应的 `provider_query` 中披露实际命中的词，不会改变用户的原始 `query`。
 
-适配器调用车型库 `https://tool.bitefu.net/car/`（`type=info&keyword=...`），把返回的每个条目规整成可落档的车型项，含：`brand`/`series`/`model`/`year`、按名称推断的 `power_type`（electric/hybrid/fuel，含对特斯拉、蔚来、小鹏等纯电品牌名的启发）、`state` 与 `state_label`（在售/停售在库/进口·其他/历史款）、价格区间 `price_min_cny`/`price_max_cny`、来源链接 `source_url`，以及 `specs_missing` 提示清单。
+详情接口并非覆盖所有年款：部分新款、进口款或旧款没有参数记录。此时保留身份信息，`specifications` 为空并填写 `specs_missing`，绝不伪造续航或电池数据；用户可以换一个有详情的具体年款或手动补充配置。这是上游数据缺失，不是前端丢字段。
 
-目录端点只提供车型身份、年款与价格，不承诺可靠的按配置续航/能耗/电池——因此标回 `rated_range_km`、`battery_kwh`、`consumption_per_100km`、`max_charge_kw`、`height_m`、`width_m` 等字段置空，让用户在保存前按自己的具体配置确认，而不是静默继承演示 SUV 的数值。
+## 前端选择与入库
 
-目录服务访问失败或没有匹配时返回结构化的 `error_code=CARINFO_NO_RESULTS`（带可解释 warning）或空结果，绝不伪造续航/能耗等规格。成功响应 `success=true` 并携带来源 `SourceRecord`，缓存 `cache_ttl_seconds=3600`。
+`frontend/src/views/HomeView.vue` 的车型抽屉支持：
 
-## 确定性回退（carinfo.demo）
+- 搜索品牌、车系或具体车型；点击结果会把身份和已核验配置回填表单。
+- “直接添加”会调用 `POST /api/v1/vehicles`；编辑保存调用 `PATCH`，删除调用 `DELETE`，当前车型选择保存在本地存储。
+- 已核验的参数在当前车型卡片中展示；缺失参数明确提示确认，不会把演示车型的默认值混入真实车型。
 
-`CarInfoDemoAdapter`（`carinfo.demo`）返回内置的 RoadMan 固定样本：`Explorer 纯电 SUV` 与 `Tourer 混动 SUV`（均标 `estimated=true`）。它只按可选的 `brand`/`power_type` 过滤，用于规划侧按动力类型取样，不用于新建真实车型。
+`VehicleProfile` 将来源和参数存入现有 JSON 文档字段，无需数据库迁移：
+`source_id`、`source_url`、`detail_source_url`、`price_min_cny`、`price_max_cny`、`specifications`。
 
-## 前端接入（HomeView.vue 车辆抽屉）
+## 失败与缓存策略
 
-`frontend/src/views/HomeView.vue` 的车辆抽屉先搜索再确认：
+- `carinfo.catalog` 的适配器版本为 `1.5.0`。版本变化会使旧的“只有车名”的缓存失效，避免升级后继续显示旧结果；详情查询最多并发 12 条，较大的 `limit` 仍会返回完整数量而不会拖垮接口。
+- 没有命中返回 `CARINFO_NO_RESULTS`；网络或详情单条失败不会丢弃其他车型。
+- 详情请求是尽力而为，搜索仍可返回身份记录；规划端只有在用户保存了可靠续航/能耗后才使用这些数值。
+- 不带 `query` 的内部兼容调用仍走确定性的 `carinfo.demo`，用于旧规划测试，不会出现在真实车型搜索结果中。
 
-- `searchVehicleModels()` 调 `searchVehicleCatalog(query)` 拉目录结果；空 query（或不足 2 字符）提示输入，无结果提示换关键词。
-- `applyVehicleCatalogItem(item)` 把选中条目回填到 `VehicleDraft`：身份字段（brand/series/model/year/power_type）直接写入；目录缺失的技术规格仅在**编辑已有车辆**时保留原值，新建车辆则留空，避免用户误以为演示 SUV 的数值属于当前车型。
-- 回填后若 `specs_missing` 非空，提示「所需规格需按具体配置确认」。
+## 本地验证
 
-车辆资源（增删改查、选择进行程）由 `/api/v1/vehicles` 提供，模型为 `VehicleProfile`（见 [domain-model.md](domain-model.md)）。凭据与目录响应不写入日志。
+```powershell
+Invoke-RestMethod http://127.0.0.1:8000/api/v1/skills/carinfo/search `
+  -Method Post -ContentType 'application/json' `
+  -Body '{"query":"特斯拉 Model 3","limit":2}'
+```
+
+验收应看到 `rated_range_km`、`battery_kwh`、`consumption_per_100km` 和非空 `specifications`（具体年款以上游详情覆盖为准），随后用返回条目创建、读取、修改、删除一条车型，确认参数在 CRUD 往返中保持不变。

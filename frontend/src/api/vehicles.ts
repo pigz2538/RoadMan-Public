@@ -2,6 +2,11 @@ const API_BASE = import.meta.env.VITE_API_BASE_URL || ''
 
 export type VehiclePowerType = 'electric' | 'hybrid' | 'fuel'
 
+export interface VehicleSpecification {
+  name: string
+  value: string
+}
+
 export interface Vehicle {
   id: string
   brand: string
@@ -22,6 +27,12 @@ export interface Vehicle {
   mountain_ready: boolean
   unpaved_ready: boolean
   safe_energy_reserve_percent: number
+  source_id?: string | null
+  source_url?: string | null
+  detail_source_url?: string | null
+  price_min_cny?: number | null
+  price_max_cny?: number | null
+  specifications?: VehicleSpecification[]
 }
 
 export type VehicleInput = Omit<Vehicle, 'id'> & { id?: string }
@@ -49,6 +60,8 @@ export interface VehicleCatalogItem {
   state?: string
   state_label?: string
   source_url?: string
+  detail_source_url?: string
+  specifications?: VehicleSpecification[]
   specs_missing?: string[]
 }
 

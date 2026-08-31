@@ -139,6 +139,34 @@ async def flyai_flight(
     return await registry.execute("flyai.flight", payload, context)
 
 
+@router.post("/transport/train-fallback")
+async def train_fallback(
+    payload: dict,
+    context: SkillContext = Depends(context_from_request),
+    registry: SkillRegistry = Depends(get_registry),
+):
+    """Query the public train fallback without exposing provider internals in the UI."""
+    return await registry.execute("freeapi.train", payload, context)
+
+
+@router.post("/transport/flight-fallback")
+async def flight_fallback(
+    payload: dict,
+    context: SkillContext = Depends(context_from_request),
+    registry: SkillRegistry = Depends(get_registry),
+):
+    return await registry.execute("sixapi.flight", payload, context)
+
+
+@router.post("/travel/oil-price")
+async def oil_price(
+    payload: dict,
+    context: SkillContext = Depends(context_from_request),
+    registry: SkillRegistry = Depends(get_registry),
+):
+    return await registry.execute("freeapi.oil", payload, context)
+
+
 @router.post("/flyai/ferry")
 async def flyai_ferry(
     payload: dict,

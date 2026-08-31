@@ -7,11 +7,13 @@
 前置：安装并启动 Docker Desktop。
 
 ```powershell
-Copy-Item .env.example .env
+if (!(Test-Path .env)) { Copy-Item .env.example .env }
 # 编辑 .env，至少填写 DEEPSEEK_API_KEY 与 AMAP_WEBSERVICE_KEY
 docker compose up -d --build
 docker compose ps
 ```
+
+`backend` 与 `worker` 通过 Compose 的 `env_file: .env` 读取项目目录中的 DeepSeek 凭据；不会再把同名的旧系统环境变量插入容器。两者启动后应使用同一个 `DEEPSEEK_API_KEY`、官方 `https://api.deepseek.com/chat/completions` 和 `deepseek-v4-flash`。`.env` 已被 `.gitignore` 忽略，禁止提交到仓库或写入日志。
 
 Compose 提供五类服务：`postgres`（PostgreSQL 17）、`redis`（7.4）、`backend`（FastAPI，入容器先 `alembic upgrade head` 再 uvicorn）、`worker`（ARQ）、`frontend`（Nginx）。`frontend` 以 `0.0.0.0:8080:80` 绑定宿主机所有网卡，作为统一 Web 入口；`backend` 仅回环暴露 `127.0.0.1:8000:8000` 供本地工具与 Playwright 使用，浏览器请求全部经 Nginx `/api/` 反向代理到后端。
 

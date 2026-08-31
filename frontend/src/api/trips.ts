@@ -15,6 +15,12 @@ export interface PlanningSnapshot {
     issues: Array<{ code: string; severity?: 'blocker' | 'warning' | string; description: string }>
     auto_repair_attempts?: number
     auto_repair_exhausted?: boolean
+    auto_repair_history?: Array<{
+      attempt: number
+      issue_codes: string[]
+      changed: boolean
+      strategy: string
+    }>
   }
   special_event_research?: SpecialEventResearch[]
   plan_markdown?: string

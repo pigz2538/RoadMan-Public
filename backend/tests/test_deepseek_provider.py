@@ -42,7 +42,14 @@ async def test_deepseek_chat_contract_uses_official_model_and_max_thinking(monke
             return FakeResponse()
 
     monkeypatch.setattr("app.planning.llm.httpx.AsyncClient", FakeClient)
-    settings = Settings(deepseek_api_key="test-key")
+    # Thinking is opt-in now: the product runs ordinary flows in fast
+    # non-thinking mode, while this contract test explicitly verifies that a
+    # deep evaluation can still request the provider's thinking payload.
+    settings = Settings(
+        deepseek_api_key="test-key",
+        deepseek_thinking=True,
+        deepseek_reasoning_effort="max",
+    )
     audited = {}
 
     async def fake_audit(agent_name, **kwargs):

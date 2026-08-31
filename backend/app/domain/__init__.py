@@ -9,6 +9,7 @@ from .models import (
     Trip,
     TripRequest,
     VehicleProfile,
+    VehicleSpecification,
     VehicleUpdate,
     VerificationIssue,
 )
@@ -24,6 +25,7 @@ __all__ = [
     "Trip",
     "TripRequest",
     "VehicleProfile",
+    "VehicleSpecification",
     "VehicleUpdate",
     "VerificationIssue",
 ]

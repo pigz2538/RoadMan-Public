@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 import time
 from datetime import date, datetime
@@ -24,16 +25,37 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SCENARIOS = ROOT / "evaluation" / "weird_live_scenarios.json"
 DEFAULT_OUTPUT = ROOT / "evaluation" / "results" / "weird-live-acceptance.json"
 
+_DISALLOWED_COMFORT_LODGING_RE = re.compile(
+    r"(?:青旅|青年旅舍|青年旅社|青年公寓|学生公寓|旅舍|背包客栈|青年旅店|青年旅馆|青年客栈|学生宿舍|宿舍型|床位房|胶囊旅馆|太空舱|hostel|backpacker)",
+    re.IGNORECASE,
+)
+
 
 def _contains(value: Any, expected: str) -> bool:
     return expected.casefold() in str(value or "").casefold()
+
+
+def _as_list(value: Any) -> list[Any]:
+    """Normalize scalar/list expectation fields from old and new fixtures."""
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple, set)):
+        return [item for item in value if item]
+    return [value]
 
 
 def _score_preflight(payload: dict[str, Any], expected: dict[str, Any]) -> list[str]:
     failures: list[str] = []
     extracted = payload.get("extracted") or {}
     if expected.get("clarification_required"):
-        if payload.get("ready") or not payload.get("issues"):
+        # A clarification is the intended, safe terminal state for prompts
+        # that omit a location/date or are semantically infeasible.  Do not
+        # turn that pause into a full-trip run when --force-full is enabled.
+        if payload.get("ready") or not (
+            payload.get("issues")
+            or payload.get("missing_fields")
+            or payload.get("clarification_question")
+        ):
             failures.append("expected_clarification")
         return failures
     confirmation_ready = (
@@ -48,9 +70,15 @@ def _score_preflight(payload: dict[str, Any], expected: dict[str, Any]) -> list[
         extracted.get("destination_name"),
         *((extracted.get("destination_names") or [])),
     ]
-    if expected.get("origin") and not _contains(origin, expected["origin"]):
+    expected_origins = []
+    expected_origins.extend(_as_list(expected.get("origin")))
+    expected_origins.extend(_as_list(expected.get("origin_any")))
+    expected_origins.extend(_as_list(expected.get("origin_contains")))
+    if expected_origins and not any(_contains(origin, target) for target in expected_origins):
         failures.append("origin")
-    expected_destinations = expected.get("destination_any") or [expected.get("destination")]
+    expected_destinations = _as_list(expected.get("destination_any"))
+    expected_destinations.extend(_as_list(expected.get("destination")))
+    expected_destinations.extend(_as_list(expected.get("destination_contains")))
     if any(expected_destinations) and not any(
         _contains(actual, target)
         for actual in destinations
@@ -66,6 +94,12 @@ def _score_preflight(payload: dict[str, Any], expected: dict[str, Any]) -> list[
                 failures.append("date_order")
         except (KeyError, TypeError, ValueError):
             failures.append("date_fields")
+    if expected.get("not_in_past"):
+        try:
+            if date.fromisoformat(extracted["start_date"]) < date.today():
+                failures.append("start_date_in_past")
+        except (KeyError, TypeError, ValueError):
+            failures.append("date_fields")
     must_text = " ".join(
         str(item) for item in [
             *(extracted.get("must_visit_names") or []),
@@ -76,6 +110,29 @@ def _score_preflight(payload: dict[str, Any], expected: dict[str, Any]) -> list[
     for name in expected.get("must_visit") or []:
         if not _contains(must_text, name):
             failures.append(f"must_visit:{name}")
+    if expected.get("transport_any"):
+        transport_text = " ".join(
+            str(item)
+            for item in [
+                *(extracted.get("transport_modes") or []),
+                extracted.get("primary_transport_mode"),
+                extracted.get("transport_mode"),
+            ]
+        )
+        if not any(_contains(transport_text, mode) for mode in expected["transport_any"]):
+            failures.append("transport")
+    if expected.get("special_event_any"):
+        event_text = " ".join(
+            str(item)
+            for item in [
+                *(extracted.get("special_events") or []),
+                *(extracted.get("travel_intents") or []),
+                *(extracted.get("preferences") or []),
+                extracted.get("_source_raw_text"),
+            ]
+        )
+        if not any(_contains(event_text, event) for event in expected["special_event_any"]):
+            failures.append("special_event")
     return failures
 
 
@@ -135,7 +192,12 @@ def _wait(session: requests.Session, base: str, trip_id: str, timeout: int) -> t
     raise TimeoutError(f"planning exceeded {timeout}s")
 
 
-def _validate_trip(trip: dict[str, Any], snapshot: dict[str, Any], case: dict[str, Any]) -> list[str]:
+def _validate_trip(
+    trip: dict[str, Any],
+    snapshot: dict[str, Any],
+    case: dict[str, Any],
+    extracted: dict[str, Any] | None = None,
+) -> list[str]:
     failures: list[str] = []
     verification = snapshot.get("verification_result") or {}
     if not verification.get("passed"):
@@ -143,6 +205,11 @@ def _validate_trip(trip: dict[str, Any], snapshot: dict[str, Any], case: dict[st
     days = trip.get("days") or []
     if not days:
         failures.append("no_days")
+    extracted = extracted or {}
+    if extracted.get("start_date") and str(trip.get("start_date")) != str(extracted["start_date"]):
+        failures.append("persisted_start_date_mismatch")
+    if extracted.get("end_date") and str(trip.get("end_date")) != str(extracted["end_date"]):
+        failures.append("persisted_end_date_mismatch")
     all_activities = [item for day in days for item in day.get("activities") or []]
     all_stages = [item for day in days for item in day.get("stages") or []]
     itinerary_text = " ".join(
@@ -174,6 +241,13 @@ def _validate_trip(trip: dict[str, Any], snapshot: dict[str, Any], case: dict[st
             if previous_end is not None and start < previous_end:
                 failures.append(f"stage_overlap:{stage.get('id')}")
             previous_end = max(previous_end, end) if previous_end is not None else end
+        for hotel in [item for item in day.get("activities") or [] if item.get("type") == "hotel"]:
+            hotel_place = hotel.get("place") or {}
+            hotel_text = " ".join(
+                str(hotel_place.get(field) or "") for field in ("name", "address")
+            )
+            if _DISALLOWED_COMFORT_LODGING_RE.search(hotel_text):
+                failures.append(f"disallowed_hotel:day_{day_index}:{hotel_place.get('name') or 'unknown'}")
     for stage in all_stages:
         try:
             start = datetime.fromisoformat(stage["planned_start"])
@@ -204,6 +278,11 @@ def main() -> int:
     parser.add_argument("--timeout", type=int, default=900)
     parser.add_argument("--full-limit", type=int, default=3)
     parser.add_argument(
+        "--force-full",
+        action="store_true",
+        help="Run a full trip for every selected case that passes preflight, even when the fixture lacks full=true.",
+    )
+    parser.add_argument(
         "--case-id",
         action="append",
         default=[],
@@ -227,7 +306,11 @@ def main() -> int:
     try:
         for case in scenarios:
             started = time.monotonic()
-            result: dict[str, Any] = {"id": case["id"], "input": case["input"], "full_requested": bool(case.get("full"))}
+            result: dict[str, Any] = {
+                "id": case["id"],
+                "input": case["input"],
+                "full_requested": bool(case.get("full") or args.force_full),
+            }
             try:
                 response = session.post(
                     f"{base}/api/v1/trips/preflight",
@@ -244,7 +327,13 @@ def main() -> int:
                     "extracted": preflight.get("extracted"),
                 }
                 failures = _score_preflight(preflight, case.get("expect") or {})
-                if case.get("full") and full_count < args.full_limit and not failures:
+                expected_clarification = bool((case.get("expect") or {}).get("clarification_required"))
+                if (
+                    (case.get("full") or args.force_full)
+                    and not expected_clarification
+                    and full_count < args.full_limit
+                    and not failures
+                ):
                     full_count += 1
                     trip = session.post(
                         f"{base}/api/v1/trips", json=_trip_payload(case, preflight.get("extracted") or {}), timeout=60
@@ -258,7 +347,14 @@ def main() -> int:
                     planned, snapshot, progress = _wait(session, base, trip_id, args.timeout)
                     result["progress"] = progress
                     result["verification"] = snapshot.get("verification_result")
-                    failures.extend(_validate_trip(planned, snapshot, case))
+                    failures.extend(
+                        _validate_trip(
+                            planned,
+                            snapshot,
+                            case,
+                            preflight.get("extracted") or {},
+                        )
+                    )
                     export = session.get(f"{base}/api/v1/trips/{trip_id}/roadbook.html", timeout=180)
                     if export.status_code != 200 or not export.content.lower().startswith(b"<!doctype html>"):
                         failures.append("html_export")
@@ -286,6 +382,7 @@ def main() -> int:
         "passed": sum(bool(item.get("passed")) for item in results),
         "failed": sum(not item.get("passed") for item in results),
         "duration_seconds": round(time.monotonic() - started_suite, 2),
+        "model_mode": "non-thinking",
         "results": results,
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)

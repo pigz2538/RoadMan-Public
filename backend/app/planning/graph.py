@@ -65,12 +65,46 @@ from .tourism import (
 
 ProgressCallback = Callable[[str, str, str, int, str, str | None], Awaitable[None]]
 SHANGHAI = ZoneInfo("Asia/Shanghai")
-MAX_AUTO_REPAIR_ATTEMPTS = 4
+MAX_AUTO_REPAIR_ATTEMPTS = 3
 # A return-time phrase is often a preference rather than a minute-precise
 # appointment. Keep a half-day planning window before treating the itinerary
 # as impossible; a few minutes of drift should not block completion.
 RETURN_DEADLINE_GRACE_MINUTES = 12 * 60
 RETURN_DEADLINE_SILENT_TOLERANCE_MINUTES = 15
+
+
+def _local_today() -> date:
+    """Use the product timezone instead of the container's UTC calendar."""
+    return datetime.now(SHANGHAI).date()
+
+
+def _repair_plan_signature(day_plans: list[dict[str, Any]]) -> tuple[Any, ...]:
+    """Return a stable structural fingerprint for one repair-loop result."""
+    signature: list[Any] = []
+    for day in day_plans:
+        stages = tuple(
+            (
+                str(stage.get("title") or ""),
+                str((stage.get("origin") or {}).get("name") or ""),
+                str((stage.get("destination") or {}).get("name") or ""),
+                str(stage.get("planned_start") or ""),
+                str(stage.get("planned_end") or ""),
+            )
+            for stage in day.get("stages", [])
+            if isinstance(stage, dict)
+        )
+        activities = tuple(
+            (
+                str(activity.get("type") or ""),
+                str((activity.get("place") or {}).get("name") or ""),
+                str(activity.get("planned_start") or ""),
+                str(activity.get("planned_end") or ""),
+            )
+            for activity in day.get("activities", [])
+            if isinstance(activity, dict)
+        )
+        signature.append((str(day.get("date") or ""), stages, activities))
+    return tuple(signature)
 
 
 def _return_deadline_issue(
@@ -239,6 +273,97 @@ def _merge_required_lookup_result(
     return True
 
 
+def _merge_required_geocode_result(
+    attractions: list[dict[str, Any]],
+    required: dict[str, Any],
+    result: Any,
+    destination: dict[str, Any],
+) -> bool:
+    """Promote a successful semantic geocode to a hard-required attraction.
+
+    A region-level request (for example a province or autonomous region) can
+    legitimately have no exact text-search hit for a named scenic area.  The
+    geocoder still returns a concrete, provider-backed coordinate in many of
+    those cases.  Treat that result as an executable candidate instead of
+    dropping the user's requirement or replacing it with a random nearby POI.
+    This remains provider/agent driven; no destination names are embedded in
+    the planner.
+    """
+    if (
+        isinstance(result, Exception)
+        or not getattr(result, "success", False)
+        or not isinstance(getattr(result, "data", None), dict)
+    ):
+        return False
+    data = result.data
+    location = str(data.get("location") or "").strip()
+    if not location:
+        return False
+    try:
+        longitude, latitude = location.split(",", 1)
+        coordinates = {
+            "longitude": float(longitude),
+            "latitude": float(latitude),
+        }
+    except (TypeError, ValueError):
+        return False
+    requested_name = str(required.get("name") or "").strip()
+    if not requested_name:
+        return False
+
+    resolved = next(
+        (
+            item
+            for item in attractions
+            if _poi_name_matches(
+                requested_name,
+                (item.get("place") or {}).get("name"),
+            )
+        ),
+        None,
+    )
+    if resolved is None:
+        resolved = {
+            "place": {
+                "id": f"required-geocode:{requested_name}",
+                "name": requested_name,
+                "address": data.get("formatted_address"),
+                "city": data.get("city") or destination.get("city"),
+                "coordinates": coordinates,
+                "source_id": f"required-geocode:{requested_name}",
+            },
+            "source_records": [],
+        }
+        attractions.append(resolved)
+    place = resolved.setdefault("place", {})
+    place.update(
+        {
+            "name": requested_name,
+            "address": place.get("address") or data.get("formatted_address"),
+            "city": place.get("city") or data.get("city") or destination.get("city"),
+            "coordinates": coordinates,
+        }
+    )
+    source_records = [
+        item.model_dump(mode="json")
+        for item in getattr(result, "sources", [])
+    ]
+    resolved["source_records"] = [
+        *resolved.get("source_records", []),
+        *source_records,
+        {
+            "provider": "高德地图",
+            "title": f"{requested_name} 指定景点地理编码",
+            "url": f"https://www.amap.com/search?query={quote(requested_name)}",
+        },
+    ]
+    resolved["detail_url"] = f"https://www.amap.com/search?query={quote(requested_name)}"
+    resolved["user_required"] = True
+    resolved["required_name"] = requested_name
+    resolved.pop("lookup_unresolved", None)
+    return True
+
+
 def _destination_search_area(destination: dict[str, Any]) -> str:
     """Return the provider search scope without collapsing admin regions."""
     scope = str(destination.get("destination_scope") or "unknown").strip().lower()
@@ -333,7 +458,7 @@ def build_planning_graph(
 
     async def extract_trip_request(state: RoadManState) -> dict[str, Any]:
         await emit(state, "extract_trip_request", "正在理解出发地、目的地与日期", 15)
-        extracted = await extractor.extract(state["raw_input"], date.today())
+        extracted = await extractor.extract(state["raw_input"], _local_today())
         current = dict(state.get("trip_request", {}))
         if extracted.get("origin_name") and not current.get("origin"):
             current["origin"] = {"name": extracted["origin_name"]}
@@ -433,7 +558,7 @@ def build_planning_graph(
         try:
             year = date.fromisoformat(request.get("start_date", "")).year
         except (TypeError, ValueError):
-            year = date.today().year
+            year = _local_today().year
         research = await research_special_events(
             events,
             year=year,
@@ -600,7 +725,7 @@ def build_planning_graph(
                 "route_candidates": [],
             }
         warnings: list[dict[str, Any]] = []
-        start_date = _parse_request_date(request.get("start_date")) or date.today()
+        start_date = _parse_request_date(request.get("start_date")) or _local_today()
         end_date = _parse_request_date(request.get("end_date")) or start_date
         departure_at = _request_clock(
             start_date,
@@ -739,10 +864,39 @@ def build_planning_graph(
                             }
                         )
                     return selected
+                # The traveller explicitly selected an intercity mode.  A
+                # schedule-provider outage must never silently turn a Wuhan →
+                # Chengdu flight into a multi-day drive: that destroys the
+                # available sightseeing window and makes every later repair
+                # work on the wrong route skeleton.  Preserve the requested
+                # mode with a clearly estimated, daytime connector.  The UI
+                # exposes the unavailable service number and asks the user to
+                # confirm the actual ticket before departure.
+                estimated_mode = intercity_order[0]
+                estimated = await _estimated_intercity_route(
+                    registry,
+                    leg_origin,
+                    leg_destination,
+                    state["trip_id"],
+                    mode=estimated_mode,
+                    travel_date=travel_date,
+                    requested_departure=requested_departure,
+                    arrival_deadline=arrival_deadline,
+                )
+                warnings.append(
+                    {
+                        "code": "INTERCITY_SCHEDULE_ESTIMATED",
+                        "message": (
+                            f"暂未取得可用{_intercity_mode_label(estimated_mode)}班次，"
+                            "已保留所选交通方式与合理时间预算；具体班次需在出发前确认"
+                        ),
+                        "severity": "warning",
+                        "estimated": True,
+                    }
+                )
+                return estimated
             modes = (
-                ["driving"]
-                if explicit_intercity
-                else [*local_order, "driving"]
+                [*local_order, "driving"]
                 if explicit_local
                 else ["driving", "train", "flight", "ferry"]
             )
@@ -803,7 +957,11 @@ def build_planning_graph(
         # allowed to consume every calendar day with the outbound and return
         # legs.  If both road legs would require more driving days than the
         # trip leaves after reserving one destination day, compare real FlyAI
-        # flight/train schedules and switch only when a complete pair exists.
+        # flight/train schedules.  If every schedule provider is down, keep
+        # the trip executable with a clearly estimated intercity pair instead
+        # of persisting a multi-day road route that necessarily overflows the
+        # user's dates.  The estimate never invents a service number and is
+        # surfaced as a confirmation warning in the itinerary.
         # This is a feasibility decision, not a destination keyword rule: a
         # six-day Wuhan→Harbin road trip can remain self-drive while a
         # four-day Wuhan→Qinghai round trip is escalated to air/rail.
@@ -833,7 +991,19 @@ def build_planning_graph(
             except (TypeError, ValueError, ZeroDivisionError):
                 trip_days = 0
                 road_days_needed = 0
-            if trip_days and road_days_needed > max(1, trip_days - 1):
+            # A two-day nearby road trip can legitimately spend one day out
+            # and one day back.  Escalation is reserved for routes whose
+            # driving days exceed the entire window (or a single-day plan),
+            # which is the point at which the route skeleton itself becomes
+            # impossible rather than merely busy.
+            # Reserve at least one full destination day when both road legs
+            # span a multi-day window.  Equality used to slip through here:
+            # a ten-day Wuhan↔Xinjiang drive consumed all ten calendar days,
+            # leaving no executable window for named must-visits even though
+            # the route itself stayed inside the date range. Short two-day
+            # nearby drives remain a valid outbound/return pattern.
+            needs_destination_day = trip_days > 2 and road_days_needed + 1 > trip_days
+            if trip_days and (road_days_needed > max(2, trip_days) or needs_destination_day):
                 alternatives: list[tuple[str, dict[str, Any], dict[str, Any]]] = []
                 for alternative_mode in ("flight", "train"):
                     alt_outbound, outbound_warnings = await scheduled(
@@ -907,6 +1077,49 @@ def build_planning_graph(
                             "severity": "warning",
                         }
                     )
+                else:
+                    # No complete real pair is available (provider outage,
+                    # stale schedules, or both legs outside the requested
+                    # window).  A short trip is still better served by an
+                    # honest time-budget estimate than by a driving plan that
+                    # spills into dates the traveller did not request.  Pick
+                    # the more comfortable default for a long city transfer;
+                    # users who explicitly allowed a mode will have gone
+                    # through the explicit-intercity branch above.
+                    estimated_mode = "flight"
+                    estimated_outbound = await _estimated_intercity_route(
+                        registry,
+                        origin,
+                        destination,
+                        state["trip_id"],
+                        mode=estimated_mode,
+                        travel_date=start_date,
+                        requested_departure=departure_at,
+                    )
+                    estimated_inbound = await _estimated_intercity_route(
+                        registry,
+                        destination,
+                        origin,
+                        state["trip_id"],
+                        mode=estimated_mode,
+                        travel_date=end_date,
+                        arrival_deadline=deadline,
+                    )
+                    if estimated_outbound.get("success") and estimated_inbound.get("success"):
+                        outbound, inbound = estimated_outbound, estimated_inbound
+                        primary_mode = estimated_mode
+                        primary_tool = f"flyai.{estimated_mode}"
+                        warnings.append(
+                            {
+                                "code": "TRANSPORT_AUTO_ESCALATED_ESTIMATED",
+                                "message": (
+                                    f"自驾往返预计占用 {road_days_needed} 个驾驶日，超过 {trip_days} 天可用窗口；"
+                                    "班次服务暂不可用，已保留航班时间预算并标记为待确认，避免跨天超时"
+                                ),
+                                "severity": "warning",
+                                "estimated": True,
+                            }
+                        )
         candidates = [item for item in (outbound, inbound) if item.get("success")]
         error = None
         if not outbound.get("success"):
@@ -1300,7 +1513,7 @@ def build_planning_graph(
         for category, (keywords, page_size) in categories.items():
             if category == "hotels" and any(
                 not re.search(
-                    r"(?:青旅|青年旅舍|青年旅社|青年公寓|学生公寓|旅舍|背包客栈|hostel|backpacker)",
+                    r"(?:青旅|青年旅舍|青年旅社|青年公寓|学生公寓|旅舍|背包客栈|青年旅店|青年旅馆|青年客栈|学生宿舍|宿舍型|床位房|胶囊旅馆|太空舱|hostel|backpacker)",
                     " ".join(
                         str((item.get("place") or {}).get(field) or "")
                         for field in ("name", "address")
@@ -1737,7 +1950,10 @@ def build_planning_graph(
                 candidates["attractions"],
                 required_places,
             )
-            if required_to_lookup and "amap.poi" in registry.names():
+            # Always process unresolved requirements, even when the map POI
+            # adapter is unavailable.  Otherwise a degraded provider silently
+            # drops the user's hard requirement before verification.
+            if required_to_lookup:
                 await emit(
                     state,
                     "required_poi_lookup",
@@ -1773,29 +1989,69 @@ def build_planning_graph(
                         if area in searched:
                             continue
                         searched.append(area)
-                        result = await registry.execute(
-                            "amap.poi",
-                            {
-                                "keywords": str(required["name"])[:80],
-                                "city": area,
-                                "page_size": 10,
+                        context = SkillContext(
+                            trip_id=state["trip_id"],
+                            metadata={
+                                "purpose": "required_poi_lookup",
+                                "required_name": required["name"],
+                                "search_city": area,
                             },
-                            SkillContext(
-                                trip_id=state["trip_id"],
-                                metadata={
-                                    "purpose": "required_poi_lookup",
-                                    "required_name": required["name"],
-                                    "search_city": area,
-                                },
-                            ),
                         )
-                        if _merge_required_lookup_result(
-                            candidates["attractions"],
-                            required,
-                            result,
-                            destination,
-                        ):
-                            return True
+                        if "amap.poi" in registry.names():
+                            result = await registry.execute(
+                                "amap.poi",
+                                {
+                                    "keywords": str(required["name"])[:80],
+                                    "city": area,
+                                    "page_size": 10,
+                                },
+                                context,
+                            )
+                            if _merge_required_lookup_result(
+                                candidates["attractions"],
+                                required,
+                                result,
+                                destination,
+                            ):
+                                return True
+                        # Region scenic areas are often missing from a
+                        # city-scoped text search.  Ask the geocoder for a
+                        # concrete point before retaining an unresolved
+                        # blocker, still keeping the user's exact wording.
+                        if "amap.geocode" in registry.names():
+                            geocode = await registry.execute(
+                                "amap.geocode",
+                                {
+                                    "address": str(required["name"])[:80],
+                                    "city": area,
+                                },
+                                context,
+                            )
+                            if _merge_required_geocode_result(
+                                candidates["attractions"],
+                                required,
+                                geocode,
+                                destination,
+                            ):
+                                return True
+                        if "osm.geocode" in registry.names():
+                            osm_query = " ".join(
+                                item
+                                for item in (str(required["name"]).strip(), area or destination.get("name"), "中国")
+                                if item
+                            )
+                            osm_result = await registry.execute(
+                                "osm.geocode",
+                                {"query": osm_query, "limit": 3},
+                                context,
+                            )
+                            if _merge_required_geocode_result(
+                                candidates["attractions"],
+                                required,
+                                osm_result,
+                                destination,
+                            ):
+                                return True
                     return False
 
                 lookup_status = await asyncio.gather(
@@ -1868,6 +2124,63 @@ def build_planning_graph(
                     injected["user_confirmed"] = True
                     injected["provider"] = injected.get("provider") or "用户已确认"
                     candidates[category].insert(0, injected)
+
+        # Final integrity pass: provider/ranking agents must never erase an
+        # explicit must-visit. Resolve any name that still lacks a candidate
+        # through the public geocoder fallback, or retain an honest marker.
+        for required in required_places:
+            requested_name = str(required.get("name") or "").strip()
+            matching = next(
+                (
+                    item
+                    for item in candidates["attractions"]
+                    if _poi_name_matches(
+                        requested_name,
+                        (item.get("place") or {}).get("name"),
+                    )
+                ),
+                None,
+            )
+            if matching is not None:
+                matching["user_required"] = True
+                matching["required_name"] = requested_name
+                continue
+            resolved = False
+            if "osm.geocode" in registry.names():
+                area = str(required.get("city") or destination.get("name") or "").strip()
+                query = " ".join(item for item in (requested_name, area, "中国") if item)
+                osm_result = await registry.execute(
+                    "osm.geocode",
+                    {"query": query, "limit": 3},
+                    SkillContext(
+                        trip_id=state["trip_id"],
+                        metadata={
+                            "purpose": "required_poi_integrity",
+                            "required_name": requested_name,
+                        },
+                    ),
+                )
+                resolved = _merge_required_geocode_result(
+                    candidates["attractions"],
+                    required,
+                    osm_result,
+                    destination,
+                )
+            if not resolved:
+                candidates["attractions"].append(
+                    {
+                        "place": {
+                            "id": f"required-unresolved:{requested_name}",
+                            "name": requested_name,
+                            "city": required.get("city") or destination.get("city"),
+                            "coordinates": None,
+                        },
+                        "user_required": True,
+                        "required_name": requested_name,
+                        "lookup_unresolved": True,
+                        "source_records": [],
+                    }
+                )
 
         candidates = rank_tourism_candidates(
             candidates,
@@ -1971,6 +2284,13 @@ def build_planning_graph(
         request = state["trip_request"]
         destination = request["destination"]
         coordinates = destination.get("coordinates")
+        requested_modes = {
+            str(mode).strip().casefold()
+            for mode in request.get("transport_modes", [])
+            if str(mode).strip()
+        }
+        if "ship" in requested_modes or "boat" in requested_modes:
+            requested_modes.add("ferry")
         if not coordinates:
             return {"local_routes": []}
         attraction_candidates = state.get("tourism_candidates", {}).get(
@@ -2088,6 +2408,161 @@ def build_planning_graph(
         )
         default_local_mode = "driving" if driving_requested else "transit"
 
+        # A destination research result can legitimately contain a highlight
+        # in another city (for example Xi'an + Luoyang).  It must never be
+        # sent through the city-local AMap connector: that turns a 350 km
+        # intercity move into a 12-hour "local transit" stage and leaves the
+        # required attraction without a usable sightseeing window.  Keep this
+        # threshold generic and derive the actual transport from the user's
+        # selected modes; no city or attraction names are embedded here.
+        LOCAL_LEG_MAX_KM = 35.0
+        requested_intercity_modes = [
+            mode
+            for mode in ("train", "flight", "ferry")
+            if mode in requested_modes
+        ]
+        if not requested_intercity_modes and selected_intercity_mode in {
+            "train",
+            "flight",
+            "ferry",
+        }:
+            requested_intercity_modes = [selected_intercity_mode]
+
+        def _distance_between_places(
+            first: dict[str, Any], second: dict[str, Any]
+        ) -> float | None:
+            try:
+                first_coordinates = first.get("coordinates") or {}
+                second_coordinates = second.get("coordinates") or {}
+                return _haversine_km(
+                    RoutePoint(
+                        longitude=float(first_coordinates["longitude"]),
+                        latitude=float(first_coordinates["latitude"]),
+                    ),
+                    RoutePoint(
+                        longitude=float(second_coordinates["longitude"]),
+                        latitude=float(second_coordinates["latitude"]),
+                    ),
+                )
+            except (KeyError, TypeError, ValueError):
+                return None
+
+        async def _intercity_leg_route(
+            leg_origin: dict[str, Any],
+            leg_destination: dict[str, Any],
+            day_index: int,
+        ) -> dict[str, Any]:
+            """Build a truthful route for a long leg between city clusters.
+
+            Explicit train/flight/ferry preferences are resolved through the
+            corresponding travel-search adapter.  Self-drive remains the
+            default for an unqualified request, so a long leg is left as a
+            driving route and the deep-drive pass can split it across days.
+            If a schedule provider is unavailable, retain an estimated
+            intercity connector instead of mislabelling it as local transit.
+            """
+            travel_date = date.fromisoformat(
+                state["day_plans"][day_index]["date"]
+            )
+            if requested_intercity_modes:
+                for mode in requested_intercity_modes:
+                    if mode == "train":
+                        route, _ = await _train_route(
+                            registry,
+                            leg_origin,
+                            leg_destination,
+                            state["trip_id"],
+                            travel_date=travel_date,
+                        )
+                    elif mode == "flight":
+                        route, _ = await _flight_route(
+                            registry,
+                            leg_origin,
+                            leg_destination,
+                            state["trip_id"],
+                            travel_date=travel_date,
+                        )
+                    else:
+                        route, _ = await _ferry_route(
+                            registry,
+                            leg_origin,
+                            leg_destination,
+                            state["trip_id"],
+                            travel_date=travel_date,
+                        )
+                    if route.get("success"):
+                        return route
+
+            # When the top-level planner auto-escalated an impossible
+            # self-drive window to air/rail, keep far intra-region legs on
+            # that selected intercity mode. Falling back to the original
+            # ``driving_requested`` flag here recreated multi-hour road legs
+            # after the flight had already been chosen and caused overlapping
+            # calendar stages.
+            if driving_requested and selected_intercity_mode not in {
+                "train",
+                "flight",
+                "ferry",
+            }:
+                route = await _route(
+                    registry,
+                    leg_origin,
+                    leg_destination,
+                    state["trip_id"],
+                    preferred_mode="driving",
+                    fallback_modes=["transit", "riding", "walking"],
+                )
+                if route.get("success"):
+                    return route
+
+            # Provider outages are non-fatal, but the fallback must preserve
+            # the intercity nature of the move.  Use a conservative speed and
+            # an estimated flag so the UI asks the traveller to confirm the
+            # actual service before departure.
+            distance = _distance_between_places(leg_origin, leg_destination) or 0.1
+            fallback_mode = requested_intercity_modes[0] if requested_intercity_modes else default_local_mode
+            speed_kmh = {
+                "train": 180.0,
+                "flight": 520.0,
+                "ferry": 30.0,
+                "driving": 75.0,
+                "transit": 25.0,
+            }.get(fallback_mode, 25.0)
+            duration = max(10, round(distance / speed_kmh * 60) + 30)
+            origin_coordinates = leg_origin.get("coordinates") or {}
+            destination_coordinates = leg_destination.get("coordinates") or {}
+            geometry: list[dict[str, float]] = []
+            try:
+                geometry = [
+                    {
+                        "longitude": float(origin_coordinates["longitude"]),
+                        "latitude": float(origin_coordinates["latitude"]),
+                    },
+                    {
+                        "longitude": float(destination_coordinates["longitude"]),
+                        "latitude": float(destination_coordinates["latitude"]),
+                    },
+                ]
+            except (KeyError, TypeError, ValueError):
+                pass
+            return {
+                "success": True,
+                "data": {
+                    "selected_mode": fallback_mode,
+                    "distance_km": round(distance, 2),
+                    "duration_minutes": duration,
+                    "tolls_cny": 0,
+                    "geometry": geometry,
+                    "steps": [],
+                    "traffic_summary": "跨城市接驳为估算值，出发前请确认具体班次/路况",
+                    "estimated": True,
+                },
+                "sources": [],
+                "warnings": [
+                    "未取得可用城际班次，已保留估算接驳并标记为待确认",
+                ],
+            }
+
         # Research clusters may assign several hard requirements to the same
         # day. Spread user-required places over available stay days so each
         # one receives a real sightseeing window instead of being squeezed
@@ -2098,9 +2573,72 @@ def build_planning_graph(
             if candidate.get("user_required") or candidate.get("user_confirmed")
         ]
         if required_candidates:
+            # Do not assign named must-visits to calendar days that are still
+            # owned by a cross-day highway leg.  ``build_stages`` deliberately
+            # suppresses local routes on those dates; assigning the requirement
+            # there would make the later scheduler report a false omission
+            # even though the route has not arrived at the destination yet.
             stay_day_indexes = list(range(day_count))
+            day_dates = [
+                date.fromisoformat(str(item.get("date")))
+                for item in state.get("day_plans", [])
+                if item.get("date")
+            ]
+            selected_route_data = (state.get("selected_route") or {}).get("data") or {}
+            selected_mode = str(
+                selected_route_data.get("selected_mode") or selected_intercity_mode
+            ).casefold()
+            try:
+                outbound_minutes = int(selected_route_data.get("duration_minutes") or 0)
+            except (TypeError, ValueError):
+                outbound_minutes = 0
+            if selected_mode == "driving" and outbound_minutes and day_dates:
+                outbound_start = _request_clock(
+                    day_dates[0],
+                    request.get("departure_time"),
+                    default=time(8, 0),
+                )
+                effective_daily = max(
+                    180,
+                    int(request.get("max_daily_drive_minutes") or 9 * 60) - 80,
+                )
+                outbound_arrival = _estimated_driving_arrival_date(
+                    outbound_start,
+                    outbound_minutes,
+                    effective_daily,
+                )
+                after_arrival = [
+                    index for index, value in enumerate(day_dates)
+                    if value > outbound_arrival
+                ]
+                if after_arrival:
+                    stay_day_indexes = after_arrival
             if selected_intercity_mode in {"train", "flight", "ferry"} and day_count > 2:
                 stay_day_indexes = stay_day_indexes[1:-1] or stay_day_indexes
+            if len(stay_day_indexes) > 1 and selected_mode == "driving":
+                try:
+                    inbound_route = next(
+                        route
+                        for route in state.get("route_candidates", [])[1:]
+                        if route.get("success")
+                    )
+                    inbound_data = inbound_route.get("data") or {}
+                    inbound_minutes = int(inbound_data.get("duration_minutes") or 0)
+                except (StopIteration, TypeError, ValueError):
+                    inbound_minutes = 0
+                if inbound_minutes and day_dates:
+                    effective_daily = max(
+                        180,
+                        int(request.get("max_daily_drive_minutes") or 9 * 60) - 80,
+                    )
+                    return_days = max(1, ceil(inbound_minutes / effective_daily))
+                    return_start_index = max(0, len(day_dates) - return_days)
+                    before_return = [
+                        index for index in stay_day_indexes
+                        if index < return_start_index
+                    ]
+                    if before_return:
+                        stay_day_indexes = before_return
             for requirement_index, candidate in enumerate(required_candidates):
                 candidate["coverage_day_index"] = (
                     stay_day_indexes[requirement_index % len(stay_day_indexes)] + 1
@@ -2183,23 +2721,27 @@ def build_planning_graph(
                 target = None
                 target = target_candidate["place"]
                 mode = modes[(day_index * 2 + route_sequence) % len(modes)]
-                candidate_route = await _route(
-                    registry,
-                    anchor,
-                    target,
-                    state["trip_id"],
-                    preferred_mode=mode,
-                    fallback_modes=["walking", "riding", "transit", "driving"],
-                )
-                if candidate_route.get("success") and _local_route_reasonable(candidate_route.get("data", {})):
-                    route = candidate_route
+                leg_distance = _distance_between_places(anchor, target)
+                if leg_distance is not None and leg_distance > LOCAL_LEG_MAX_KM:
+                    route = await _intercity_leg_route(anchor, target, day_index)
                 else:
-                    # Keep the selected place in the itinerary when the
-                    # routing provider returns no usable geometry. The
-                    # fallback is visibly marked as estimated and is still
-                    # rechecked by the planner before persistence.
-                    fallback_mode = _safe_fallback_local_mode(anchor, target, mode)
-                    route = _fallback_local_route(anchor, target, fallback_mode)
+                    candidate_route = await _route(
+                        registry,
+                        anchor,
+                        target,
+                        state["trip_id"],
+                        preferred_mode=mode,
+                        fallback_modes=["walking", "riding", "transit", "driving"],
+                    )
+                    if candidate_route.get("success") and _local_route_reasonable(candidate_route.get("data", {})):
+                        route = candidate_route
+                    else:
+                        # Keep the selected place in the itinerary when the
+                        # routing provider returns no usable geometry. The
+                        # fallback is visibly marked as estimated and is still
+                        # rechecked by the planner before persistence.
+                        fallback_mode = _safe_fallback_local_mode(anchor, target, mode)
+                        route = _fallback_local_route(anchor, target, fallback_mode)
                 if route and target:
                     local_routes.append(
                         {
@@ -2214,16 +2756,20 @@ def build_planning_graph(
                     used_target_names.add(_normalize_poi_name(target.get("name")))
                     route_sequence += 1
             if not _same_place(anchor, local_base):
-                route = await _route(
-                    registry,
-                    anchor,
-                    local_base,
-                    state["trip_id"],
-                    preferred_mode="transit",
-                    fallback_modes=["walking", "riding", "driving"],
-                )
-                if not route.get("success"):
-                    route = _fallback_local_route(anchor, local_base, "transit")
+                return_distance = _distance_between_places(anchor, local_base)
+                if return_distance is not None and return_distance > LOCAL_LEG_MAX_KM:
+                    route = await _intercity_leg_route(anchor, local_base, day_index)
+                else:
+                    route = await _route(
+                        registry,
+                        anchor,
+                        local_base,
+                        state["trip_id"],
+                        preferred_mode=default_local_mode,
+                        fallback_modes=["walking", "riding", "transit", "driving"],
+                    )
+                    if not route.get("success"):
+                        route = _fallback_local_route(anchor, local_base, default_local_mode)
                 local_routes.append(
                     {
                         "day_index": day_index,
@@ -2624,6 +3170,49 @@ def build_planning_graph(
                     stages.append(arrival_connector)
                     local_start = arrival_connector.planned_end + timedelta(minutes=30)
             for local in sorted(local_items, key=lambda item: item["sequence"]):
+                # Never trust a provider/Agent-produced origin after the
+                # previous local stage has already been materialized.  A
+                # multi-area result can contain stale origins (or two POIs
+                # returned in a different order); carrying that value into a
+                # MovementStage creates a visible map jump and a hard
+                # ROUTE_DISCONTINUITY blocker. Reconnect the leg from the
+                # actual previous destination while preserving its intended
+                # target.
+                expected_origin = (
+                    stages[-1].destination.model_dump(mode="json")
+                    if stages
+                    else (local.get("origin") or hotel_place)
+                )
+                local_destination = local.get("destination") or expected_origin
+                if not _same_place(expected_origin, local.get("origin")):
+                    reconnect_mode = str(
+                        (local.get("route") or {}).get("data", {}).get("selected_mode")
+                        or (outbound.get("data") or {}).get("selected_mode")
+                        or ("driving" if driving_requested else "transit")
+                    ).casefold()
+                    if reconnect_mode not in {
+                        "driving",
+                        "transit",
+                        "riding",
+                        "walking",
+                    }:
+                        reconnect_mode = "driving" if driving_requested else "transit"
+                    reconnect_route = await _route(
+                        registry,
+                        expected_origin,
+                        local_destination,
+                        state["trip_id"],
+                        preferred_mode=reconnect_mode,
+                        fallback_modes=["transit", "riding", "walking", "driving"],
+                    )
+                    if not reconnect_route.get("success"):
+                        reconnect_route = _fallback_local_route(
+                            expected_origin,
+                            local_destination,
+                            reconnect_mode,
+                        )
+                    local["origin"] = expected_origin
+                    local["route"] = reconnect_route
                 local["route"] = await prepare_route(local["route"])
                 stage = _movement_stage(
                     day_id=f"day_{index + 1}",
@@ -2632,24 +3221,30 @@ def build_planning_graph(
                         local["route"]["data"].get("selected_mode"),
                         return_to_base=local.get("return_to_base", False),
                     ),
-                    origin=local["origin"],
-                    destination=local["destination"],
+                    origin=local.get("origin") or expected_origin,
+                    destination=local_destination,
                     route=local["route"],
                     start_at=local_start,
                 )
                 if (
-                    index == 0
-                    and stages
+                    stages
+                    and index < len(day_defs) - 1
                     and (
                         stage.planned_start.date() != day_date
                         or stage.planned_end.date() != day_date
+                        or stage.planned_start.time() < time(7, 0)
                         or stage.planned_end.time() > time(21, 30)
                     )
                 ):
-                    # The arrival day has a strict evening boundary.  A
-                    # connector that would cross midnight is never a valid
-                    # sightseeing leg; stop the local chain and let the
-                    # following day start from the booked hotel base.
+                    # A local sightseeing leg on a non-return day must stay
+                    # inside the same calendar day and finish early enough
+                    # for a comfortable return to the booked hotel.  The old
+                    # guard only covered index 0, so a later day could append
+                    # a 23:50 attraction, push hotel check-in past midnight,
+                    # and make the next day's first connector overlap the
+                    # overnight hotel.  Stop the local chain here; the
+                    # day-base connector below closes the day cleanly and the
+                    # following day starts from the hotel.
                     break
                 if return_cutoff and stage.planned_end > return_cutoff:
                     # A scheduled intercity return is a hard timetable.  Do
@@ -3572,7 +4167,32 @@ def build_planning_graph(
                         start_at=datetime.fromisoformat(final_outbound["planned_end"])
                         + timedelta(minutes=15),
                     )
-                    stages.append(connector_stage.model_dump(mode="json"))
+                    connector_data = connector_stage.model_dump(mode="json")
+                    connector_limit = max(
+                        60,
+                        int(request.get("max_continuous_drive_minutes") or 120),
+                    )
+                    if (
+                        connector_stage.mode == "driving"
+                        and connector_stage.duration_minutes > connector_limit
+                    ):
+                        connector_data.setdefault("warnings", []).append(
+                            {
+                                "code": "REST_STOP_SCHEDULED",
+                                "message": (
+                                    f"continuity connector exceeds {connector_limit} minutes; "
+                                    "a driving rest stop is planned"
+                                ),
+                                "severity": "warning",
+                                "estimated": True,
+                            }
+                        )
+                        connector_data["risk_tags"] = list(
+                            dict.fromkeys(
+                                [*(connector_data.get("risk_tags") or []), "continuous_drive"]
+                            )
+                        )
+                    stages.append(connector_data)
                     stages = sorted(
                         stages,
                         key=lambda item: (item.get("planned_start", ""), item.get("sequence", 0)),
@@ -3587,6 +4207,184 @@ def build_planning_graph(
                             for activity in day.get("activities", [])
                         ],
                     ]
+        async def ensure_global_stage_continuity() -> None:
+            """Join every persisted movement stage with a visible connector.
+
+            Cross-day driving is split before this node runs.  A split can
+            still leave a legitimate overnight hotel between the final
+            outbound piece and the first return piece (or between two
+            provider terminals).  The old verifier reported that as a hard
+            discontinuity and the repair loop repeated the same broken
+            snapshot.  Build one provider-backed connector for each gap and
+            place it on the side of the calendar where it fits.
+            """
+            for _ in range(max(1, len(plans) * 2 + 2)):
+                flattened: list[tuple[dict[str, Any], dict[str, Any]]] = []
+                for owner in sorted(plans, key=lambda item: item.get("day_index", 0)):
+                    for stage in sorted(
+                        owner.get("stages", []),
+                        key=lambda item: (
+                            str(item.get("planned_start") or ""),
+                            int(item.get("sequence") or 0),
+                        ),
+                    ):
+                        flattened.append((owner, stage))
+                repaired_gap = False
+                for position, ((previous_day, previous), (current_day, current)) in enumerate(
+                    zip(flattened, flattened[1:])
+                ):
+                    if _same_place(previous.get("destination"), current.get("origin")):
+                        continue
+                    origin = previous.get("destination") or {}
+                    destination = current.get("origin") or {}
+                    if not origin or not destination:
+                        continue
+                    try:
+                        previous_end = datetime.fromisoformat(previous["planned_end"])
+                        current_start = datetime.fromisoformat(current["planned_start"])
+                    except (KeyError, TypeError, ValueError):
+                        continue
+                    requested_modes = {
+                        str(mode).strip().casefold()
+                        for mode in request.get("transport_modes", [])
+                        if str(mode).strip()
+                    }
+                    preferred_mode = (
+                        "driving"
+                        if "driving" in requested_modes
+                        or previous.get("mode") == "driving"
+                        or current.get("mode") == "driving"
+                        else "transit"
+                    )
+                    connector_route = await _route(
+                        registry,
+                        origin,
+                        destination,
+                        state["trip_id"],
+                        preferred_mode=preferred_mode,
+                        fallback_modes=["transit", "riding", "walking", "driving"],
+                    )
+                    if not connector_route.get("success"):
+                        connector_route = _fallback_local_route(
+                            origin,
+                            destination,
+                            preferred_mode,
+                        )
+                    try:
+                        connector_minutes = max(
+                            5,
+                            int((connector_route.get("data") or {}).get("duration_minutes") or 5),
+                        )
+                    except (TypeError, ValueError):
+                        connector_minutes = 5
+                    connector_start = previous_end + timedelta(minutes=15)
+                    connector_end = connector_start + timedelta(minutes=connector_minutes)
+                    # Keep driving connectors within a calendar day.  When a
+                    # corridor is too long for the remaining evening, place
+                    # the connector at the next day's first usable hour and
+                    # shift that day's chain forward instead of persisting an
+                    # impossible cross-midnight driving stage.
+                    target_day = previous_day
+                    if (
+                        preferred_mode == "driving"
+                        and connector_end.date() != connector_start.date()
+                    ) or (
+                        connector_end > current_start
+                        and current_day is not previous_day
+                    ):
+                        target_day = current_day
+                        connector_start = max(
+                            current_start,
+                            datetime.combine(
+                                current_start.date(),
+                                time(8, 0),
+                                tzinfo=current_start.tzinfo,
+                            ),
+                        )
+                        connector_end = connector_start + timedelta(minutes=connector_minutes)
+                    connector = _movement_stage(
+                        day_id=target_day.get("id") or f"day_{target_day.get('day_index', 1)}",
+                        sequence=len(target_day.get("stages", [])),
+                        title="返回住宿或目的地核心区",
+                        origin=origin,
+                        destination=destination,
+                        route=connector_route,
+                        start_at=connector_start,
+                    ).model_dump(mode="json")
+                    # A continuity connector can itself be a long highway
+                    # transfer. Mark a planned break directly on the stage so
+                    # verification does not repeatedly report a planner-
+                    # created continuous-driving omission.
+                    connector_limit = max(
+                        60,
+                        int(request.get("max_continuous_drive_minutes") or 120),
+                    )
+                    if preferred_mode == "driving" and connector_minutes > connector_limit:
+                        connector.setdefault("warnings", []).append(
+                            {
+                                "code": "REST_STOP_SCHEDULED",
+                                "message": (
+                                    f"continuity connector exceeds {connector_limit} minutes; "
+                                    "a driving rest stop is planned"
+                                ),
+                                "severity": "warning",
+                                "estimated": True,
+                            }
+                        )
+                        connector["risk_tags"] = list(
+                            dict.fromkeys(
+                                [*(connector.get("risk_tags") or []), "continuous_drive"]
+                            )
+                        )
+                    connector["id"] = (
+                        f"continuity_{previous.get('id', position)}_"
+                        f"{current.get('id', position)}"
+                    )
+                    connector.setdefault("warnings", []).append(
+                        {
+                            "code": "STAGE_CONTINUITY_REPAIRED",
+                            "message": "已为相邻阶段补充住宿/终端接驳，确保路线连续",
+                            "severity": "info",
+                        }
+                    )
+                    target_day.setdefault("stages", []).append(connector)
+                    if target_day is current_day and connector_end > current_start:
+                        shift = connector_end + timedelta(minutes=15) - current_start
+                        shifting = False
+                        for stage in sorted(
+                            current_day.get("stages", []),
+                            key=lambda item: str(item.get("planned_start") or ""),
+                        ):
+                            if stage is current:
+                                shifting = True
+                            if not shifting or stage is connector:
+                                continue
+                            start = _parse_train_datetime(stage.get("planned_start"))
+                            end = _parse_train_datetime(stage.get("planned_end"))
+                            if start and end:
+                                stage["planned_start"] = (start + shift).isoformat()
+                                stage["planned_end"] = (end + shift).isoformat()
+                    for owner in plans:
+                        owner["stages"] = sorted(
+                            owner.get("stages", []),
+                            key=lambda item: str(item.get("planned_start") or ""),
+                        )
+                        for sequence, stage in enumerate(owner["stages"]):
+                            stage["sequence"] = sequence
+                        owner["items"] = [
+                            {"type": "stage", "id": stage["id"]}
+                            for stage in owner["stages"]
+                        ] + [
+                            {"type": "activity", "id": activity["id"]}
+                            for activity in owner.get("activities", [])
+                        ]
+                    repaired_gap = True
+                    break
+                if not repaired_gap:
+                    break
+
+        await ensure_global_stage_continuity()
+
         for day in plans:
             previous_end: datetime | None = None
             for stage in sorted(
@@ -3624,6 +4422,7 @@ def build_planning_graph(
             state.get("day_plans", []),
             state.get("tourism_candidates", {}),
             state.get("confirmed_additions", []),
+            state.get("trip_request", {}).get("destination"),
         )
         if settings.enable_poi_web_enrichment:
             plans, enriched_candidates = await enrich_scheduled_activities(
@@ -3674,6 +4473,7 @@ def build_planning_graph(
             state.get("day_plans", []),
             state.get("tourism_candidates", {}),
             state.get("confirmed_additions", []),
+            state.get("trip_request", {}).get("destination"),
         )
         return {
             "day_plans": plans,
@@ -3775,6 +4575,7 @@ def build_planning_graph(
                 "auto_repair_attempts": repair_attempts,
                 "auto_repair_exhausted": bool(issues)
                 and repair_attempts >= MAX_AUTO_REPAIR_ATTEMPTS,
+                "auto_repair_history": state.get("repair_history", []),
             },
             "progress": {"node": "verify_plan", "value": 95},
         }
@@ -3787,6 +4588,7 @@ def build_planning_graph(
             for item in (state.get("verification_result") or {}).get("issues", [])
             if item.get("severity") == "blocker"
         ]
+        before_signature = _repair_plan_signature(state.get("day_plans", []))
         await emit(
             state,
             "repair_plan_refined",
@@ -3811,6 +4613,11 @@ def build_planning_graph(
                 "ROUTE_DISCONTINUITY",
                 "ROUTE_NOT_CLOSED",
                 "EMPTY_DAY_STAGES",
+                "STAGE_OVERLAP",
+                "ACTIVITY_TIME_OVERLAP",
+                "REQUIRED_PLACES_UNSCHEDULED",
+                "OVERNIGHT_HOTEL_MISSING",
+                "DRIVING_STAGE_CALENDAR_MISMATCH",
                 # A late return is often caused by the route stage being
                 # built after the day's activities were already filled.  A
                 # fresh stage build applies the arrival-deadline cutoff above
@@ -3848,17 +4655,189 @@ def build_planning_graph(
             repair_input_days,
             state.get("tourism_candidates", {}),
             state.get("confirmed_additions", []),
+            state.get("trip_request", {}).get("destination"),
         )
         repaired_days, review_notes = review_daily_schedule(
             repaired_days,
             state.get("tourism_candidates", {}),
             state.get("confirmed_additions", []),
+            state.get("trip_request", {}).get("destination"),
         )
         repaired_days = _repair_activity_stage_overlaps(repaired_days)
+
+        # A route rebuild starts from freshly split stages and therefore does
+        # not pass through the normal deep-drive node's continuity guard.
+        # Reconnect the rebuilt snapshot here as well; otherwise each retry
+        # can reintroduce the same hotel/terminal jump it was meant to fix.
+        for _ in range(max(1, len(repaired_days) * 2 + 2)):
+            flattened: list[tuple[dict[str, Any], dict[str, Any]]] = []
+            for owner in sorted(repaired_days, key=lambda item: item.get("day_index", 0)):
+                for stage in sorted(
+                    owner.get("stages", []),
+                    key=lambda item: (
+                        str(item.get("planned_start") or ""),
+                        int(item.get("sequence") or 0),
+                    ),
+                ):
+                    flattened.append((owner, stage))
+            repaired_gap = False
+            for position, ((previous_day, previous), (current_day, current)) in enumerate(
+                zip(flattened, flattened[1:])
+            ):
+                if _same_place(previous.get("destination"), current.get("origin")):
+                    continue
+                try:
+                    previous_end = datetime.fromisoformat(previous["planned_end"])
+                    current_start = datetime.fromisoformat(current["planned_start"])
+                except (KeyError, TypeError, ValueError):
+                    continue
+                origin = previous.get("destination") or {}
+                destination = current.get("origin") or {}
+                requested_modes = {
+                    str(mode).strip().casefold()
+                    for mode in state["trip_request"].get("transport_modes", [])
+                    if str(mode).strip()
+                }
+                preferred_mode = (
+                    "driving"
+                    if "driving" in requested_modes
+                    or previous.get("mode") == "driving"
+                    or current.get("mode") == "driving"
+                    else "transit"
+                )
+                connector_route = await _route(
+                    registry,
+                    origin,
+                    destination,
+                    state["trip_id"],
+                    preferred_mode=preferred_mode,
+                    fallback_modes=["transit", "riding", "walking", "driving"],
+                )
+                if not connector_route.get("success"):
+                    connector_route = _fallback_local_route(
+                        origin,
+                        destination,
+                        preferred_mode,
+                    )
+                connector_minutes = max(
+                    5,
+                    int((connector_route.get("data") or {}).get("duration_minutes") or 5),
+                )
+                connector_start = previous_end + timedelta(minutes=15)
+                connector_end = connector_start + timedelta(minutes=connector_minutes)
+                target_day = previous_day
+                if (
+                    preferred_mode == "driving"
+                    and connector_end.date() != connector_start.date()
+                ) or (
+                    connector_end > current_start
+                    and current_day is not previous_day
+                ):
+                    target_day = current_day
+                    connector_start = max(
+                        current_start,
+                        datetime.combine(
+                            current_start.date(),
+                            time(8, 0),
+                            tzinfo=current_start.tzinfo,
+                        ),
+                    )
+                connector = _movement_stage(
+                    day_id=target_day.get("id") or f"day_{target_day.get('day_index', 1)}",
+                    sequence=len(target_day.get("stages", [])),
+                    title="返回住宿或目的地核心区",
+                    origin=origin,
+                    destination=destination,
+                    route=connector_route,
+                    start_at=connector_start,
+                ).model_dump(mode="json")
+                connector_limit = max(
+                    60,
+                    int(state["trip_request"].get("max_continuous_drive_minutes") or 120),
+                )
+                if preferred_mode == "driving" and connector_minutes > connector_limit:
+                    connector.setdefault("warnings", []).append(
+                        {
+                            "code": "REST_STOP_SCHEDULED",
+                            "message": (
+                                f"continuity connector exceeds {connector_limit} minutes; "
+                                "a driving rest stop is planned"
+                            ),
+                            "severity": "warning",
+                            "estimated": True,
+                        }
+                    )
+                    connector["risk_tags"] = list(
+                        dict.fromkeys(
+                            [*(connector.get("risk_tags") or []), "continuous_drive"]
+                        )
+                    )
+                connector["id"] = (
+                    f"repair_continuity_{previous.get('id', position)}_"
+                    f"{current.get('id', position)}"
+                )
+                connector.setdefault("warnings", []).append(
+                    {
+                        "code": "STAGE_CONTINUITY_REPAIRED",
+                        "message": "已为重排后的相邻阶段补充住宿/终端接驳",
+                        "severity": "info",
+                    }
+                )
+                target_day.setdefault("stages", []).append(connector)
+                if target_day is current_day and connector_end > current_start:
+                    shift = connector_end + timedelta(minutes=15) - current_start
+                    shifting = False
+                    for stage in sorted(
+                        current_day.get("stages", []),
+                        key=lambda item: str(item.get("planned_start") or ""),
+                    ):
+                        if stage is current:
+                            shifting = True
+                        if not shifting or stage is connector:
+                            continue
+                        start = _parse_train_datetime(stage.get("planned_start"))
+                        end = _parse_train_datetime(stage.get("planned_end"))
+                        if start and end:
+                            stage["planned_start"] = (start + shift).isoformat()
+                            stage["planned_end"] = (end + shift).isoformat()
+                for owner in repaired_days:
+                    owner["stages"] = sorted(
+                        owner.get("stages", []),
+                        key=lambda item: str(item.get("planned_start") or ""),
+                    )
+                    for sequence, stage in enumerate(owner["stages"]):
+                        stage["sequence"] = sequence
+                    owner["items"] = [
+                        {"type": "stage", "id": stage["id"]}
+                        for stage in owner["stages"]
+                    ] + [
+                        {"type": "activity", "id": activity["id"]}
+                        for activity in owner.get("activities", [])
+                    ]
+                repaired_gap = True
+                break
+            if not repaired_gap:
+                break
+        after_signature = _repair_plan_signature(repaired_days)
+        changed = before_signature != after_signature
+        repair_history = [
+            *state.get("repair_history", []),
+            {
+                "attempt": attempt,
+                "issue_codes": issue_codes,
+                "changed": changed,
+                "strategy": (
+                    "route_rebuild_and_reschedule"
+                    if rebuild_route
+                    else "daily_reschedule"
+                ),
+            },
+        ]
         return {
             "day_plans": repaired_days,
             "repair_attempts": attempt,
             "repair_attempted": True,
+            "repair_history": repair_history,
             "warnings": [
                 *state.get("warnings", []),
                 *drive_warnings,
@@ -3867,6 +4846,7 @@ def build_planning_graph(
                     "code": "AUTO_REPAIR_ATTEMPTED",
                     "message": (
                         f"已完成第 {attempt}/{MAX_AUTO_REPAIR_ATTEMPTS} 次自动复核"
+                        + ("，行程结构已更新" if changed else "，未产生有效结构变化")
                         + (f"（问题：{'、'.join(issue_codes[:3])}）" if issue_codes else "")
                     ),
                     "severity": "warning",
@@ -4622,17 +5602,46 @@ async def _train_route(
         requested_departure = requested_departure.replace(tzinfo=SHANGHAI)
     if arrival_deadline and arrival_deadline.tzinfo is None:
         arrival_deadline = arrival_deadline.replace(tzinfo=SHANGHAI)
+    warnings: list[dict[str, Any]] = []
+    payload = {
+        "origin": _transport_city_name(origin),
+        "destination": _transport_city_name(destination),
+        "dep_date": travel_date.isoformat(),
+        "sort_type": 4,
+    }
     result = await registry.execute(
         "flyai.train",
-        {
-            "origin": _transport_city_name(origin),
-            "destination": _transport_city_name(destination),
-            "dep_date": travel_date.isoformat(),
-            "sort_type": 4,
-        },
+        payload,
         SkillContext(trip_id=trip_id),
     )
-    warnings: list[dict[str, Any]] = []
+    # Keep the primary provider as the first choice, then ask the public
+    # train endpoint for a normalized result when FlyAI is unavailable or
+    # returns an empty list.  A failed fallback never masks the primary error.
+    primary_result = result
+    primary_items = result.data.get("items") if isinstance(result.data, dict) else None
+    if not result.success or not isinstance(primary_items, list) or not primary_items:
+        fallback = await registry.execute(
+            "freeapi.train",
+            payload,
+            SkillContext(trip_id=trip_id),
+        )
+        fallback_items = fallback.data.get("items") if isinstance(fallback.data, dict) else None
+        if fallback.success and isinstance(fallback_items, list) and fallback_items:
+            result = fallback
+            warnings.append(
+                {
+                    "code": "TRANSPORT_FALLBACK_USED",
+                    "message": "主车次查询暂不可用，已切换公开车次备选服务",
+                    "severity": "warning",
+                }
+            )
+        else:
+            # Preserve the primary provider's actionable error while retaining
+            # the fallback diagnostic for the audit trail.
+            if fallback.warnings:
+                result = primary_result.model_copy(
+                    update={"warnings": [*primary_result.warnings, *fallback.warnings]}
+                )
     if not result.success or not isinstance(result.data, dict):
         return (
             {
@@ -4726,6 +5735,120 @@ async def _train_route(
         )
     route["warnings"] = [*result.warnings, *warnings]
     return route, warnings
+
+
+async def _estimated_intercity_route(
+    registry: SkillRegistry,
+    origin: dict[str, Any],
+    destination: dict[str, Any],
+    trip_id: str,
+    *,
+    mode: str,
+    travel_date: date,
+    requested_departure: datetime | None = None,
+    arrival_deadline: datetime | None = None,
+) -> dict[str, Any]:
+    """Keep an explicit intercity mode usable during schedule-data outages.
+
+    This is a time-budget fallback, not a fabricated ticket.  It deliberately
+    leaves the service number unavailable, marks every value estimated and
+    resolves concrete airport/station/port anchors where the map provider can
+    do so.  Most importantly, it never substitutes a multi-day road trip for
+    an explicitly requested flight or train.
+    """
+    origin_coordinates = origin.get("coordinates") or {}
+    destination_coordinates = destination.get("coordinates") or {}
+    try:
+        distance_km = _haversine_km(
+            RoutePoint(
+                longitude=float(origin_coordinates["longitude"]),
+                latitude=float(origin_coordinates["latitude"]),
+            ),
+            RoutePoint(
+                longitude=float(destination_coordinates["longitude"]),
+                latitude=float(destination_coordinates["latitude"]),
+            ),
+        )
+    except (KeyError, TypeError, ValueError):
+        distance_km = 300.0
+
+    speed_kmh = {"flight": 680.0, "train": 210.0, "ferry": 32.0}.get(mode, 180.0)
+    minimum_minutes = {"flight": 70, "train": 60, "ferry": 90}.get(mode, 60)
+    movement_minutes = max(minimum_minutes, round(distance_km / speed_kmh * 60))
+    departure_buffer = _intercity_departure_buffer(mode)
+
+    if arrival_deadline is not None:
+        if arrival_deadline.tzinfo is None:
+            arrival_deadline = arrival_deadline.replace(tzinfo=SHANGHAI)
+        # Scheduled-route materialization adds a 30-minute city-side margin
+        # for rail; flights already use the same 150-minute check-in buffer as
+        # their stage start.  End the whole visible stage by the requested
+        # overall deadline rather than treating that clock as take-off time.
+        arrival_margin = 30 if mode == "train" else 0
+        arrival_at = arrival_deadline - timedelta(minutes=arrival_margin)
+        departure_at = arrival_at - timedelta(minutes=movement_minutes)
+    else:
+        city_departure = requested_departure or datetime.combine(
+            travel_date, time(8, 0), tzinfo=SHANGHAI
+        )
+        if city_departure.tzinfo is None:
+            city_departure = city_departure.replace(tzinfo=SHANGHAI)
+        departure_at = city_departure + timedelta(minutes=departure_buffer)
+        arrival_at = departure_at + timedelta(minutes=movement_minutes)
+
+    mode_label = _intercity_mode_label(mode)
+    item: dict[str, Any] = {
+        "departure_at": departure_at.isoformat(),
+        "arrival_at": arrival_at.isoformat(),
+        "duration_minutes": movement_minutes,
+        "estimated": True,
+        "operator": None,
+        "price": None,
+    }
+    if mode == "flight":
+        item.update(
+            {
+                "flight_number": None,
+                "departure_airport": f"{_transport_city_name(origin)}机场（待确认）",
+                "arrival_airport": f"{_transport_city_name(destination)}机场（待确认）",
+            }
+        )
+    elif mode == "train":
+        item.update(
+            {
+                "train_number": None,
+                "departure_station": f"{_transport_city_name(origin)}车站（待确认）",
+                "arrival_station": f"{_transport_city_name(destination)}车站（待确认）",
+            }
+        )
+    else:
+        item.update(
+            {
+                "ship_name": None,
+                "departure_port": f"{_transport_city_name(origin)}码头（待确认）",
+                "arrival_port": f"{_transport_city_name(destination)}码头（待确认）",
+            }
+        )
+    route = _scheduled_route_result(item, origin, destination, [], mode=mode)
+    if route.get("success"):
+        route = await _attach_scheduled_terminals(
+            registry,
+            route,
+            origin,
+            destination,
+            trip_id,
+        )
+        data = route.get("data") or {}
+        data["service_status"] = "estimated"
+        data["estimated"] = True
+        data["traffic_summary"] = (
+            f"{mode_label}班次数据暂不可用；当前仅用于行程时间预算，"
+            "实际班次、票价与航站楼/车站需在出发前确认"
+        )
+    route["warnings"] = [
+        f"{mode_label}班次数据暂不可用，已使用明确标记的时间预算",
+    ]
+    return route
 
 
 def _scheduled_route_result(
@@ -4873,6 +5996,31 @@ async def _scheduled_route(
         SkillContext(trip_id=trip_id),
     )
     warnings: list[dict[str, Any]] = []
+    primary_result = result
+    primary_items = result.data.get("items") if isinstance(result.data, dict) else None
+    fallback_adapter = {"flight": "sixapi.flight"}.get(mode)
+    if fallback_adapter and (
+        not result.success or not isinstance(primary_items, list) or not primary_items
+    ):
+        fallback_result = await registry.execute(
+            fallback_adapter,
+            payload,
+            SkillContext(trip_id=trip_id),
+        )
+        fallback_items = fallback_result.data.get("items") if isinstance(fallback_result.data, dict) else None
+        if fallback_result.success and isinstance(fallback_items, list) and fallback_items:
+            result = fallback_result
+            warnings.append(
+                {
+                    "code": "TRANSPORT_FALLBACK_USED",
+                    "message": "主航班查询暂不可用，已切换公开航班备选服务",
+                    "severity": "warning",
+                }
+            )
+        elif fallback_result.warnings:
+            result = primary_result.model_copy(
+                update={"warnings": [*primary_result.warnings, *fallback_result.warnings]}
+            )
     mode_upper = mode.upper()
     if not result.success or not isinstance(result.data, dict):
         return (
@@ -5267,7 +6415,7 @@ def _movement_stage(
         )
     traffic_summary = data.get("traffic_summary")
     if data.get("selected_mode") == "driving" and traffic_summary:
-        if start_at.date() != date.today():
+        if start_at.date() != _local_today():
             traffic_summary = f"当前路况：{traffic_summary}"
     elif data.get("selected_mode") != "driving":
         mode = data.get("selected_mode")

@@ -30,11 +30,17 @@ RoadMan 支持两种运行方式：Docker Compose（推荐，生产风格）与�
 | 变量 | 用途 | 说明 |
 | --- | --- | --- |
 | `DEEPSEEK_API_KEY` | 需求理解、目的地研究、语义编辑等云端智能体 | 必需；默认模型 `DEEPSEEK_MODEL=deepseek-v4-flash` |
-| `DEEPSEEK_REASONING_EFFORT` | 云端智能体思考深度 | 默认 `max` |
-| `DEEPSEEK_THINKING` | 是否启用思考模式 | 默认 `true` |
+| `DEEPSEEK_REASONING_EFFORT` | 云端智能体思考深度 | 默认 `low` |
+| `DEEPSEEK_THINKING` | 是否启用思考模式 | 默认 `false`；需要深度评测时显式开启 |
 | `DEEPSEEK_API_URL` | DeepSeek 官方 Chat Completions 地址 | 默认 `https://api.deepseek.com/chat/completions` |
 | `AMAP_WEBSERVICE_KEY` | 真实驾车/步行/骑行/公交路线、地理编码、POI | 必需；缺失则上述能力降级 |
 | `FLYAI_API_KEY` | 旅行搜索、住宿、餐饮补充 | 推荐 |
+| `TRAIN_FALLBACK_URL` | 主车次服务不可用时的公开车次备选 | 默认 `https://api.lolimi.cn/API/hc/api`，无需密钥；结果必须有真实车次号 |
+| `MCP_12306_URL` | 可选的 12306 MCP 服务地址 | 可选；留空不影响公开车次备选 |
+| `FLIGHT_FALLBACK_URL` | 主航班服务不可用时的公开航班备选 | 默认 `https://open.6api.net/flight/getTicket` |
+| `FLIGHT_FALLBACK_API_KEY` | 公开航班备选密钥 | 可选；未配置时明确标记不可用 |
+| `OIL_API_URL` | 今日油价公开接口 | 默认 `https://www.mxnzp.com/api/oil/search` |
+| `OIL_APP_ID` / `OIL_APP_SECRET` | 今日油价接口凭据 | 可选；缺少时跳过油价，不阻塞规划 |
 | `OPENTRIPMAP_API_KEY` | 国际/开放景点数据补充 | 可选 |
 | `VITE_AMAP_JSAPI_KEY` | 浏览器真实地图 | 构建时注入，改动后需重建 frontend |
 | `VITE_AMAP_SECURITY_JS_CODE` | 浏览器地图安全密钥 | 构建时注入 |
@@ -58,7 +64,7 @@ RoadMan 支持两种运行方式：Docker Compose（推荐，生产风格）与�
 服务依赖关系保证顺序启动并健康后才拉起下游：backend 依赖 postgres+redis，worker 依赖 backend+postgres+redis，frontend 依赖 backend。后端与 worker 共享 `UPLOAD_DIR=/app/data/uploads` 卷与 `FILE_RETENTION_DAYS`。
 
 ```powershell
-Copy-Item .env.example .env   # 至少填入 DEEPSEEK_API_KEY 与 AMAP_WEBSERVICE_KEY
+if (!(Test-Path .env)) { Copy-Item .env.example .env }   # 至少填入 DEEPSEEK_API_KEY 与 AMAP_WEBSERVICE_KEY
 docker compose up -d --build
 docker compose ps
 ```

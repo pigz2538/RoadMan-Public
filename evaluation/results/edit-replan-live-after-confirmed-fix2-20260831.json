@@ -1,0 +1,67 @@
+{
+  "base_url": "http://127.0.0.1:8000",
+  "trip_id": "trip_0f8a69f98447",
+  "cases": [
+    {
+      "index": 1,
+      "name": "地图选点新增景点",
+      "status": "passed",
+      "seconds": 151.22
+    },
+    {
+      "index": 2,
+      "name": "地图选点新增餐饮",
+      "status": "passed",
+      "seconds": 161.63
+    },
+    {
+      "index": 3,
+      "name": "地图选点新增住宿",
+      "status": "passed",
+      "seconds": 153.76
+    },
+    {
+      "index": 4,
+      "name": "候选池新增景点",
+      "status": "passed",
+      "seconds": 153.14
+    },
+    {
+      "index": 5,
+      "name": "候选池新增餐饮",
+      "status": "passed",
+      "seconds": 151.09
+    },
+    {
+      "index": 6,
+      "name": "直接删除原有景点",
+      "status": "passed",
+      "seconds": 149.23
+    },
+    {
+      "index": 7,
+      "name": "自然语言删除景点",
+      "status": "passed",
+      "seconds": 135.97
+    },
+    {
+      "index": 8,
+      "name": "自然语言替换景点",
+      "status": "passed",
+      "seconds": 165.27
+    },
+    {
+      "index": 9,
+      "name": "批量新增后删除再统一重排",
+      "status": "passed",
+      "seconds": 164.93
+    },
+    {
+      "index": 10,
+      "name": "自然语言新增景点",
+      "status": "passed",
+      "seconds": 143.84
+    }
+  ],
+  "status": "passed"
+}

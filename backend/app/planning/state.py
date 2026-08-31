@@ -33,6 +33,10 @@ class RoadManState(TypedDict, total=False):
     # boolean is kept for snapshots written by earlier versions.
     repair_attempts: int
     repair_attempted: bool
+    # Evidence for every automatic repair pass.  ``changed`` is false when a
+    # pass merely replayed the same route skeleton, which must never be
+    # reported as a meaningful retry.
+    repair_history: list[dict[str, Any]]
     progress: dict[str, Any]
     sources: list[dict[str, Any]]
     plan_markdown: str | None

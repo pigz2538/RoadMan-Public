@@ -1,7 +1,8 @@
 import asyncio
 import json
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Header, Query, Response, status
 from fastapi.responses import PlainTextResponse, Response, StreamingResponse
@@ -58,6 +59,13 @@ from ..services.exports import ReportAgent
 from ..services.sse import sse_manager
 from ..skills.base import SkillContext
 from ..skills.registry import SkillRegistry
+
+SHANGHAI = ZoneInfo("Asia/Shanghai")
+
+
+def _local_today() -> date:
+    """Return the user's product calendar date, independent of container UTC."""
+    return datetime.now(SHANGHAI).date()
 
 router = APIRouter(prefix="/api/v1/trips", tags=["trips"])
 MOCK_TRIP_PATH = Path(__file__).resolve().parents[3] / "shared" / "examples" / "wuhan-lushan-trip.json"
@@ -226,7 +234,7 @@ async def preflight_trip(
     payload: PreflightRequest,
     registry: SkillRegistry = Depends(get_skill_registry),
 ) -> PreflightResponse:
-    today = date.today()
+    today = _local_today()
     structural_dates = extract_structural_constraints(payload.raw_text, today)
     extracted = dict(payload.previous_extracted)
     settings = get_settings()
@@ -338,7 +346,7 @@ async def preflight_trip(
     if special_events:
         settings = get_settings()
         start_value = _safe_date(extracted.get("start_date"))
-        research_year = start_value.year if start_value else date.today().year
+        research_year = start_value.year if start_value else _local_today().year
         special_event_research = await research_special_events(
             special_events,
             year=research_year,
@@ -407,7 +415,7 @@ async def preflight_trip(
                 answer_type="date",
             )
         )
-    if end_value and end_value < date.today():
+    if end_value and end_value < today:
         issues.append(
             PreflightIssue(
                 code="TRIP_IN_PAST",
@@ -823,7 +831,20 @@ async def apply_candidate_patch(
         candidate_payload = patch.proposed_value.get("candidate") or {}
         candidate_place = candidate_payload.get("place") or {}
         candidate_name = str(candidate_place.get("name") or "").strip()
-        if candidate_name and patch.operation in {"add", "replace"}:
+        # Only sightseeing places belong in ``TripRequest.must_visit``.  A
+        # confirmed restaurant or hotel is a user-selected activity/base,
+        # not a destination anchor.  Treating every category as a must-visit
+        # place made a map-selected hotel become a required attraction during
+        # the next replan (and could create a hotel -> hotel stage, missing
+        # overnight records, and overlapping midnight connectors).
+        candidate_category = str(
+            patch.proposed_value.get("category") or ""
+        ).strip().lower()
+        if (
+            candidate_name
+            and candidate_category == "attractions"
+            and patch.operation in {"add", "replace"}
+        ):
             existing = {
                 str(item.name).strip()
                 for item in trip.request.must_visit
@@ -834,6 +855,7 @@ async def apply_candidate_patch(
                 # an exact map-selected point cannot be reliably recovered
                 # from a later city-wide provider search.
                 trip.request.must_visit.append(PlaceRef.model_validate(candidate_place))
+            state["trip_request"] = trip.request.model_dump(mode="json")
             additions = state.setdefault("confirmed_additions", [])
             if not isinstance(additions, list):
                 additions = []
@@ -843,17 +865,49 @@ async def apply_candidate_patch(
                 for item in additions
                 if not (
                     isinstance(item, dict)
-                    and str(item.get("category") or "") == str(patch.proposed_value.get("category") or "")
+                    and str(item.get("category") or "") == candidate_category
                     and str(((item.get("candidate") or {}).get("place") or {}).get("name") or "").strip()
                     == candidate_name
                 )
             ]
             additions.append({
-                "category": str(patch.proposed_value.get("category") or ""),
+                "category": candidate_category,
                 "day_id": str(patch.proposed_value.get("day_id") or ""),
                 "candidate": candidate_payload,
             })
-            state["trip_request"] = trip.request.model_dump(mode="json")
+        elif candidate_name and patch.operation in {"add", "replace"}:
+            # Preserve an explicitly selected hotel/meal as a high-priority
+            # candidate without polluting the semantic destination list.
+            # The tourism scheduler consumes ``confirmed_additions`` and
+            # honours these flags when choosing the base/meal slot.
+            candidate_payload["user_confirmed"] = True
+            candidate_payload["user_requested"] = True
+            candidates = state.setdefault("tourism_candidates", {}).setdefault(
+                candidate_category, []
+            )
+            for item in candidates:
+                if item.get("candidate_id") == candidate_payload.get("candidate_id"):
+                    item.update(candidate_payload)
+                    break
+            additions = state.setdefault("confirmed_additions", [])
+            if not isinstance(additions, list):
+                additions = []
+                state["confirmed_additions"] = additions
+            additions[:] = [
+                item
+                for item in additions
+                if not (
+                    isinstance(item, dict)
+                    and str(item.get("category") or "") == candidate_category
+                    and str(((item.get("candidate") or {}).get("place") or {}).get("name") or "").strip()
+                    == candidate_name
+                )
+            ]
+            additions.append({
+                "category": candidate_category,
+                "day_id": str(patch.proposed_value.get("day_id") or ""),
+                "candidate": candidate_payload,
+            })
         elif patch.operation == "delete":
             deleted_name = str(
                 (patch.original_value.get("place") or {}).get("name") or ""
@@ -996,6 +1050,19 @@ async def start_planning(
     pending_state = await repo.load_planning_state(trip_id) or {}
     if isinstance(pending_state.get("pending_replan"), dict):
         raise AppError("REPLAN_CONFIRMATION_REQUIRED", "请先确认修改，再开始重新规划", 409)
+    active_job = await JobRepository(session).active_for_trip(trip_id)
+    if active_job is not None:
+        # Planning is single-flight per trip. Returning the existing job id
+        # lets the frontend resume polling instead of enqueueing a competing
+        # worker that can overwrite a newer 100% snapshot with an older 66%
+        # update.
+        return PlanningSnapshot(
+            trip_id=trip_id,
+            status=TripStatus.planning,
+            progress={"node": "queued", "value": active_job.progress},
+            job_id=active_job.id,
+            planning_batch_id=active_job.id,
+        )
     # Clear stale run-scoped diagnostics before the worker reaches its first
     # graph node. Otherwise polling this endpoint exposes the previous run's
     # 99%/ENERGY_UNSAFE result and makes a fresh run look blocked.
@@ -1008,6 +1075,7 @@ async def start_planning(
             "plan_markdown": None,
             "repair_attempts": 0,
             "repair_attempted": False,
+            "repair_history": [],
         }
     )
     trip.status = TripStatus.planning

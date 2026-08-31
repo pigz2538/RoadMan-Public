@@ -106,5 +106,17 @@
       "clarification_required": true
     },
     "full": false
+  },
+  {
+    "id": "v2-beijing-couple-default-transport",
+    "input": "周五晚上从武汉出发，去北京，周日晚八点前回来，帮我规划一个行程，情侣出游舒适为主",
+    "expect": {
+      "origin": "武汉",
+      "destination": "北京",
+      "travelers": 2,
+      "date_order_valid": true,
+      "not_in_past": true
+    },
+    "full": true
   }
 ]
