@@ -26,14 +26,48 @@ _PROVIDER_BOILERPLATE = (
     "飞猪AI开放平台（旅行信息服务）是飞猪旅行的AI能力开放平台，为开发者提供酒店预订、机票搜索、门票API、度假套餐等全品类旅行AI服务，支持OpenClaw协议实时接入飞猪官方商品库。",
 )
 
+# Providers sometimes prepend a slightly different attribution sentence
+# (notably “高德地图官方网站” instead of “在线地图官方网站”).  Treat the
+# whole sentence as transport metadata rather than POI copy.  The expressions
+# use Unicode escapes so this filter stays stable even when a Windows console
+# opens the source file with a legacy code page.
+_PROVIDER_BOILERPLATE_SENTENCE_RE = re.compile(
+    r"(?:\u9ad8\u5fb7|\u5728\u7ebf)\u5730\u56fe\u5b98\u65b9\u7f51\u7ad9[^\u3002\uff01\uff1f]*[\u3002\uff01\uff1f]?"
+    r"|(?:\u9ad8\u5fb7|\u5728\u7ebf)\u5730\u56fe\uff0c[^\u3002\uff01\uff1f]*[\u3002\uff01\uff1f]?"
+    r"|\u53ef\u540c\u65f6\u67e5\u770b\u5546\u5bb6\u56e2\u8d2d\u3001\u4f18\u60e0\u4fe1\u606f[^\u3002\uff01\uff1f]*[\u3002\uff01\uff1f]?"
+    r"|\u98de\u732aAI\u5f00\u653e\u5e73\u53f0[^\u3002\uff01\uff1f]*[\u3002\uff01\uff1f]?"
+    r"|OpenClaw\u534f\u8bae[^\u3002\uff01\uff1f]*[\u3002\uff01\uff1f]?",
+    re.IGNORECASE,
+)
+
 
 def _clean_public_description(value: str | None) -> str:
     text = str(value or "").strip()
     for boilerplate in _PROVIDER_BOILERPLATE:
         text = text.replace(boilerplate, "")
+    text = _PROVIDER_BOILERPLATE_SENTENCE_RE.sub("", text)
     # A few pages append provider attribution after punctuation/line breaks.
     text = re.sub(r"(?:在线地图|飞猪AI开放平台|OpenClaw协议)[^。！？]*[。！？]?", "", text)
     return re.sub(r"\s{2,}", " ", text).strip(" \t\r\n，,；;")
+
+
+def _sanitize_candidate_copy(candidate: dict[str, Any]) -> None:
+    """Remove provider boilerplate from every user-visible POI field.
+
+    Provider detail responses can carry a generic platform introduction in
+    ``description``.  It is not evidence about the place and used to leak
+    into saved activity cards when web enrichment timed out.  Clean both the
+    provider snapshot and the final activity projection.
+    """
+    for key, limit in (("description", 320), ("information_summary", 240)):
+        raw = candidate.get(key)
+        if raw in (None, ""):
+            continue
+        cleaned = _clean_public_description(str(raw))
+        if cleaned:
+            candidate[key] = cleaned[:limit]
+        else:
+            candidate.pop(key, None)
 
 
 def _extract_public_facts(description: str | None) -> dict[str, Any]:
@@ -186,6 +220,9 @@ async def enrich_tourism_candidates(
 ) -> dict[str, list[dict[str, Any]]]:
     targets: list[dict[str, Any]] = []
     for category, items in candidates.items():
+        for candidate in items:
+            if isinstance(candidate, dict):
+                _sanitize_candidate_copy(candidate)
         limit = max_attractions if category == "attractions" else max_other
         targets.extend(items[:limit])
     if not targets:
@@ -200,6 +237,7 @@ async def enrich_tourism_candidates(
         if not isinstance(result, dict):
             continue
         candidate = result["candidate"]
+        _sanitize_candidate_copy(candidate)
         meta = result["meta"]
         # The card opens the best public-web page found while the original
         # provider links remain available in source_records.
@@ -210,6 +248,7 @@ async def enrich_tourism_candidates(
                 candidate["description"] = cleaned[:320]
                 candidate["information_summary"] = cleaned[:240]
                 candidate.update(_extract_public_facts(cleaned))
+        _sanitize_candidate_copy(candidate)
         if meta.get("image_url") and not candidate.get("image_url"):
             candidate["image_url"] = meta["image_url"]
         records = candidate.setdefault("source_records", [])
@@ -342,6 +381,7 @@ async def _enrich_with_provider_skills(
 
     async def enrich_one(activity: dict[str, Any], candidate: dict[str, Any]) -> None:
         async with semaphore:
+            _sanitize_candidate_copy(candidate)
             place = candidate.get("place") or activity.get("place") or {}
             name = str(place.get("name") or "").strip()
             city = str(place.get("city") or "").strip()
@@ -387,6 +427,7 @@ async def _enrich_with_provider_skills(
                     if result.success and isinstance(result.data, dict):
                         item = result.data.get("item") or {}
                         _merge_structured_facts(candidate, item, provider="高德地图")
+                        _sanitize_candidate_copy(candidate)
                         _append_sources(candidate, result.sources)
                 except Exception:
                     pass
@@ -413,6 +454,7 @@ async def _enrich_with_provider_skills(
                         ) or (result.data.get("items") or [None])[0]
                         if isinstance(item, dict):
                             _merge_structured_facts(candidate, item, provider="旅行服务")
+                            _sanitize_candidate_copy(candidate)
                             _append_sources(candidate, result.sources)
                             if item.get("detail_url"):
                                 _append_sources(candidate, [{
@@ -484,13 +526,22 @@ async def enrich_scheduled_activities(
         timeout_seconds=timeout_seconds,
     )
     for activity, candidate in matches:
+        _sanitize_candidate_copy(candidate)
         for key in (
             "description", "information_summary", "image_url", "detail_url", "ticket_or_price",
             "ticket_name", "ticket_status", "ticket_note", "parking_or_price", "parking_note",
             "opening_hours", "reservation_status", "reservation_note", "official_url", "booking_url",
             "information_status", "information_checked_at", "information_sources_count",
         ):
-            if candidate.get(key):
+            if key in {"description", "information_summary"}:
+                # Clean old activity snapshots too, including records created
+                # before the provider-copy filter was introduced.
+                cleaned = _clean_public_description(candidate.get(key))
+                if cleaned:
+                    activity[key] = cleaned[:320 if key == "description" else 240]
+                else:
+                    activity.pop(key, None)
+            elif candidate.get(key):
                 activity[key] = candidate[key]
         if candidate.get("source_records"):
             activity["source_records"] = candidate["source_records"]

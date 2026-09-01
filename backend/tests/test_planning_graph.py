@@ -11,8 +11,12 @@ from app.domain.models import SkillResult, TripCreate, TripRequest, VehicleProfi
 from app.planning.graph import (
     _ensure_coordinates,
     _current_weather_sample,
+    _destination_focus_radius,
+    _is_local_destination_anchor,
     _estimated_driving_arrival_date,
     _movement_stage,
+    _scheduled_route_result,
+    _train_route_result,
     _return_stage_start,
     _return_deadline_issue,
     build_planning_graph,
@@ -51,6 +55,20 @@ def test_return_deadline_allows_small_drift_and_half_day_grace():
     assert blocker is not None
     assert blocker["code"] == "RETURN_DEADLINE_UNACHIEVABLE"
     assert blocker["severity"] == "blocker"
+
+
+def test_scheduled_routes_reject_missing_real_service_numbers():
+    origin = {"name": "武汉", "coordinates": {"longitude": 114.3, "latitude": 30.6}}
+    destination = {"name": "成都", "coordinates": {"longitude": 104.1, "latitude": 30.7}}
+    schedule = {
+        "departure_at": "2026-09-02T08:00:00+08:00",
+        "arrival_at": "2026-09-02T10:00:00+08:00",
+        "departure_airport": "武汉天河国际机场",
+        "arrival_airport": "成都天府国际机场",
+    }
+
+    assert _scheduled_route_result(schedule, origin, destination, [], mode="flight")["error_code"] == "FLIGHT_SERVICE_NUMBER_MISSING"
+    assert _train_route_result(schedule, origin, destination, [])["error_code"] == "TRAIN_SERVICE_NUMBER_MISSING"
 
 
 def test_long_outbound_drive_arrival_date_respects_daytime_and_daily_budget():
@@ -847,9 +865,10 @@ async def test_graph_builds_two_day_markdown_plan():
     assert len(result["day_plans"]) == 2
     stages = [stage for day in result["day_plans"] for stage in day["stages"]]
     assert len(stages) >= 7
-    assert {stage["mode"] for stage in stages} >= {"driving", "transit", "walking"}
+    assert "driving" in {stage["mode"] for stage in stages}
+    assert not ({"transit", "riding"} & {stage["mode"] for stage in stages})
     assert all(
-        stage["weather_summary"].startswith(("预计抵达", "当前天气参考"))
+        stage["weather_summary"].startswith(("预计抵达", "预报天气参考"))
         for stage in stages
     )
     driving = [stage for stage in stages if stage["mode"] == "driving"]
@@ -971,6 +990,24 @@ async def test_tourism_discovery_keeps_flyai_meal_and_hotel_candidates():
     )
 
 
+def test_destination_focus_is_semantic_for_scenic_poi_but_broad_for_city():
+    scenic = {
+        "name": "仙岛湖",
+        "city": "阳新县",
+        "destination_scope": "poi",
+    }
+    city = {
+        "name": "成都",
+        "city": "成都市",
+        "destination_scope": "city",
+    }
+    assert _is_local_destination_anchor(scenic) is True
+    assert _destination_focus_radius(scenic) == 50.0
+    assert _is_local_destination_anchor(city) is False
+    assert _destination_focus_radius(city) is None
+    assert _destination_focus_radius(city, explicit_local=True) == 35.0
+
+
 @pytest.mark.asyncio
 async def test_graph_builds_five_days_and_multiple_transport_modes():
     graph = build_planning_graph(
@@ -992,6 +1029,7 @@ async def test_graph_builds_five_days_and_multiple_transport_modes():
                 "end_date": "2026-08-12",
                 "max_days": 5,
                 "preferences": ["公共交通", "步行", "骑行"],
+                "transport_modes": ["transit", "walking", "riding"],
             },
             "clarification_round": 0,
         }
@@ -999,17 +1037,21 @@ async def test_graph_builds_five_days_and_multiple_transport_modes():
     stages = [stage for day in result["day_plans"] for stage in day["stages"]]
     assert len(result["day_plans"]) == 5
     assert len(stages) >= 13
-    assert {"driving", "transit", "walking", "riding"} <= {
+    assert {"transit", "walking", "riding"} <= {
         stage["mode"] for stage in stages
     }
+    assert "driving" not in {stage["mode"] for stage in stages}
     assert all(stage["route_segments"][0]["coordinates"] for stage in stages)
     assert all(stage["weather_samples"] for stage in stages)
     assert result["verification_result"]["passed"] is True
     assert stages[0]["origin"]["name"] == stages[-1]["destination"]["name"]
-    assert {"rest", "charging", "fueling", "parking", "meal", "hospital", "toilet"} <= {
+    # A public-transport-only plan must not manufacture vehicle charging,
+    # fueling or parking stops merely to satisfy the self-drive service set.
+    assert not {
         category
         for stage_services in result["service_pois"].values()
-        for category in stage_services
+        for category in ("charging", "fueling", "parking")
+        if category in stage_services
     }
 
 
@@ -1109,6 +1151,14 @@ async def test_explicit_flight_uses_schedule_adapter_instead_of_default_driving(
     assert intercity
     assert {stage["mode"] for stage in intercity} == {"flight"}
     assert all(stage["traffic_summary"] for stage in intercity)
+    local_modes = {
+        stage["mode"]
+        for day in result["day_plans"]
+        for stage in day["stages"]
+        if stage["mode"] != "flight"
+    }
+    assert "driving" not in local_modes
+    assert "riding" not in local_modes
     outbound_stage = next(stage for stage in intercity if stage["title"] == "城市出发")
     return_stage = next(stage for stage in intercity if stage["title"] == "返程")
     assert outbound_stage["origin"]["name"] == "天河机场"

@@ -33,6 +33,12 @@
     "expect": {"origin": "武汉", "destination": "长沙", "date_order_valid": true}
   },
   {
+    "id": "xiandaohu-natural-overnight",
+    "input": "周六早上从武汉出发，去仙岛湖两天一夜，周日晚八点前回来，喜欢自然景观",
+    "expect": {"origin": "武汉", "destination": "仙岛湖", "date_order_valid": true},
+    "full": true
+  },
+  {
     "id": "two-provinces-not-restaurants",
     "input": "想从武汉去新疆再去西藏，和对象一起，9月18号走，十天左右，不是找新疆菜馆哈，先看看这个时间够不够",
     "expect": {"origin": "武汉", "destination_any": ["新疆", "西藏"], "travelers": 2, "date_order_valid": true}

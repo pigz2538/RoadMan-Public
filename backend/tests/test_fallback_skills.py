@@ -4,8 +4,10 @@ import pytest
 
 from app.skills.base import SkillContext
 from app.skills.fallbacks import (
+    AviationstackFlightAdapter,
     FreeApiOilAdapter,
     FreeApiTrainAdapter,
+    Mcp12306TrainAdapter,
     OpenStreetMapGeocodeAdapter,
     SixApiFlightAdapter,
 )
@@ -41,6 +43,56 @@ class _Client:
         self.calls.append((url, kwargs))
         type(self).calls.append((url, kwargs))
         return type(self).response
+
+
+class _McpClient:
+    calls = []
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        return False
+
+    async def post(self, url, **kwargs):
+        type(self).calls.append((url, kwargs))
+        method = kwargs["json"]["method"]
+        if method == "initialize":
+            return _McpResponse(
+                {"jsonrpc": "2.0", "id": 1, "result": {"protocolVersion": "2025-11-25"}},
+                headers={"mcp-session-id": "session-1"},
+            )
+        if method == "notifications/initialized":
+            return _McpResponse({}, status_code=202)
+        return _McpResponse(
+            {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "result": {
+                    "isError": False,
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": '{"success":true,"trains":[{"train_no":"G423","from_station":"武汉站","to_station":"长沙南站","start_time":"08:10","arrive_time":"09:38","duration":"01:28","seats":{"second_class":"有"}}]}',
+                        }
+                    ],
+                },
+            }
+        )
+
+    async def delete(self, url, **kwargs):
+        type(self).calls.append((url, kwargs))
+        return _McpResponse({})
+
+
+class _McpResponse(_Response):
+    def __init__(self, body, status_code=200, headers=None):
+        super().__init__(body, status_code)
+        self.headers = headers or {}
+        self.text = ""
 
 
 @pytest.mark.asyncio
@@ -91,6 +143,24 @@ async def test_free_train_fallback_rejects_wrong_route(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_mcp_12306_fallback_runs_handshake_and_returns_real_train(monkeypatch):
+    _McpClient.calls = []
+    monkeypatch.setattr("app.skills.fallbacks.httpx.AsyncClient", _McpClient)
+    result = await Mcp12306TrainAdapter("http://rail.test:8000").execute(
+        {"origin": "武汉", "destination": "长沙", "dep_date": date(2026, 9, 4)},
+        SkillContext(),
+    )
+    assert result.success is True
+    assert result.data["items"][0]["train_number"] == "G423"
+    assert result.data["items"][0]["departure_station"] == "武汉站"
+    assert [call[1].get("json", {}).get("method") for call in _McpClient.calls[:3]] == [
+        "initialize",
+        "notifications/initialized",
+        "tools/call",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_sixapi_flight_fallback_requires_key(monkeypatch):
     adapter = SixApiFlightAdapter("https://example.test/flight", "")
     result = await adapter.execute(
@@ -126,6 +196,34 @@ async def test_sixapi_flight_fallback_normalizes_result(monkeypatch):
     assert result.success is True
     assert result.data["items"][0]["flight_number"] == "MU2455"
     assert result.data["items"][0]["departure_airport"] == "武汉天河"
+
+
+@pytest.mark.asyncio
+async def test_aviationstack_flight_fallback_requires_real_number(monkeypatch):
+    _Client.response = _Response(
+        {
+            "data": [
+                {
+                    "departure": {"scheduled": "2026-09-04T17:50:00+08:00", "airport": "Wuhan Tianhe"},
+                    "arrival": {"scheduled": "2026-09-04T19:45:00+08:00", "airport": "Beijing Capital"},
+                    "airline": {"name": "China Eastern"},
+                    "flight": {"iata": "MU2455"},
+                },
+                {
+                    "departure": {"scheduled": "2026-09-04T18:00:00+08:00"},
+                    "arrival": {"scheduled": "2026-09-04T20:00:00+08:00"},
+                    "flight": {},
+                },
+            ]
+        }
+    )
+    monkeypatch.setattr("app.skills.fallbacks.httpx.AsyncClient", _Client)
+    result = await AviationstackFlightAdapter("https://example.test/flights", "key").execute(
+        {"origin": "武汉", "destination": "北京", "dep_date": date(2026, 9, 4)},
+        SkillContext(),
+    )
+    assert result.success is True
+    assert [item["flight_number"] for item in result.data["items"]] == ["MU2455"]
 
 
 @pytest.mark.asyncio

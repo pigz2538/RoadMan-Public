@@ -21,6 +21,8 @@ class Settings(BaseSettings):
     mcp_12306_url: str = ""
     flight_fallback_url: str = "https://open.6api.net/flight/getTicket"
     flight_fallback_api_key: str = ""
+    aviationstack_url: str = "https://api.aviationstack.com/v1/flights"
+    aviationstack_api_key: str = ""
     oil_api_url: str = "https://www.mxnzp.com/api/oil/search"
     oil_app_id: str = ""
     oil_app_secret: str = ""

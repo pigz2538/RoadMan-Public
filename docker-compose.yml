@@ -45,6 +45,8 @@ services:
       MCP_12306_URL: ${MCP_12306_URL:-}
       FLIGHT_FALLBACK_URL: ${FLIGHT_FALLBACK_URL:-https://open.6api.net/flight/getTicket}
       FLIGHT_FALLBACK_API_KEY: ${FLIGHT_FALLBACK_API_KEY:-}
+      AVIATIONSTACK_URL: ${AVIATIONSTACK_URL:-https://api.aviationstack.com/v1/flights}
+      AVIATIONSTACK_API_KEY: ${AVIATIONSTACK_API_KEY:-}
       OIL_API_URL: ${OIL_API_URL:-https://www.mxnzp.com/api/oil/search}
       OIL_APP_ID: ${OIL_APP_ID:-}
       OIL_APP_SECRET: ${OIL_APP_SECRET:-}
@@ -107,6 +109,8 @@ services:
       MCP_12306_URL: ${MCP_12306_URL:-}
       FLIGHT_FALLBACK_URL: ${FLIGHT_FALLBACK_URL:-https://open.6api.net/flight/getTicket}
       FLIGHT_FALLBACK_API_KEY: ${FLIGHT_FALLBACK_API_KEY:-}
+      AVIATIONSTACK_URL: ${AVIATIONSTACK_URL:-https://api.aviationstack.com/v1/flights}
+      AVIATIONSTACK_API_KEY: ${AVIATIONSTACK_API_KEY:-}
       OIL_API_URL: ${OIL_API_URL:-https://www.mxnzp.com/api/oil/search}
       OIL_APP_ID: ${OIL_APP_ID:-}
       OIL_APP_SECRET: ${OIL_APP_SECRET:-}
@@ -147,10 +151,17 @@ services:
         HTTP_PROXY: ${ROADMAN_HTTP_PROXY:-}
         HTTPS_PROXY: ${ROADMAN_HTTP_PROXY:-}
         NO_PROXY: ${ROADMAN_NO_PROXY:-localhost,127.0.0.1}
+        ROADMAN_HTTPS: ${ROADMAN_HTTPS:-false}
+        ROADMAN_SERVER_NAME: ${ROADMAN_SERVER_NAME:-_}
     ports:
       # Bind the unified web entrypoint on every host interface so other
       # devices on the same LAN can open http://<host-ip>:8080.
       - "0.0.0.0:8080:80"
+      # HTTPS entrypoint used by reverse tunnels (frp). Certificate files
+      # fullchain.pem + privkey.pem must exist under ./roadman-certs.
+      - "0.0.0.0:7443:443"
+    volumes:
+      - ./roadman-certs:/etc/nginx/certs:ro
     depends_on:
       backend:
         condition: service_healthy

@@ -598,6 +598,16 @@ function humanizeDefault(value: string) {
   return value
 }
 
+function forecastWeatherLabel(value: string | null | undefined) {
+  const text = humanizeDisplayText(value) || '出发前更新'
+  // Trips saved before the wording update may still contain the old snapshot
+  // label. Normalize at render time so history pages do not tell travellers
+  // that a past/current observation is the forecast for their travel date.
+  return text
+    .replace(/当前天气参考/g, '预报天气参考')
+    .replace(/当前天气数据暂不可用/g, '预报天气暂不可用')
+}
+
 function eventResearchDetails(item: SpecialEventResearch) {
   const facts = item.facts
   const details: string[] = []
@@ -759,17 +769,54 @@ watch(bottomPanelCollapsed, (collapsed) => window.localStorage.setItem(panelStor
         <section class="planning-wait-dialog glass-card">
           <div class="planning-map-animation" :data-scene="planningScene.key" aria-hidden="true">
             <span class="planning-map-grid" />
-            <svg viewBox="0 0 360 170" preserveAspectRatio="none">
-              <path class="planning-map-route route-main" d="M28 132 C76 126 78 70 132 82 S202 148 246 93 S300 39 337 47" />
-              <path class="planning-map-route route-branch" d="M132 82 C158 44 191 34 226 57" />
-              <path class="planning-map-route route-return" d="M246 93 C220 120 180 139 143 130" />
+            <span v-for="index in 5" :key="`road-${index}`" :class="`planning-ambient-road road-${index}`" />
+            <svg viewBox="0 0 520 230" preserveAspectRatio="none">
+              <path class="planning-map-route route-shadow" d="M31 183 C90 180 112 84 181 105 S280 190 355 119 S442 39 493 63" />
+              <path id="planning-route-path" class="planning-map-route route-main" d="M31 183 C90 180 112 84 181 105 S280 190 355 119 S442 39 493 63" />
+              <path class="planning-map-route route-shadow route-shadow-branch" d="M181 105 C213 49 273 45 315 79 C333 91 346 106 355 119" />
+              <path class="planning-map-route route-shadow route-shadow-return" d="M355 119 C319 161 249 191 188 171 C132 160 78 171 31 183" />
+              <path class="planning-map-route route-glow" d="M31 183 C90 180 112 84 181 105 S280 190 355 119 S442 39 493 63" />
+              <path class="planning-map-route route-glow route-glow-branch" d="M181 105 C213 49 273 45 315 79 C333 91 346 106 355 119" />
+              <path class="planning-map-route route-glow route-glow-return" d="M355 119 C319 161 249 191 188 171 C132 160 78 171 31 183" />
+              <path class="planning-map-route route-branch" d="M181 105 C213 49 273 45 315 79 C333 91 346 106 355 119" />
+              <path class="planning-map-route route-return" d="M355 119 C319 161 249 191 188 171 C132 160 78 171 31 183" />
+              <circle class="planning-map-flow-dot flow-dot-one" r="4">
+                <animateMotion dur="12s" begin="-2s" repeatCount="indefinite" rotate="auto" path="M31 183 C90 180 112 84 181 105 S280 190 355 119 S442 39 493 63" />
+              </circle>
+              <circle class="planning-map-flow-dot flow-dot-two" r="3">
+                <animateMotion dur="12s" begin="-7s" repeatCount="indefinite" rotate="auto" path="M31 183 C90 180 112 84 181 105 S280 190 355 119 S442 39 493 63" />
+              </circle>
+              <circle class="planning-map-flow-dot flow-dot-branch" r="3.5">
+                <animateMotion dur="9s" begin="-4s" repeatCount="indefinite" rotate="auto" path="M181 105 C213 49 273 45 315 79 C333 91 346 106 355 119" />
+              </circle>
+              <circle class="planning-map-flow-dot flow-dot-return" r="3">
+                <animateMotion dur="10s" begin="-6s" repeatCount="indefinite" rotate="auto" path="M355 119 C319 161 249 191 188 171 C132 160 78 171 31 183" />
+              </circle>
             </svg>
+            <span class="planning-map-route-pulse pulse-main"><i /></span>
+            <span class="planning-map-route-pulse pulse-branch"><i /></span>
+            <span class="planning-map-route-pulse pulse-return"><i /></span>
+            <span v-for="index in 3" :key="`spark-main-${index}`" :class="`planning-map-spark spark-main-${index}`"><i /></span>
+            <span v-for="index in 2" :key="`spark-branch-${index}`" :class="`planning-map-spark spark-branch-${index}`"><i /></span>
+            <span v-for="index in 3" :key="`bead-main-${index}`" :class="`planning-map-bead bead-main-${index}`"><i /></span>
+            <span v-for="index in 2" :key="`bead-return-${index}`" :class="`planning-map-bead bead-return-${index}`"><i /></span>
+            <span class="planning-map-sheen" />
             <span v-for="index in 6" :key="index" :class="`planning-map-pin pin-${index}`"><i /></span>
-            <span class="planning-map-traveller">➤</span>
+            <span class="planning-map-origin">起</span>
+            <span class="planning-map-destination">终</span>
+            <span class="planning-map-traveller"><i /><b /></span>
             <span class="planning-map-scan" />
-            <span class="planning-map-card card-hotel">住</span>
-            <span class="planning-map-card card-meal">餐</span>
-            <span class="planning-map-card card-weather">☀</span>
+            <span class="planning-map-radar"><i /><b /></span>
+            <span class="planning-map-orbit"><i /><b /><em /></span>
+            <span class="planning-map-cloud cloud-one" /><span class="planning-map-cloud cloud-two" />
+            <span class="planning-map-card card-hotel"><b>住</b><i>住宿已匹配</i></span>
+            <span class="planning-map-card card-meal"><b>餐</b><i>餐饮已匹配</i></span>
+            <span class="planning-map-card card-weather"><b>晴</b><i>天气已复核</i></span>
+            <span class="planning-itinerary-stack">
+              <i v-for="index in 4" :key="`step-${index}`"><b>{{ index }}</b><em /></i>
+            </span>
+            <span class="planning-check-badge"><i>✓</i><b>路线连续</b></span>
+            <span class="planning-stage-beacons"><i /><i /><i /></span>
           </div>
           <div class="planning-scene-copy">
             <span>{{ planningScene.index }}/{{ planningScenes.length }} · {{ planningAgentName(store.planningEvent || {}) }}</span>
@@ -881,7 +928,7 @@ watch(bottomPanelCollapsed, (collapsed) => window.localStorage.setItem(panelStor
       <section v-if="!planningComplete" class="planning-live-strip glass-card">
         <span class="planning-pulse" />
         <div class="planning-live-copy">
-          <strong>{{ store.planningEvent?.label || '智能体正在继续完善行程' }}</strong>
+          <strong>{{ humanizeDisplayText(store.planningEvent?.label) || '智能体正在继续完善行程' }}</strong>
           <small>地图、阶段、景点、用餐、住宿和补能安排会继续逐项出现</small>
           <div
             class="planning-meter"
@@ -904,7 +951,7 @@ watch(bottomPanelCollapsed, (collapsed) => window.localStorage.setItem(panelStor
           <div class="day-summary">
             <strong>{{ store.currentDay.title }}</strong>
             <span>{{ store.currentDay.total_distance_km }} km · {{ formatDuration(store.currentDay.total_drive_minutes) }}</span>
-            <span>{{ store.currentDay.weather_summary }}</span>
+            <span>{{ forecastWeatherLabel(store.currentDay.weather_summary) }}</span>
           </div>
           <section class="day-timeline" aria-label="全天时间线">
             <header><strong>全天安排</strong><span>{{ dayTimeline.length }} 项</span></header>
@@ -1043,7 +1090,7 @@ watch(bottomPanelCollapsed, (collapsed) => window.localStorage.setItem(panelStor
                 <dl>
                   <div><dt>道路</dt><dd>{{ roadNames(item.stage) }}</dd></div>
                   <div><dt>{{ stageConditionLabel(item.stage.mode) }}</dt><dd>{{ stageCondition(item.stage) }}</dd></div>
-                  <div><dt>天气</dt><dd>{{ item.stage.weather_summary || store.trip?.days[item.dayIndex]?.weather_summary || '出发前更新' }}</dd></div>
+                  <div><dt>天气</dt><dd>{{ forecastWeatherLabel(item.stage.weather_summary || store.trip?.days[item.dayIndex]?.weather_summary) }}</dd></div>
                 </dl>
                 <footer>
                   <span>{{ item.stage.distance_km }} km</span>
@@ -1053,7 +1100,7 @@ watch(bottomPanelCollapsed, (collapsed) => window.localStorage.setItem(panelStor
                   <span v-if="item.stage.energy_estimate?.replenished_amount">补能 {{ item.stage.energy_estimate.replenished_amount }} {{ item.stage.energy_estimate.replenished_unit }}</span>
                   <span v-if="item.stage.energy_estimate?.remaining_percent !== undefined">预计剩余 {{ item.stage.energy_estimate.remaining_percent }}%</span>
                 </footer>
-                <small v-if="item.stage.warnings[0]">⚠ {{ item.stage.warnings[0].message }}</small>
+                 <small v-if="item.stage.warnings[0]">⚠ {{ forecastWeatherLabel(item.stage.warnings[0].message) }}</small>
               </button>
             </div>
             <button

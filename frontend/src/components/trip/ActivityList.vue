@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { MapPin, MessageCircle, Trash2 } from '@lucide/vue'
 import type { Activity } from '../../types/trip'
-import { humanizeProvider } from '../../utils/displayLabels'
+import { humanizeDisplayText, humanizeProvider } from '../../utils/displayLabels'
 
 defineProps<{ activities: Activity[]; selectedId?: string | null }>()
 defineEmits<{
@@ -94,13 +94,13 @@ const reservationLabels: Record<string, string> = {
             :title="activity.risk_note"
           >{{ tag }}</span>
         </div>
-        <p v-if="activity.reservation_note" class="activity-check-note">{{ activity.reservation_note }}</p>
-        <p v-if="activity.risk_note" class="activity-check-note risk-note">{{ activity.risk_note }}</p>
+        <p v-if="activity.reservation_note" class="activity-check-note">{{ humanizeDisplayText(activity.reservation_note) }}</p>
+        <p v-if="activity.risk_note" class="activity-check-note risk-note">{{ humanizeDisplayText(activity.risk_note) }}</p>
         <span v-if="activity.source_records?.length" class="activity-source">
           来源：{{ [...new Set(activity.source_records.map((item) => humanizeProvider(item.provider)))].join('、') }}
         </span>
-        <p v-if="activity.user_note" class="activity-note">{{ activity.user_note }}</p>
-        <p v-if="activity.description" class="activity-description">{{ activity.description }}</p>
+        <p v-if="activity.user_note" class="activity-note">{{ humanizeDisplayText(activity.user_note) }}</p>
+        <p v-if="activity.description" class="activity-description">{{ humanizeDisplayText(activity.description) }}</p>
         <a
           v-if="activity.detail_url || activity.official_url || activity.booking_url || activity.source_records?.find((item) => item.url)"
           class="activity-detail-link"

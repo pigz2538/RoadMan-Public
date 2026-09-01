@@ -190,7 +190,7 @@ class DeepSeekRequirementExtractor:
             "飞机/航班 as flight, 轮船/渡轮/船 as ferry, "
             "自驾/开车 as driving, and 公交/地铁/公共交通 as transit.  ‘可以坐高铁’ means train is an allowed and "
             "preferred intercity option; do not silently force driving for a long-distance trip.  If no transport "
-            "preference is stated, return an empty array. "
+            "preference is stated, return an empty array; the planner will then use driving for both intercity and local movement. "
             "cross_sea_required must be true only when the trip actually requires crossing a sea or water barrier; "
             "cross_sea_mode may be ferry, flight, bridge or null. past_return_requested is true only when the user "
             "explicitly requests returning before the current date. time_window_minutes is the user's explicit "
@@ -569,8 +569,11 @@ class DeepSeekTripEditAgent:
               '"origin_name":"","destination_name":"","start_date":"","end_date":"",'
               '"must_visit_names":[],"exclude_names":[],"restore_names":[],"stay_only_at_destination":false,'
               '"reply":"给用户的简短中文说明"}。'
-            "如果用户要求增加或减少天数、重排整体路线、改变出发/返回日期，intent 用 replan。"
-            "如果是加入/删除/替换一个已有候选，尽量填出对应第几天和名称；不确定时留空，"
+             "如果用户要求增加或减少天数、重排整体路线、改变出发/返回日期，intent 用 replan。"
+             "如果一句话同时明确指出一个现有安排和一个新的地点（例如‘把 A 替换为 B’、‘把 A 换成 B’、‘A 改成 B’），"
+             "intent 必须用 replace，并填写 target_activity_id/target_name 与 candidate_name；只有‘再加/新增/添加’才用 add。"
+             "即使上下文提供了 current_target_id，也不能把明确的替换请求误判为新增。"
+             "如果是加入/删除/替换一个已有候选，尽量填出对应第几天和名称；不确定时留空，"
             "优先返回上下文中的 day_id、阶段 ID、活动 ID、候选 ID；名称仅用于精确核对，禁止返回不存在的 ID。"
               "不要把‘看流星雨’、‘赏花’、‘泡温泉’等体验目标误当成景点名称。"
               "如果用户说‘这几天都住/玩在某地、不去其他地方’，用 replan 并将 stay_only_at_destination=true；"
@@ -705,7 +708,7 @@ class DeepSeekPoiCurator:
                             "action": action,
                             "display_name_zh": display_name,
                             "merge_target_name": str(item.get("merge_target_name") or "").strip(),
-                            "reason": str(item.get("reason") or "Agent 多源核验"),
+                            "reason": str(item.get("reason") or "智能体多源核验"),
                         }
                     )
                 return cleaned
@@ -752,6 +755,14 @@ class DeepSeekDestinationResearchAgent:
             )
         if not evidence:
             return []
+        local_anchor_instruction = (
+            "这是一个用户明确指定的景区或具体地点锚点。短途行程应把大部分景点、餐饮和住宿留在该锚点周边，"
+            "优先自然景观、代表性文化地点和有证据支持的本地餐饮；不要因为搜索结果出现就加入远处的 KTV、娱乐城、"
+            "普通商场或无关学校。只有用户明确要求时才推荐娱乐项目。"
+            if trip_request.get("destination_scope") == "poi"
+            or trip_request.get("stay_only_at_destination")
+            else ""
+        )
         prompt = (
             "You are RoadMan Destination Research Agent. Based ONLY on supplied web/FlyAI evidence, "
             "identify famous, source-backed must-see attractions and representative local foods. "
@@ -761,8 +772,10 @@ class DeepSeekDestinationResearchAgent:
             "return enough distinct attractions for the number of travel days (up to 12 attraction recommendations). "
             "Do not invent names, choose a restaurant/university/campus as a province or city destination, or promote "
             "obscure nearby POIs just because they are close to a geocoder point. Do not turn an experience into a place name. "
+            f"{local_anchor_instruction} "
             "Return JSON only: {\"recommendations\":[{\"name\":\"...\",\"category\":\"attractions|meals\","
-            "\"importance\":0,\"area\":\"城区或地理片区\",\"suggested_minutes\":90,"
+            "\"importance\":0,\"area\":\"城区或地理片区\",\"suggested_minutes\":180,"
+            "\"visit_scale\":\"major|compact|indoor|outdoor|unknown\","
             "\"best_time\":\"morning|afternoon|evening|any\",\"reason\":\"中文依据\","
             "\"source_indexes\":[0]}]}. "
             "importance is 0-100 and reflects local fame and evidence quality. "
@@ -805,7 +818,14 @@ class DeepSeekDestinationResearchAgent:
                     "suggested_minutes": _coerce_positive_minutes(
                         item.get("suggested_minutes")
                     )
-                    or 90,
+                    or 180,
+                    "visit_scale": (
+                        item.get("visit_scale")
+                        if item.get("visit_scale") in {
+                            "major", "compact", "small", "quick", "short", "indoor", "outdoor"
+                        }
+                        else "unknown"
+                    ),
                     "best_time": (
                         item.get("best_time")
                         if item.get("best_time") in {"morning", "afternoon", "evening", "any"}
@@ -854,12 +874,20 @@ class DeepSeekDestinationPlanAgent:
                 for item in bundle.get("agent_recommendations", [])
                 if isinstance(item, dict)
             ]
+        local_anchor_instruction = (
+            "这是具体景区/地点锚点，不是城市范围搜索。请把每天主轴、住宿和餐饮集中在锚点周边，"
+            "只选择证据充分且与用户兴趣匹配的自然或文化地点；不要塞入远处的 KTV、娱乐城、普通商场或无关学校。"
+            if trip_request.get("destination_scope") == "poi"
+            or trip_request.get("stay_only_at_destination")
+            else ""
+        )
         prompt = (
             "你是 RoadMan 目的地行程策划 Agent。你已经拿到公开网页和旅行信息服务的证据，"
             "现在只写一份供路线 Agent 执行的高层计划单，不直接返回地图坐标。"
             "对于省份/大区域，必须拆成有代表性的城市或景区片区；对于城市，必须覆盖不同片区的著名地标，"
             "不要只围绕酒店，不要把学校、餐馆或搜索结果中的偶然地点当作目的地。"
             "根据用户日期、交通、人数和舒适度约束安排每天的主轴，给出景点、三餐和住宿区域的建议。"
+            f"{local_anchor_instruction} "
             "没有证据支持的地点不要写入 selected_attractions。只返回 JSON："
             '{"strategy":"中文总体策略","selected_attractions":[{"name":"...","destination":"...",'
             '"area":"...","reason":"..."}],"day_plans":[{"day":1,"focus":"...",'
@@ -971,6 +999,9 @@ class DeepSeekPoiRanker:
             "Assess seasonal_fit for every candidate; reject clearly off-season outdoor activities, "
             "but keep indoor or all-season venues when provider details support them. "
             "Return seasonal_fit and seasonal_reason in each decision. "
+            "For category=attractions, do not rank a nearby KTV/nightclub, pharmacy/clinic, "
+            "school/campus, shopping mall or generic service facility as a scenic attraction "
+            "unless the user explicitly asks for it; nearby-search noise must receive a low score. "
             f"Destination research evidence (use it to prioritize famous source-backed places, never as a hard-coded list): {json.dumps(destination_research or {}, ensure_ascii=False)}. "
             "你是 RoadMan POI 行程策展 Agent。请根据已经由 Requirement Agent 提取的偏好、特殊体验、"
             "距离、评分、价格和类别，为候选景点、住宿、餐饮排序。不要从原始用户文本猜测偏好，"
@@ -1019,7 +1050,7 @@ class DeepSeekPoiRanker:
                         else None
                     ),
                     "seasonal_reason": str(item.get("seasonal_reason") or "").strip()[:160],
-                    "reason": str(item.get("reason") or "Agent 综合偏好、距离与数据质量").strip()[:120],
+                    "reason": str(item.get("reason") or "智能体综合偏好、距离与数据质量").strip()[:120],
                 }
             )
         return cleaned
@@ -1091,6 +1122,15 @@ class DeepSeekPoiSuitabilityAgent:
             "the requested date range, forecast temperature/precipitation/wind, "
             "elevation and terrain, opening information, activity characteristics, "
             "travel mode, party size and the user's preferences/special events. "
+            "Do not assume that every result returned by a nearby ‘景点’ search "
+            "is a sightseeing attraction. For category=attractions, a result "
+            "whose provider category or description is clearly a KTV/nightclub, "
+            "pharmacy/clinic, school/campus, shopping mall, generic service "
+            "facility or unrelated business is unsuitable unless the user "
+            "explicitly requested that exact place. When the extracted intent "
+            "prefers nature/scenery, mark entertainment, retail, medical and "
+            "other non-tourism businesses unsuitable and favor parks, lakes, "
+            "mountains, forests, museums and established scenic areas. "
             "A seasonal activity can still be suitable when the provider details, "
             "indoor setting or local conditions support it. Mark unsuitable only "
             "when the evidence makes it unreasonable or unsafe. Return ONLY JSON: "
@@ -1142,7 +1182,7 @@ class DeepSeekPoiSuitabilityAgent:
                     "candidate_id": candidate_id,
                     "suitable": suitable,
                     "confidence": confidence,
-                    "reason": str(item.get("reason") or "Agent 综合日期、天气、地形与偏好复核").strip()[:240],
+                    "reason": str(item.get("reason") or "智能体综合日期、天气、地形与偏好复核").strip()[:240],
                     "weather_reason": str(item.get("weather_reason") or "").strip()[:160],
                     "terrain_reason": str(item.get("terrain_reason") or "").strip()[:160],
                     "personal_reason": str(item.get("personal_reason") or "").strip()[:160],

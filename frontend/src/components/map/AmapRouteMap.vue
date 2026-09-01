@@ -145,7 +145,18 @@ async function routeWithFallback(
   waypoints: Array<{ longitude: number; latitude: number }> = [],
   preferredMode: TravelMode = 'driving',
 ): Promise<PlannedRoute> {
-  const cached = routePathCache.value.get(cacheKey)
+  // A stage id can survive an edit while its endpoints move. Include the
+  // geometry in the cache key so a re-render cannot reuse yesterday's local
+  // connector and leave an apparent gap between the sidebar and the map.
+  const geometryKey = [
+    cacheKey,
+    `${start.longitude.toFixed(6)},${start.latitude.toFixed(6)}`,
+    `${end.longitude.toFixed(6)},${end.latitude.toFixed(6)}`,
+    city || '',
+    preferredMode,
+    ...waypoints.map((point) => `${point.longitude.toFixed(6)},${point.latitude.toFixed(6)}`),
+  ].join('|')
+  const cached = routePathCache.value.get(geometryKey)
   if (cached) return cached
   const modes = [
     preferredMode,
@@ -155,7 +166,7 @@ async function routeWithFallback(
     const path = await searchByMode(mode, start, end, city, mode === 'driving' ? waypoints : [])
     if (path.length >= 2) {
       const result: PlannedRoute = { path, mode, fallback: mode !== preferredMode }
-      routePathCache.value.set(cacheKey, result)
+      routePathCache.value.set(geometryKey, result)
       return result
     }
   }
@@ -164,8 +175,45 @@ async function routeWithFallback(
     mode: 'direct',
     fallback: true,
   }
-  routePathCache.value.set(cacheKey, result)
+  routePathCache.value.set(geometryKey, result)
   return result
+}
+
+type RoutePoint = [number, number]
+
+function routePointDistance(left: RoutePoint, right: RoutePoint) {
+  return Math.hypot(left[0] - right[0], left[1] - right[1])
+}
+
+function anchorRoutePath(
+  path: RoutePoint[],
+  start?: { longitude: number; latitude: number },
+  end?: { longitude: number; latitude: number },
+): RoutePoint[] {
+  const clean = path.filter((point) =>
+    Array.isArray(point)
+    && point.length >= 2
+    && Number.isFinite(Number(point[0]))
+    && Number.isFinite(Number(point[1])),
+  ) as RoutePoint[]
+  if (!clean.length) return clean
+  const anchored = clean.map((point) => [Number(point[0]), Number(point[1])] as RoutePoint)
+  const startPoint: RoutePoint | undefined = start
+    ? [start.longitude, start.latitude]
+    : undefined
+  const endPoint: RoutePoint | undefined = end
+    ? [end.longitude, end.latitude]
+    : undefined
+  // Provider road polylines often omit the exact geocoded endpoint by a few
+  // dozen metres. Add a tiny terminal link so every visible stage starts and
+  // ends at the same coordinate as its card and marker.
+  if (startPoint && routePointDistance(anchored[0], startPoint) > 0.00001) {
+    anchored.unshift(startPoint)
+  }
+  if (endPoint && routePointDistance(anchored.at(-1) as RoutePoint, endPoint) > 0.00001) {
+    anchored.push(endPoint)
+  }
+  return anchored
 }
 
 function stagePath(stage: NonNullable<typeof props.day>['stages'][number]): Promise<PlannedRoute> {
@@ -175,8 +223,9 @@ function stagePath(stage: NonNullable<typeof props.day>['stages'][number]): Prom
     segment.coordinates.map((point) => [point.longitude, point.latitude]),
   )
   if (persistedPath.length >= 2) {
+    const anchoredPath = anchorRoutePath(persistedPath as RoutePoint[], start, end)
     return Promise.resolve({
-      path: persistedPath,
+      path: anchoredPath,
       mode: (['driving', 'riding', 'walking', 'transit', 'train', 'flight', 'ferry'].includes(stage.mode)
         ? stage.mode
         : 'driving') as PlannedRoute['mode'],
@@ -287,7 +336,10 @@ function normalizedMarkerName(name: string): string {
     .trim()
 }
 
-const SAME_NAMED_PLACE_DISTANCE = 0.015 // roughly 1.5 km at mainland-China latitudes
+// Provider entrances, hotel pins and nearby service records can drift by a
+// few kilometres even when they describe one named place. Keep one label and
+// expose all category badges instead of rendering a vertical pile of copies.
+const SAME_NAMED_PLACE_DISTANCE = 0.03 // roughly 3 km at mainland-China latitudes
 const SAME_COORDINATE_DISTANCE = 0.001 // roughly 100 m; names may differ by provider
 
 function compatibleMarkerNames(left: string, right: string): boolean {
@@ -475,6 +527,53 @@ function itineraryConnectors(day: NonNullable<typeof props.day>) {
   return pairs
 }
 
+function stageContinuityConnectors(day: NonNullable<typeof props.day>) {
+  type StageConnector = {
+    id: string
+    start: { longitude: number; latitude: number }
+    end: { longitude: number; latitude: number }
+    city?: string
+    distanceKm: number
+    preferredMode: TravelMode
+  }
+  const pairs: StageConnector[] = []
+  const stages = [...day.stages].sort((left, right) =>
+    left.planned_start.localeCompare(right.planned_start)
+    || left.sequence - right.sequence,
+  )
+  for (let index = 1; index < stages.length; index += 1) {
+    const previous = stagePlaceWithFallback(stages[index - 1], 'destination')
+    const current = stagePlaceWithFallback(stages[index], 'origin')
+    if (!previous.coordinates || !current.coordinates) continue
+    const distance = Math.hypot(
+      previous.coordinates.longitude - current.coordinates.longitude,
+      previous.coordinates.latitude - current.coordinates.latitude,
+    )
+    const distanceKm = distance * 92
+    // The backend accepts a few kilometres of geocoding drift as the same
+    // place. Draw that short link on the map as well, otherwise two valid
+    // cards can look visually disconnected even though the verifier passes.
+    if (distanceKm <= 0.05 || distanceKm > 3) continue
+    const id = `stage-continuity-${stages[index - 1].id}-${stages[index].id}`
+    if (pairs.some((item) => item.id === id)) continue
+    pairs.push({
+      id,
+      start: previous.coordinates,
+      end: current.coordinates,
+      city: previous.city === current.city ? current.city : undefined,
+      distanceKm,
+      preferredMode: stages[index - 1].mode === 'driving' || stages[index].mode === 'driving'
+        ? 'driving'
+        : stages[index - 1].mode === 'riding'
+          ? 'riding'
+          : stages[index - 1].mode === 'walking'
+            ? 'walking'
+            : 'transit',
+    })
+  }
+  return pairs
+}
+
 let renderVersion = 0
 function clearRenderedOverlays() {
   if (!map.value) return
@@ -501,8 +600,12 @@ async function renderRoutes() {
   const plannedPaths = await Promise.all(
     day.stages.map(async (stage) => ({ stage, route: await stagePath(stage) })),
   )
+  const connectorPlans = [
+    ...itineraryConnectors(day),
+    ...stageContinuityConnectors(day),
+  ]
   const plannedConnectors = await Promise.all(
-    itineraryConnectors(day).map(async (connector) => ({
+    connectorPlans.map(async (connector) => ({
       connector,
       route: await routeWithFallback(
         connector.id,
@@ -514,7 +617,10 @@ async function renderRoutes() {
       ),
     })),
   )
-  if (version !== renderVersion || !map.value || props.day?.id !== dayId) return
+  if (version !== renderVersion || !map.value || props.day?.id !== dayId) {
+    if (version === renderVersion) routeLoading.value = false
+    return
+  }
   routeUnavailable.value = [...plannedPaths, ...plannedConnectors].some(({ route }) => route.mode === 'direct')
 
   const modeColor: Record<PlannedRoute['mode'], string> = {
@@ -530,9 +636,12 @@ async function renderRoutes() {
   const inactiveRouteColor = '#98a3b2'
   for (const { stage, route } of plannedPaths) {
     const unavailable = route.mode === 'direct'
-    if (unavailable && stage.distance_km > 35) continue
     const start = stagePlaceWithFallback(stage, 'origin').coordinates
     const end = stagePlaceWithFallback(stage, 'destination').coordinates
+    // Keep an estimated dashed line even for a long leg when the online route
+    // service is unavailable. Hiding it made the itinerary look disconnected;
+    // the badge and dashed style make the uncertainty explicit without
+    // pretending that a direct line is turn-by-turn navigation.
     const displayPath = unavailable && start && end && route.path.length < 2
       ? [[start.longitude, start.latitude], [end.longitude, end.latitude]]
       : route.path
@@ -545,7 +654,7 @@ async function renderRoutes() {
       borderWeight: 3,
       strokeColor: active && !unavailable ? modeColor[route.mode] : inactiveRouteColor,
       strokeOpacity: active ? 0.96 : 0.78,
-      strokeWeight: active && !unavailable ? 6 : 3,
+      strokeWeight: active && !unavailable ? 4 : 2.5,
       strokeStyle: unavailable ? 'dashed' : 'solid',
       strokeDasharray: unavailable ? [8, 8] : undefined,
       lineJoin: 'round',
@@ -565,7 +674,7 @@ async function renderRoutes() {
       path: route.path,
       strokeColor: inactiveRouteColor,
       strokeOpacity: unavailable ? 0.72 : 0.78,
-      strokeWeight: 3,
+      strokeWeight: 2.5,
       strokeStyle: unavailable ? 'dashed' : 'solid',
       strokeDasharray: unavailable ? [8, 8] : undefined,
       lineJoin: 'round',

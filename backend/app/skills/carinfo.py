@@ -4,6 +4,7 @@ import asyncio
 import html
 import re
 import time
+from collections import Counter
 from typing import Any, Literal
 from urllib.parse import urlencode
 
@@ -70,7 +71,7 @@ class CarInfoCatalogAdapter(SkillAdapter):
     name = "carinfo.catalog"
     # Bump the adapter contract when detail enrichment changes so Redis does
     # not serve pre-enrichment identity-only results after deployment.
-    version = "1.5.0"
+    version = "1.7.0"
     category = "vehicle"
     timeout_seconds = 12
     max_retries = 0
@@ -130,6 +131,56 @@ class CarInfoCatalogAdapter(SkillAdapter):
                 continue
             seen.add(item["source_id"])
             items.append(item)
+        # A brand-only query is capped by the upstream at the newest 50 rows;
+        # those rows can all predate the detail table. Expand a few established
+        # series concurrently so concrete, detail-backed trims are available
+        # without hard-coding any manufacturer or model name.
+        series_requests: list[dict[str, str]] = []
+        brand_ids = _catalog_brand_ids_for_query(items, request.query)
+        if brand_ids:
+            async with httpx.AsyncClient(timeout=self.timeout_seconds) as series_client:
+                series_rows = await _fetch_catalog_series_rows(series_client, brand_ids[0])
+                series_requests = _catalog_series_expansion_requests(
+                    series_rows,
+                    request.query,
+                    limit=4,
+                )
+                # A provider deployment may not expose the series index. Keep
+                # the older name-based expansion as a graceful fallback.
+                if not series_requests:
+                    series_requests = [
+                        {"query": query}
+                        for query in _catalog_series_expansion_queries(items, request.query)
+                    ]
+                expanded_groups = await asyncio.gather(
+                    *(_fetch_catalog_info_rows(
+                        series_client,
+                        query=request_item.get("query"),
+                        series_id=request_item.get("series_id"),
+                    ) for request_item in series_requests),
+                    return_exceptions=True,
+                )
+        else:
+            series_queries = _catalog_series_expansion_queries(items, request.query)
+            expanded_groups = []
+            if series_queries:
+                async with httpx.AsyncClient(timeout=self.timeout_seconds) as series_client:
+                    expanded_groups = await asyncio.gather(
+                        *(_fetch_catalog_info_rows(series_client, query=query) for query in series_queries),
+                        return_exceptions=True,
+                    )
+        if series_requests or expanded_groups:
+            # ``expanded_groups`` is intentionally handled uniformly for both
+            # the brand-id and name-query paths above.
+            for expanded in expanded_groups:
+                if not isinstance(expanded, list):
+                    continue
+                for raw in expanded:
+                    item = _catalog_vehicle_item(raw)
+                    if not item or item["source_id"] in seen:
+                        continue
+                    seen.add(item["source_id"])
+                    items.append(item)
         items.sort(key=_catalog_sort_key)
         # Keep a bounded look-ahead window. Newer trims in the upstream search
         # list occasionally have no detail row while an adjacent trim does;
@@ -138,11 +189,7 @@ class CarInfoCatalogAdapter(SkillAdapter):
         # Twelve concurrent detail calls stay below the Registry's 12-second
         # adapter budget; larger requested limits still return their remaining
         # identity rows without making the endpoint time out.
-        candidate_count = min(
-            len(items),
-            max(min(request.limit, 12), min(request.limit * 3, 12)),
-        )
-        candidate_items = items[:candidate_count]
+        candidate_items = _catalog_detail_probe_items(items, request.limit)
         # The provider's ``info`` endpoint is an identity/search endpoint. It
         # intentionally returns only brand/series/trim/price. Fetch the
         # matching ``detail`` record for each result before returning it to the
@@ -156,6 +203,12 @@ class CarInfoCatalogAdapter(SkillAdapter):
         for item, detail in zip(candidate_items, details):
             if isinstance(detail, dict):
                 item.update(detail)
+                if detail.get("rated_range_km") is not None:
+                    item["estimated_fields"] = [
+                        field
+                        for field in item.get("estimated_fields", [])
+                        if field != "rated_range_km"
+                    ]
             item["specs_missing"] = _missing_specs(item)
         # Prefer records with verified detail, then retain the provider's
         # availability/year ordering. This makes a normal brand/model search
@@ -236,6 +289,236 @@ def _catalog_info_items(body: object) -> list[dict[str, Any]]:
     if isinstance(raw_items, list):
         return [item for item in raw_items if isinstance(item, dict)]
     return []
+
+
+def _catalog_detail_probe_items(
+    items: list[dict[str, Any]],
+    limit: int,
+) -> list[dict[str, Any]]:
+    """Choose useful detail probes for a broad brand/series search.
+
+    The upstream identity index is newer than its detail table. A broad query
+    such as ``小鹏`` therefore starts with many 2026 trims whose detail endpoint
+    legitimately has no row, while 2024/older concrete trims later in the same
+    result set contain range, battery and consumption specifications. Probe the
+    requested head plus a small, diverse stable-history sample instead of
+    issuing dozens of blind calls or returning a wall of identity-only rows.
+    """
+    if not items:
+        return []
+    head_count = min(len(items), min(max(1, limit), 12))
+    selected = list(items[:head_count])
+    selected_ids = {str(item.get("source_id") or "") for item in selected}
+    historical = [
+        item
+        for item in items[head_count:]
+        if str(item.get("state") or "") == "0"
+        and (item.get("year") is None or int(item.get("year") or 0) <= 2024)
+    ]
+    # First cover different series, then fill the remaining probe budget. This
+    # lets a brand query expose several useful concrete models rather than 12
+    # near-identical trims from one series.
+    seen_series: set[str] = set()
+    ordered_history: list[dict[str, Any]] = []
+    for item in historical:
+        series = str(item.get("series") or "")
+        if series and series in seen_series:
+            continue
+        if series:
+            seen_series.add(series)
+        ordered_history.append(item)
+    ordered_history.extend(item for item in historical if item not in ordered_history)
+    probe_budget = min(len(items), max(head_count, 24))
+    for item in ordered_history:
+        source_id = str(item.get("source_id") or "")
+        if not source_id or source_id in selected_ids:
+            continue
+        selected.append(item)
+        selected_ids.add(source_id)
+        if len(selected) >= probe_budget:
+            break
+    return selected
+
+
+def _catalog_brand_ids_for_query(
+    items: list[dict[str, Any]],
+    original_query: str,
+) -> list[str]:
+    """Return the dominant brand id only for a broad brand search.
+
+    ``info?keyword=品牌`` is capped at the newest rows and does not expose all
+    historical series. The provider can filter its series index by
+    ``brand_id``; use that path only when the query is a brand-like phrase so
+    a specific trim (for example ``P7`` or ``Model 3``) is not widened.
+    """
+    query_key = re.sub(r"\s+", "", str(original_query or "")).casefold()
+    if not query_key or re.search(r"\d", query_key):
+        return []
+    counts: Counter[str] = Counter()
+    brand_names: dict[str, str] = {}
+    for item in items:
+        brand_id = str(item.get("brand_id") or "").strip()
+        brand = re.sub(r"\s+", "", str(item.get("brand") or "")).casefold()
+        if not brand_id or not brand:
+            continue
+        counts[brand_id] += 1
+        brand_names[brand_id] = brand
+    # A query is broad when it is contained in (or equals) the provider's
+    # brand name. This also handles the natural shorthand ``小鹏`` for
+    # ``小鹏汽车`` without maintaining a manufacturer allow-list.
+    return [
+        brand_id
+        for brand_id, _ in counts.most_common()
+        if query_key in brand_names.get(brand_id, "")
+    ][:1]
+
+
+async def _fetch_catalog_series_rows(
+    client: httpx.AsyncClient,
+    brand_id: str,
+) -> list[dict[str, Any]]:
+    """Fetch all series metadata for one provider brand id."""
+    try:
+        response = await client.get(
+            CARINFO_API_URL,
+            params={
+                "type": "series",
+                "brand_id": brand_id,
+                "pagesize": 100,
+            },
+        )
+        response.raise_for_status()
+        body = response.json()
+    except (httpx.HTTPError, ValueError, TypeError):
+        return []
+    if not isinstance(body, dict) or body.get("status") != 1:
+        return []
+    rows = body.get("info")
+    if isinstance(rows, dict):
+        rows = [rows]
+    return [row for row in rows if isinstance(row, dict)] if isinstance(rows, list) else []
+
+
+def _catalog_series_expansion_requests(
+    rows: list[dict[str, Any]],
+    original_query: str,
+    *,
+    limit: int = 4,
+) -> list[dict[str, str]]:
+    """Choose established series whose concrete trims are worth probing."""
+    if not rows or limit <= 0:
+        return []
+    query_key = re.sub(r"\s+", "", str(original_query or "")).casefold()
+    candidates: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for row in rows:
+        series_id = str(row.get("id") or "").strip()
+        # ``name`` is the concise series label (e.g. 小鹏P7); ``full_name``
+        # usually includes the brand prefix and is retained as the search
+        # fallback when older provider deployments omit ``name``.
+        full_name = str(row.get("name") or row.get("full_name") or "").strip()
+        if not series_id or not full_name or series_id in seen:
+            continue
+        series_key = re.sub(r"\s+", "", full_name).casefold()
+        if query_key and series_key == query_key:
+            # The broad query itself can already contain the active series;
+            # it is still useful to keep that series when it is the only one,
+            # but avoid spending every probe on the same literal match.
+            continue
+        state = str(row.get("seriesstate") or "").strip()
+        has_info = str(row.get("has_info") or "").strip()
+        try:
+            numeric_id = int(series_id)
+        except ValueError:
+            numeric_id = 0
+        candidates.append(
+            {
+                "series_id": series_id,
+                "query": full_name,
+                "has_info": has_info,
+                "state": state,
+                "numeric_id": numeric_id,
+            }
+        )
+        seen.add(series_id)
+    state_rank = {"20": 0, "10": 1, "40": 2, "0": 3}
+    candidates.sort(
+        key=lambda row: (
+            0 if row["has_info"] == "1" else 1,
+            state_rank.get(row["state"], 4),
+            -int(row["numeric_id"]),
+        )
+    )
+    return [
+        {"series_id": row["series_id"], "query": row["query"]}
+        for row in candidates[:limit]
+    ]
+
+
+def _catalog_series_expansion_queries(
+    items: list[dict[str, Any]],
+    original_query: str,
+    *,
+    limit: int = 4,
+) -> list[str]:
+    """Select established series for a broad brand-query detail expansion."""
+    if not items or limit <= 0:
+        return []
+    query_key = re.sub(r"\s+", "", str(original_query or "")).casefold()
+    series_keys = {
+        re.sub(r"\s+", "", str(item.get("series") or "")).casefold()
+        for item in items
+        if item.get("series")
+    }
+    if any(key and key in query_key for key in series_keys) or (
+        re.search(r"\d", query_key)
+        and any(query_key and query_key in key for key in series_keys)
+    ):
+        return []
+    grouped: dict[str, tuple[int, int]] = {}
+    for item in items:
+        series = str(item.get("series") or "").strip()
+        series_key = re.sub(r"\s+", "", series).casefold()
+        if not series or not series_key or series_key in query_key:
+            continue
+        year = int(item.get("year") or 9999)
+        historical_rank = 0 if str(item.get("state") or "") in {"0", "40"} else 1
+        current = grouped.get(series)
+        rank = (historical_rank, year)
+        if current is None or rank < current:
+            grouped[series] = rank
+    if len(grouped) <= 1:
+        return []
+    return [
+        series
+        for series, _ in sorted(
+            grouped.items(),
+            key=lambda pair: (pair[1][0], pair[1][1], pair[0]),
+        )[:limit]
+    ]
+
+
+async def _fetch_catalog_info_rows(
+    client: httpx.AsyncClient,
+    query: str | None = None,
+    series_id: str | None = None,
+) -> list[dict[str, Any]]:
+    params: dict[str, str] = {"type": "info"}
+    if series_id:
+        params["series_id"] = str(series_id)
+    elif query:
+        params["keyword"] = query
+    else:
+        return []
+    try:
+        response = await client.get(
+            CARINFO_API_URL,
+            params=params,
+        )
+        response.raise_for_status()
+        return _catalog_info_items(response.json())
+    except (httpx.HTTPError, ValueError, TypeError):
+        return []
 
 
 async def _fetch_catalog_detail(
@@ -426,6 +709,38 @@ def _infer_power_type_from_text(text: str) -> str:
     return "fuel"
 
 
+def _infer_catalog_name_range(
+    model: str,
+    *,
+    brand: str,
+    series: str,
+    power_type: str,
+) -> float | None:
+    """Recover an explicitly advertised range embedded in a trim name.
+
+    New catalogue rows may precede their parameter-detail record by several
+    months, but names such as ``纯电 665 Max`` and ``增程 1585 四驱`` already
+    carry an official advertised range. Strip brand/series/year first so model
+    numbers such as G9/P7 cannot be mistaken for kilometres. This value is
+    marked estimated at the field level and must still be confirmed by trim.
+    """
+    if power_type not in {"electric", "hybrid"}:
+        return None
+    trim = str(model or "")
+    for token in (brand, series):
+        if token:
+            trim = trim.replace(token, " ")
+    trim = re.sub(r"20\d{2}\s*款?", " ", trim)
+    preferred = re.search(r"(?:纯电|增程|续航)\D{0,8}([2-9]\d{2}|1\d{3})(?!\d)", trim)
+    matches = preferred.groups() if preferred else ()
+    if not matches:
+        matches = tuple(re.findall(r"(?<!\d)([2-9]\d{2}|1\d{3})(?!\d)", trim))
+    if not matches:
+        return None
+    value = float(matches[0])
+    return value if 200 <= value <= 2000 else None
+
+
 def _missing_specs(item: dict[str, Any]) -> list[str]:
     missing: list[str] = []
     if item.get("rated_range_km") is None:
@@ -485,11 +800,23 @@ def _catalog_vehicle_item(raw: dict[str, Any]) -> dict[str, Any] | None:
         return None
     year = _integer(raw.get("year"))
     power_type = _infer_power_type(raw)
+    advertised_range = _infer_catalog_name_range(
+        model,
+        brand=brand,
+        series=series,
+        power_type=power_type,
+    )
     state = str(raw.get("state") or "").strip()
+    brand_id = str(raw.get("brand_id") or "").strip()
+    group_id = str(raw.get("group_id") or "").strip()
+    series_id = str(raw.get("series_id") or "").strip()
     source_url = f"{CARINFO_API_URL}?{urlencode({'type': 'info', 'id': source_id})}"
     item = {
         "id": f"carinfo_{source_id}",
         "source_id": source_id,
+        "brand_id": brand_id,
+        "group_id": group_id,
+        "series_id": series_id,
         "brand": brand,
         "series": series,
         "model": model,
@@ -499,7 +826,7 @@ def _catalog_vehicle_item(raw: dict[str, Any]) -> dict[str, Any] | None:
         # reliable per-trim battery or real-world range. Keep those fields
         # null so the traveller can confirm their exact configuration instead
         # of silently inheriting the demo SUV's numbers.
-        "rated_range_km": None,
+        "rated_range_km": advertised_range,
         "battery_kwh": None,
         "consumption_per_100km": None,
         "max_charge_kw": None,
@@ -517,6 +844,7 @@ def _catalog_vehicle_item(raw: dict[str, Any]) -> dict[str, Any] | None:
         "price_max_cny": _number(raw.get("maxprice")),
         "source_url": source_url,
         "specs_missing": [],
+        "estimated_fields": ["rated_range_km"] if advertised_range is not None else [],
     }
     item["specs_missing"] = _missing_specs(item)
     return item

@@ -25,7 +25,7 @@ RoadMan 只把第三方返回的真实道路/步行/骑行/公交 geometry 当�
 
 在规划图 `build_base_route`（`backend/app/planning/graph.py`）中，`resolve_leg` 决定每一段腿（去程/返程）走何种方式：
 
-- 无跨城班次显式信号时，`driving` 始终是第一个且唯一优先尝试（即「自驾优先」）；只有驾车查询失败，才解锁城际班次 fallback 候选。这保证普通行程走用户默认自驾，同时能从缺失公路/桥梁路线（含水面横穿）中恢复。
+- 无跨城班次显式信号时，`driving` 是跨城与市内的唯一机动交通方式；驾车查询失败也不会自动改成飞机、火车或市内公交。长途自驾只通过跨天拆段、休息、住宿与补能修复可执行性。
 - 用户/需求 Agent 显式给出本地方式（transit/walking/riding）时，按其顺序再兜底 driving。
 - 用户/需求 Agent 显式给出城际班次（train/flight/ferry）时，逐个查询所有允许方式，用 `_intercity_route_quality` 综合抵达时刻、到达期限与方式优先级选取最优班次，避免「首个提供者在凌晨抵达」却输给白天更舒适方案的情况。
 - 返程腿按到到达期限（`arrival_deadline`，来自 `return_time`）选择班次。
@@ -43,11 +43,13 @@ RoadMan 只把第三方返回的真实道路/步行/骑行/公交 geometry 当�
 - 相邻阶段之间，如果前一个阶段的 `destination` 与后一个阶段的 `origin` 不是同一地点，产生 blocker `ROUTE_DISCONTINUITY`（阶段不连续）。
 - 如果首个阶段的 `origin` 与最后一个阶段的 `destination` 不是同一地点，产生 blocker `ROUTE_NOT_CLOSED`（行程终点未回到出发点）。
 
-`_same_place` 判定两个地点是否同一：名称完全一致即视为同一；否则以经纬度差计算欧氏距离（经度差乘以 cos 修正 `0.87` 系数），距离 ≤ 0.02（约 2 km 量级）视为同一点。返程抵达死线（`return_time`）单独校验，超过 `RETURN_DEADLINE_SILENT_TOLERANCE_MINUTES=15` 分钟的迟到才报告问题。
+`_same_place` 判定两个地点是否同一：名称完全一致即视为同一；否则以 Haversine 距离计算，距离 ≤ 1 km 视为同一点。返程抵达死线（`return_time`）单独校验，超过 `RETURN_DEADLINE_SILENT_TOLERANCE_MINUTES=15` 分钟的迟到才报告问题。
 
 ## 自动复核修复
 
-复核不是 LLM 协作协议，而是图内确定的 verify ⇄ repair 确定性循环（`backend/app/planning/graph.py`）。`verify_plan` 汇总三类校验：`verify_deep_drive_plan`（能耗、驾驶休息、天气、阶段计时、步行/骑行上限、三餐覆盖）、`verify_tourism_plan`（景点/住宿/餐饮与时间窗）与 `_verify_route_closure`（返程闭环）。只要存在 `blocker` 级别问题且自动修复次数 `repair_attempts` 未达到上限 `MAX_AUTO_REPAIR_ATTEMPTS=4`，就走 `repair_plan`：重跑 `schedule_tourism_activities`、`review_daily_schedule` 与时间重叠规整 `_repair_activity_stage_overlaps`，然后回到 `verify_plan` 再次校验。最多迭代 4 轮；4 轮后仍有 blocker 则记为 `auto_repair_exhausted`，交前端展示可执行约束。
+复核不是 LLM 协作协议，而是图内确定的 verify ⇄ repair 确定性循环（`backend/app/planning/graph.py`）。`verify_plan` 汇总三类校验：`verify_deep_drive_plan`（能耗、驾驶休息、天气、阶段计时、步行/骑行上限、三餐覆盖）、`verify_tourism_plan`（景点/住宿/餐饮与时间窗）与 `_verify_route_closure`（返程闭环）。只要存在 `blocker` 级别问题且自动修复次数 `repair_attempts` 未达到上限 `MAX_AUTO_REPAIR_ATTEMPTS=3`，就走 `repair_plan`：重跑 `schedule_tourism_activities`、`review_daily_schedule` 与时间重叠规整 `_repair_activity_stage_overlaps`，然后回到 `verify_plan` 再次校验。最多迭代 3 轮；3 轮后仍有 blocker 则记为 `auto_repair_exhausted`，交前端展示可执行约束。
+
+景区型目的地（需求智能体返回 `destination_scope=poi`，或地理编码显示为兴趣点）采用 50 km 的目的地聚焦半径；明确说“几天都在这里/不去其他地方”时收紧到 35 km。城市、省域和多目的地请求不套用该边界，仍由目的地研究智能体覆盖全域知名地标。长途自驾没有真实服务区名称时，系统使用道路名与前/中/后段生成可解释候选，并明确提示出发前确认具体站点，不再使用编号占位。
 
 每一日的确定性复核 `review_daily_schedule`（`backend/app/planning/tourism.py`）检查上午/下午/晚间安排、三餐与住宿覆盖、可用时间窗和天气/季节适配，产出核查意见并入 warnings。
 
@@ -62,3 +64,23 @@ RoadMan 只把第三方返回的真实道路/步行/骑行/公交 geometry 当�
 ## 缓存
 
 `AmapRouteAdapter.cache_ttl_seconds = 1800`，按 payload 归一化后的 `UnifiedRouteInput` 命中缓存；缓存键覆盖起终点、途经点、方式与城市。参数错误/无结果显示不重试；网络异常由 `base.py` 的 `max_retries` 控制（路由适配器为 1 次短重试）。
+
+## Recent itinerary quality safeguards
+
+- Stage endpoints within 3 km are treated as one connected place. The browser
+  map draws that short continuity connector too, so small geocoding drift does
+  not leave a visual gap between cards.
+- If an online route has no geometry, the map keeps an explicitly dashed,
+  estimated direct segment and labels the degradation; it never presents that
+  line as turn-by-turn navigation. The fallback map has a slow, looping route
+  pulse instead of a static image.
+- Long-drive breaks use provider-returned service-area names. If no named
+  record is available, the generated label describes the road corridor and
+  position and asks for confirmation; numbered placeholders are not emitted.
+- Scenic candidates normally reserve a 180–240 minute visit block. Only a
+  source-marked compact venue may use a shorter window. Ordinary city days
+  schedule at most two principal scenic stops (three only when the researched
+  highlight set and time window support it); an anchor destination keeps one
+  relaxed stop per day.
+- Forecast cards consistently use “forecast weather reference”. Missing
+  forecast data is a warning/degradation signal, not a blocker by itself.

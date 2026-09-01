@@ -328,7 +328,12 @@ class FlyAITrainAdapter(SkillAdapter):
             )
             if duration is None:
                 duration = max(1, round((arrival_at - departure_at).total_seconds() / 60))
-            train_numbers = _segment_numbers(segments, "trainNo", "trainNumber")
+            train_numbers = _segment_numbers(
+                segments,
+                "trainNo",
+                "trainNumber",
+                "marketingTransportNo",
+            )
             items.append(
                 {
                     "id": raw.get("id") or f"train_{index}",
@@ -490,7 +495,12 @@ class FlyAIFlightAdapter(SkillAdapter):
             )
             if duration is None:
                 duration = max(1, round((arrival_at - departure_at).total_seconds() / 60))
-            flight_numbers = _segment_numbers(segments, "flightNo", "flightNumber")
+            flight_numbers = _segment_numbers(
+                segments,
+                "flightNo",
+                "flightNumber",
+                "marketingTransportNo",
+            )
             items.append(
                 {
                     "id": raw.get("id") or f"flight_{index}",

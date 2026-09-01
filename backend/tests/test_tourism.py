@@ -1,10 +1,16 @@
 import json
+from datetime import datetime
 
 import pytest
 
 from app.domain.models import SkillResult, SourceRecord
-from app.planning.recommendations import plan_attraction_coverage, rank_tourism_candidates
+from app.planning.recommendations import (
+    apply_candidate_type_guard,
+    plan_attraction_coverage,
+    rank_tourism_candidates,
+)
 from app.planning.tourism import (
+    _suggested_duration,
     activity_checks,
     review_daily_schedule,
     schedule_tourism_activities,
@@ -106,6 +112,105 @@ def test_tourism_scheduler_adds_attraction_and_overnight_hotel():
     assert hotel["planned_end"].startswith("2026-08-03")
     assert hotel["source_records"][0]["provider"] == "高德地图"
     assert verify_tourism_plan(scheduled, candidates) == []
+
+
+def test_attraction_duration_defaults_to_comfortable_block_but_compact_can_opt_out():
+    assert _suggested_duration({"suggested_minutes": 90}, 75) == 180
+    assert _suggested_duration({"suggested_minutes": 240}, 75) == 240
+    assert _suggested_duration({"suggested_minutes": 60, "visit_scale": "compact"}, 75) == 60
+
+
+def test_category_guard_keeps_obvious_map_noise_out_of_attraction_schedule():
+    candidates = {
+        "attractions": [
+            {
+                "place": {"name": "某地KTV"},
+                "categories": "休闲娱乐服务;KTV",
+                "destination_research_priority": 95,
+            },
+            {
+                "place": {"name": "南京大学鼓楼校区"},
+                "categories": "教育;高等院校",
+                "destination_research_priority": 90,
+            },
+            {
+                "place": {"name": "湖畔公园"},
+                "categories": "风景名胜;公园",
+            },
+        ],
+        "meals": [],
+        "hotels": [],
+    }
+
+    apply_candidate_type_guard(candidates)
+
+    assert candidates["attractions"][0]["agent_suitability"] is False
+    assert candidates["attractions"][0]["category_guarded"] is True
+    # A destination-researched university may be an intentional landmark;
+    # category evidence alone must not erase it.
+    assert candidates["attractions"][1].get("agent_suitability") is not False
+    assert candidates["attractions"][2].get("agent_suitability") is not False
+
+
+def test_category_guard_rejects_road_facility_without_category_metadata():
+    candidates = {
+        "attractions": [
+            {"place": {"name": "青城山收费站(SA3高速出口)"}},
+            {"place": {"name": "湖畔公园"}},
+        ],
+        "meals": [],
+        "hotels": [],
+    }
+    apply_candidate_type_guard(candidates)
+    assert candidates["attractions"][0]["agent_suitability"] is False
+    assert candidates["attractions"][0]["category_guarded"] is True
+    assert candidates["attractions"][1].get("agent_suitability") is not False
+
+
+def test_scheduler_does_not_execute_negative_suitability_candidate():
+    days = [
+        {
+            "id": "day_noise",
+            "date": "2026-09-05",
+            "items": [],
+            "activities": [],
+            "stages": [
+                {
+                    "id": "stage_arrival",
+                    "sequence": 0,
+                    "destination": {"name": "目的地核心区"},
+                    "planned_start": "2026-09-05T09:00:00+08:00",
+                    "planned_end": "2026-09-05T09:30:00+08:00",
+                }
+            ],
+        }
+    ]
+    candidates = {
+        "attractions": [
+            {
+                "place": {"name": "目的地KTV", "coordinates": {"longitude": 114.3, "latitude": 30.6}},
+                "agent_suitability": False,
+                "suitability_confidence": "high",
+                "source_records": [{"provider": "地图", "title": "POI"}],
+                "categories": "休闲娱乐服务;KTV",
+            },
+            {
+                "place": {"name": "湖畔公园", "coordinates": {"longitude": 114.31, "latitude": 30.61}},
+                "source_records": [{"provider": "地图", "title": "POI"}],
+                "categories": "风景名胜;公园",
+            },
+        ],
+        "hotels": [],
+        "meals": [],
+    }
+
+    scheduled = schedule_tourism_activities(days, candidates)
+    names = [
+        item.get("place", {}).get("name")
+        for item in scheduled[0]["activities"]
+        if item.get("type") == "attraction"
+    ]
+    assert "目的地KTV" not in names
 
 
 def test_tourism_scheduler_preserves_explicit_required_attraction():
@@ -1247,3 +1352,66 @@ def test_tourism_scheduler_keeps_three_meals_on_long_drive_day():
         issue["code"] == "DAILY_MEALS_INCOMPLETE"
         for issue in verify_tourism_plan(scheduled, {"attractions": [], "hotels": [], "meals": []})
     )
+
+
+def test_local_anchor_keeps_named_scenic_stop_for_a_comfortable_window():
+    day = {
+        "id": "day_anchor",
+        "date": "2026-09-05",
+        "items": [],
+        "activities": [],
+        "stages": [
+            {
+                "id": "anchor_out",
+                "sequence": 0,
+                "mode": "driving",
+                "title": "目的地短途接驳",
+                "origin": {"name": "舒适酒店"},
+                "destination": {"name": "仙岛湖景区"},
+                "planned_start": "2026-09-05T14:00:00+08:00",
+                "planned_end": "2026-09-05T14:30:00+08:00",
+                "duration_minutes": 30,
+            },
+            {
+                "id": "anchor_back",
+                "sequence": 1,
+                "mode": "driving",
+                "title": "返回住宿或目的地核心区",
+                "origin": {"name": "仙岛湖景区"},
+                "destination": {"name": "舒适酒店"},
+                "planned_start": "2026-09-05T16:15:00+08:00",
+                "planned_end": "2026-09-05T16:45:00+08:00",
+                "duration_minutes": 30,
+            },
+        ],
+    }
+    candidates = {
+        "attractions": [
+            {
+                "place": {"name": "仙岛湖景区", "coordinates": {"longitude": 1, "latitude": 1}},
+                "source_records": [{"provider": "公开地点资料", "title": "景区详情"}],
+                "agent_suitability": True,
+                "visit_scale": "major",
+            }
+        ],
+        "hotels": [],
+        "meals": [],
+    }
+
+    scheduled = schedule_tourism_activities(
+        [day],
+        candidates,
+        trip_request={"destination_scope": "poi"},
+    )
+    attraction = next(
+        item for item in scheduled[0]["activities"] if item["type"] == "attraction"
+    )
+    start = datetime.fromisoformat(attraction["planned_start"])
+    end = datetime.fromisoformat(attraction["planned_end"])
+    assert (end - start).total_seconds() / 60 >= 180
+    return_stage = next(
+        stage
+        for stage in scheduled[0]["stages"]
+        if stage["title"] == "返回住宿或目的地核心区"
+    )
+    assert datetime.fromisoformat(return_stage["planned_start"]) >= end

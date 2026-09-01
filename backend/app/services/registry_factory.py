@@ -19,8 +19,10 @@ from ..skills.flyai import (
     FlyAITrainAdapter,
 )
 from ..skills.fallbacks import (
+    AviationstackFlightAdapter,
     FreeApiOilAdapter,
     FreeApiTrainAdapter,
+    Mcp12306TrainAdapter,
     OpenStreetMapGeocodeAdapter,
     SixApiFlightAdapter,
 )
@@ -58,7 +60,9 @@ def build_skill_registry(settings: Settings | None = None) -> SkillRegistry:
     # after a provider outage or empty response and return the same normalized
     # ``data.items`` contract, so route selection does not fabricate tickets.
     registry.register(FreeApiTrainAdapter(config.train_fallback_url))
+    registry.register(Mcp12306TrainAdapter(config.mcp_12306_url))
     registry.register(SixApiFlightAdapter(config.flight_fallback_url, config.flight_fallback_api_key))
+    registry.register(AviationstackFlightAdapter(config.aviationstack_url, config.aviationstack_api_key))
     registry.register(FreeApiOilAdapter(config.oil_api_url, config.oil_app_id, config.oil_app_secret))
     registry.register(OpenStreetMapGeocodeAdapter())
     registry.register(OpenTripMapNearbyAdapter(config.opentripmap_api_key))

@@ -757,8 +757,8 @@ def _overnight_stop_place(
             return place
     return {
         "id": f"route_overnight_{stage.get('id', 'stage')}_{number}",
-        "name": f"沿途住宿点 {number}（需预订）",
-        "address": "按实时导航在路线附近选择可入住酒店",
+        "name": "沿途服务区附近可入住酒店（需预订）",
+        "address": "路线分段后的过夜位置；请出发前通过导航确认具体酒店、房态与取消政策",
         "city": (stage.get("origin") or {}).get("city")
         or (stage.get("destination") or {}).get("city"),
         "coordinates": {
@@ -810,7 +810,7 @@ def verify_deep_drive_plan(
                     _issue(
                         "WEATHER_DEGRADED",
                         "warning",
-                        f"{stage['title']} 当前天气数据暂不可用，已按基础风险继续规划",
+                        f"{stage['title']} 预报天气暂不可用，已按基础风险继续规划",
                     )
                 )
             start = datetime.fromisoformat(stage["planned_start"])
@@ -1059,7 +1059,7 @@ def _apply_weather_risk(
 ) -> None:
     samples = stage.get("weather_samples", [])
     if not samples:
-        warnings.append(_warning("WEATHER_DATA_DEGRADED", "当前天气数据暂不可用，已按基础风险继续规划", "warning", True))
+        warnings.append(_warning("WEATHER_DATA_DEGRADED", "预报天气暂不可用，已按基础风险继续规划", "warning", True))
         tags.append("天气数据不足")
         return
     sample = samples[0]
@@ -1463,8 +1463,8 @@ def _fill_planned_rest_points(
         point = geometry[target]
         place = {
             "id": f"rest_{stage.get('id', 'stage')}_{number}",
-            "name": f"沿途计划休息点 {number}",
-            "address": "按实时导航选择附近服务区或可安全停车区域",
+            "name": _derived_rest_place_name(stage, number, count),
+            "address": _derived_rest_place_address(stage, number, count),
             "city": stage.get("origin", {}).get("city") or stage.get("destination", {}).get("city"),
             "coordinates": {
                 "longitude": float(point["longitude"]),
@@ -1489,8 +1489,8 @@ def _fill_planned_rest_points(
                 "rest",
                 {
                     "id": f"rest_{stage.get('id', 'stage')}_{number}",
-                    "name": f"沿途计划休息点 {number}",
-                    "address": "按实时导航选择附近服务区或可安全停车区域",
+                    "name": _derived_rest_place_name(stage, number, count),
+                    "address": _derived_rest_place_address(stage, number, count),
                     "city": stage.get("origin", {}).get("city") or stage.get("destination", {}).get("city"),
                     "coordinates": {
                         "longitude": float(point["longitude"]),
@@ -1507,6 +1507,41 @@ def _fill_planned_rest_points(
     # 'dict' and 'dict'`` and aborts otherwise valid long-distance plans.
     ordered = sorted(indexed_by_route_index.items(), key=lambda item: item[0])
     return [item for _, item in ordered[:count]]
+
+
+def _derived_rest_place_name(stage: dict[str, Any], number: int, count: int) -> str:
+    """Give a generated safety stop a useful corridor label.
+
+    Provider-returned service areas keep their real names. Only when a
+    provider has no named result do we derive an honest, route-bound label;
+    this avoids the opaque ``休息地点1234`` placeholders while making clear
+    that the exact service-area name still needs navigation confirmation.
+    """
+    segment = _first_route_segment(stage)
+    road = str(segment.get("road_name") or "").strip()
+    road = road.split(" / ", 1)[0].strip()
+    origin_city = str((stage.get("origin") or {}).get("city") or "").strip()
+    destination_city = str((stage.get("destination") or {}).get("city") or "").strip()
+    if number <= 1:
+        position = "前段"
+    elif number >= max(1, count):
+        position = "后段"
+    else:
+        position = "中段"
+    if road:
+        return f"{road}沿线{position}服务区候选（需确认具体名称）"
+    corridor = "至".join(item for item in (origin_city, destination_city) if item)
+    if corridor:
+        return f"{corridor}沿途{position}服务区候选（需确认具体名称）"
+    return f"沿途{position}服务区候选（需确认具体名称）"
+
+
+def _derived_rest_place_address(stage: dict[str, Any], number: int, count: int) -> str:
+    """Explain why a generated stop has no provider address yet."""
+    segment = _first_route_segment(stage)
+    road = str(segment.get("road_name") or "").strip()
+    context = road.split(" / ", 1)[0].strip() if road else "路线估算位置"
+    return f"{context}的路线估算停靠位置；请出发前通过导航确认服务区名称、营业与可停车状态"
 
 
 def _first_route_segment(stage: dict[str, Any]) -> dict[str, Any]:

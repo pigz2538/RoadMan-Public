@@ -638,7 +638,7 @@ def _render_activity_board(
     body_font = _load_font(max(14, width // 78))
     small_font = _load_font(max(12, width // 95))
     seen_image_urls: set[str] = set()
-    draw.text((28, 20), "Agent 精选行程安排", fill="#10213e", font=title_font)
+    draw.text((28, 20), "智能体精选行程安排", fill="#10213e", font=title_font)
     activities = sorted(
         activities
         if activities is not None

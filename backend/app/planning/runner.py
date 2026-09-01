@@ -455,7 +455,7 @@ async def _reveal_stages(
         await _publish_progress(
             trip.id,
             "build_stages",
-            f"Agent 已加入第 {visible_count}/{target_count} 个行程阶段",
+            f"行程编排智能体已加入第 {visible_count}/{target_count} 个行程阶段",
             int(result.get("progress", {}).get("value") or 1),
             "plan_updated",
             None,
@@ -485,7 +485,7 @@ async def _reveal_activities(
         )
         visible_items = [item for day in trip.days for item in day.activities]
         activity = visible_items[visible_count - 1] if len(visible_items) >= visible_count else None
-        label = f"Agent 已加入：{activity.place.name}" if activity else f"Agent 已加入第 {visible_count} 项停留安排"
+        label = f"行程编排智能体已加入：{activity.place.name}" if activity else f"行程编排智能体已加入第 {visible_count} 项停留安排"
         await _publish_progress(
             trip.id,
             node,
@@ -538,23 +538,23 @@ def _partial_update_label(node: str, result: dict[str, Any]) -> str:
     stage_count = sum(len(day.get("stages", [])) for day in day_plans if isinstance(day, dict))
     activity_count = sum(len(day.get("activities", [])) for day in day_plans if isinstance(day, dict))
     labels = {
-        "extract_requirements": "Agent 已理解并结构化旅行需求",
-        "build_base_route": "Agent 已加入跨城主路线",
-        "discover_tourism": "Agent 已完成多来源景点、餐饮与住宿候选整理",
-        "build_local_routes": "Agent 正在补齐景点间的本地交通",
+        "extract_requirements": "智能体已理解并结构化旅行需求",
+        "build_base_route": "智能体已加入跨城主路线",
+        "discover_tourism": "智能体已完成多来源景点、餐饮与住宿候选整理",
+        "build_local_routes": "智能体正在补齐景点间的本地交通",
         "build_stages": f"已加入 {stage_count} 个行程阶段",
-        "discover_services": "Agent 已检查沿途休息与补能设施",
+        "discover_services": "智能体已检查沿途休息与补能设施",
         "schedule_tourism": f"已加入 {activity_count} 项景点、用餐与住宿安排",
-        "review_daily_schedule": "每日复核 Agent 已检查上午、下午、晚间与三餐住宿",
-        "sample_weather": "Agent 已按计划时间补充逐段天气",
-        "enrich_deep_drive": "Agent 已补充休息、补能与安全余量",
-        "verify_plan": "Agent 正在逐段核验时间、闭环与驾驶安全",
-        "enrich_poi_details": "POI Agent 已完成景点详情与图片补充",
-        "render_markdown": "报告 Agent 正在整理最终行程安排",
-        "persist_trip": "报告 Agent 正在保存并核对行程安排",
-        "generate_plan": "Agent 正在整理最终行程安排",
+        "review_daily_schedule": "每日复核智能体已检查上午、下午、晚间与三餐住宿",
+        "sample_weather": "智能体已按计划时间补充逐段天气",
+        "enrich_deep_drive": "智能体已补充休息、补能与安全余量",
+        "verify_plan": "智能体正在逐段核验时间、闭环与驾驶安全",
+        "enrich_poi_details": "地点详情智能体已完成景点详情与图片补充",
+        "render_markdown": "报告整理智能体正在整理最终行程安排",
+        "persist_trip": "报告整理智能体正在保存并核对行程安排",
+        "generate_plan": "智能体正在整理最终行程安排",
     }
     # Never expose internal graph node names (e.g. ``render markdown``) in
     # the user-facing progress stream. Unknown future nodes get a generic
     # localized label until they are added to the map above.
-    return labels.get(node, "Agent 已完成当前规划步骤")
+    return labels.get(node, "智能体已完成当前规划步骤")

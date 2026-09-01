@@ -41,7 +41,7 @@ def assess_candidate_season(
     """
 
     if start_date is None:
-        return {"seasonal_fit": None, "seasonal_reason": "缺少出行日期，交由 Agent 复核"}
+        return {"seasonal_fit": None, "seasonal_reason": "缺少出行日期，交由适配智能体复核"}
     place = candidate.get("place") or {}
     text = " ".join(
         str(value or "")
@@ -72,7 +72,7 @@ def assess_candidate_season(
         # Indoor venues are not rejected by the fallback.  Let the Agent or
         # provider details override the broad outdoor interpretation.
         if any(marker in text for marker in ("室内", "全年", "全天候", "室内馆")):
-            return {"seasonal_fit": None, "seasonal_reason": "疑似室内/全年项目，需 Agent 结合详情复核"}
+            return {"seasonal_fit": None, "seasonal_reason": "疑似室内/全年项目，需适配智能体结合详情复核"}
         return {"seasonal_fit": False, "seasonal_reason": f"{reason}，与当前出行月份不匹配"}
 
     return {"seasonal_fit": None, "seasonal_reason": "未识别到明确季节限制"}
@@ -110,7 +110,7 @@ def apply_seasonal_guard(
                 assessment = {
                     "seasonal_fit": agent_suitability,
                     "seasonal_reason": item.get("suitability_reason")
-                    or "Agent 已结合日期、天气、地形与偏好复核",
+                    or "智能体已结合日期、天气、地形与偏好复核",
                 }
             # A rank-level seasonal flag is weaker than a confident
             # candidate-level suitability decision. Keep it as a fallback

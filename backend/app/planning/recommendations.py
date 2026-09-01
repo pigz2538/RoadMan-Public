@@ -61,9 +61,12 @@ def rank_tourism_candidates(
                 item["research_area"] = recommendation.get("area") or None
                 suggested_minutes = _number(recommendation.get("suggested_minutes")) or 90
                 item["suggested_minutes"] = max(45, min(240, int(suggested_minutes)))
+                visit_scale = str(recommendation.get("visit_scale") or "").strip().casefold()
+                if visit_scale in {"major", "compact", "small", "quick", "short", "indoor", "outdoor"}:
+                    item["visit_scale"] = visit_scale
                 item["best_time"] = recommendation.get("best_time") or "any"
                 item["must_see"] = priority >= 60
-                reasons.insert(0, "目的地研究 Agent 标记为代表性推荐")
+                reasons.insert(0, "目的地研究智能体标记为代表性推荐")
             item["score"] = round(max(0, min(100, score)), 1)
             item["distance_km"] = round(distance_km, 2) if distance_km is not None else None
             item["recommendation_reasons"] = reasons[:3] or ["按数据完整度排序"]
@@ -202,6 +205,87 @@ def plan_attraction_coverage(
 
 
 _RESEARCH_NAME_SEPARATORS = re.compile(r"[\s\u00b7•\-—–_/|（）()【】\[\]，,。；;:：]+")
+
+# Map providers deliberately return a broad ``景点`` search result.  The
+# result may still be a nearby pharmacy, KTV, school, mall or other business.
+# These are not destination-specific name rules; they are generic category
+# evidence used to keep obvious search noise out of the executable attraction
+# list.  A source-backed destination highlight or an explicitly requested
+# place is allowed through because the traveller may intentionally visit it.
+_NON_ATTRACTION_CATEGORY_RE = re.compile(
+    r"(?:ktv|karaoke|nightclub|bar|club|娱乐|歌厅|酒吧|夜店|休闲娱乐|"
+    r"药店|药房|医院|诊所|卫生|pharmacy|clinic|hospital|medical|"
+    r"学校|大学|学院|校园|campus|school|education|"
+    r"商场|购物|超市|便利店|mall|shopping|supermarket|"
+    r"酒店|宾馆|住宿|hotel|汽车服务|加油站|充电站|维修|售票处|票务|"
+    r"装修|建材|门窗|service facility)",
+    re.IGNORECASE,
+)
+_HARD_NON_ATTRACTION_EVIDENCE_RE = re.compile(
+    r"(?:ktv|karaoke|nightclub|bar|club|娱乐中心|歌厅|酒吧|夜店|休闲娱乐|"
+    r"药店|药房|医院|诊所|pharmacy|clinic|hospital|medical|"
+    r"装修|建材|门窗|筹建|售票处|service facility)",
+    re.IGNORECASE,
+)
+
+
+# A map result named after a road facility is not an attraction even when the
+# provider omitted category metadata. Keep this evidence generic (no city or
+# destination names) so scenic searches cannot schedule a toll gate, service
+# area or station as a three-hour visit.
+_NON_ATTRACTION_LOCATION_RE = re.compile(
+    r"(?:\u6536\u8d39\u7ad9|\u670d\u52a1\u533a|\u9ad8\u901f\u516c\u8def\u51fa\u53e3|\u673a\u573a|\u706b\u8f66\u7ad9|\u5730\u94c1\u7ad9|\u6c7d\u8f66\u7ad9)",
+    re.IGNORECASE,
+)
+
+
+def apply_candidate_type_guard(
+    candidates: dict[str, list[dict[str, Any]]],
+) -> dict[str, list[dict[str, Any]]]:
+    """Mark obvious non-attraction provider hits as unsuitable.
+
+    This is a data-quality check after model review, not an intent parser. It
+    only uses explicit provider category metadata and keeps the record visible
+    as a backup with an explainable reason. Research-backed highlights and
+    user-selected places are preserved even when their category is a school,
+    hotel or another non-scenic type (for example a university campus).
+    """
+    for item in candidates.get("attractions", []):
+        if item.get("user_required") or item.get("user_confirmed"):
+            continue
+        place_name = str((item.get("place") or {}).get("name") or "")
+        evidence_text = str(item.get("categories") or place_name)
+        # A destination model can occasionally echo a noisy map result as a
+        # “recommended” name. Unmistakable service evidence (KTV, pharmacy,
+        # ticket office, construction office, …) must still be rejected;
+        # softer types such as a university campus remain eligible when the
+        # destination research agent intentionally selected them.
+        hard_non_attraction = bool(
+            _HARD_NON_ATTRACTION_EVIDENCE_RE.search(evidence_text)
+            or _NON_ATTRACTION_LOCATION_RE.search(evidence_text)
+        )
+        if (_research_priority(item) > 0 or item.get("must_see")) and not hard_non_attraction:
+            continue
+        categories = item.get("categories")
+        if not categories and not place_name:
+            continue
+        # Some provider responses omit ``type``. For a missing category, use
+        # only an unmistakable service suffix in the returned place name;
+        # this still classifies provider evidence rather than interpreting the
+        # traveller's intent from free text.
+        category_text = str(categories or place_name)
+        if not (
+            _NON_ATTRACTION_CATEGORY_RE.search(category_text)
+            or _NON_ATTRACTION_LOCATION_RE.search(category_text)
+        ):
+            continue
+        item["agent_suitability"] = False
+        item["suitability_confidence"] = "high"
+        item["suitability_reason"] = (
+            "在线地点资料显示为非景点类服务，已保留为备选而不纳入景点排程"
+        )
+        item["category_guarded"] = True
+    return candidates
 
 
 def _normalise_research_name(value: Any) -> str:

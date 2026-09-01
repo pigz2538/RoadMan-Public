@@ -3,6 +3,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from app.planning.deep_drive import (
+    _fill_planned_rest_points,
     enrich_deep_drive_plan,
     normalize_plan_calendar,
     verify_deep_drive_plan,
@@ -152,6 +153,18 @@ def test_nine_hour_ev_leg_is_split_before_soc_estimation_and_can_charge_repeated
     assert all(item["consumed_percent"] <= 100 for item in estimates)
     assert sum(item["replenished_amount"] is not None for item in estimates) >= 2
     assert all(0 <= item["remaining_percent"] <= 100 for item in estimates)
+
+
+def test_generated_long_drive_stops_have_human_readable_corridor_names():
+    stage = _stage()
+    stage["route_segments"][0]["road_name"] = "G4京港澳高速"
+    selected = _fill_planned_rest_points(stage, [], 2)
+
+    assert len(selected) == 2
+    names = [place["name"] for _kind, place in selected]
+    assert all("服务区候选" in name for name in names)
+    assert all("休息点" not in name for name in names)
+    assert all("需确认具体名称" in name for name in names)
 
 
 def test_verifier_rejects_driving_piece_that_spills_into_next_calendar_day():
@@ -438,7 +451,7 @@ def test_noncritical_service_and_weather_failures_degrade_without_blocking():
     assert enriched[0]["stages"][0]["risk_level"] == "moderate"
     assert any(item["code"] == "WEATHER_DATA_DEGRADED" for item in enriched[0]["stages"][0]["warnings"])
     assert issues and all(item["severity"] == "warning" for item in issues)
-    assert any("当前天气数据暂不可用，已按基础风险继续规划" in item["description"] for item in issues)
+    assert any("预报天气暂不可用，已按基础风险继续规划" in item["description"] for item in issues)
 
 
 def test_malformed_weather_fields_are_ignored_without_crashing_planning():

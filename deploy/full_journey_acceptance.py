@@ -194,7 +194,20 @@ def semantic_replacement(
         None,
     )
     if not persisted_target or (persisted_target.get("place") or {}).get("name") != new_name:
-        raise JourneyFailure("confirmed semantic replacement was not persisted")
+        raise JourneyFailure(
+            "confirmed semantic replacement was not persisted: "
+            + json.dumps(
+                {
+                    "target_id": target.get("id"),
+                    "old_name": old_name,
+                    "new_name": new_name,
+                    "interpreted": interpreted,
+                    "applied": applied,
+                    "persisted_target": persisted_target,
+                },
+                ensure_ascii=False,
+            )[:5000]
+        )
     # Local edits deliberately mark the route chain as stale.  Reuse the same
     # queue/SSE path as a normal plan restart so the worker recomputes every
     # affected stage instead of pretending that a card-only mutation is a

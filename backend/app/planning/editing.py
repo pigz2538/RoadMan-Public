@@ -75,7 +75,7 @@ def interpret_edit_intent(
     if not agent_intent:
         raise AppError(
             "EDIT_AGENT_REQUIRED",
-            "行程语义修改需要规划 Agent 返回结构化意图，请检查模型配置后重试",
+            "行程语义修改需要规划智能体返回结构化意图，请检查模型配置后重试",
             503,
         )
 
@@ -94,7 +94,7 @@ def interpret_edit_intent(
     if day is None:
         raise AppError(
             "EDIT_DAY_REQUIRED",
-            "请先选择要修改的日期或阶段卡片，Agent 才能安全应用修改",
+            "请先选择要修改的日期或阶段卡片，智能体才能安全应用修改",
             422,
         )
 
@@ -128,13 +128,13 @@ def interpret_edit_intent(
                 "meal": "meals",
             }.get(target.type)
     if category not in {"attractions", "hotels", "meals"}:
-        return reply or "请让 Agent 明确这次修改是景点、住宿还是餐饮。", None, False
+        return reply or "请让智能体明确这次修改是景点、住宿还是餐饮。", None, False
 
     candidate = _find_candidate_exact(state, category, agent_intent)
     if candidate is None and intent == "add":
         candidate = _candidate_for_add(state, category, selected_stage)
     if candidate is None:
-        return reply or "没有找到与 Agent 意图完全对应的候选项，请先刷新候选推荐或在地图上选点。", None, False
+        return reply or "没有找到与智能体意图完全对应的候选项，请先刷新候选推荐或在地图上选点。", None, False
 
     candidates = state.setdefault("tourism_candidates", {}).setdefault(category, [])
     if not any(item.get("candidate_id") == candidate.get("candidate_id") for item in candidates):
@@ -321,7 +321,7 @@ def _candidate_for_add(
             return {
                 "candidate_id": f"meals:route-service:{source_id}",
                 "place": place,
-                "provider": "沿途服务 Agent",
+                "provider": "沿途服务智能体",
                 "source_records": [],
                 "recommendation_reasons": ["靠近所选移动阶段", "适合途中用餐和休息"],
                 "score": 90,
@@ -651,7 +651,13 @@ async def recompute_and_verify_patch(
                     destination,
                     trip.id,
                     preferred_mode=stage.mode,
-                    fallback_modes=["walking", "riding", "transit", "driving"],
+                    fallback_modes=(
+                        ["driving"]
+                        if stage.mode == "driving"
+                        else ["transit", "walking"]
+                        if stage.mode == "transit"
+                        else [stage.mode]
+                    ),
                 )
                 if not result.get("success"):
                     raise AppError(
@@ -760,7 +766,7 @@ def _activity_from_candidate(
         opening_hours=candidate.get("opening_hours"),
         **checks,
         source_records=candidate.get("source_records", []),
-        user_note="由地图选点或 Agent 备选方案加入",
+        user_note="由地图选点或智能体备选方案加入",
         description=candidate.get("description"),
         image_url=candidate.get("image_url"),
         detail_url=candidate.get("detail_url"),

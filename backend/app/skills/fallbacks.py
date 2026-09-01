@@ -9,6 +9,7 @@ unavailable result instead of inventing a timetable.
 
 from __future__ import annotations
 
+import json
 import re
 import time
 from datetime import date, datetime, time as clock, timedelta
@@ -73,6 +74,10 @@ def _parse_clock(value: Any, day: date) -> datetime | None:
         except (OverflowError, OSError, ValueError):
             pass
     normalized = text.replace("T", " ").replace("/", "-")
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        pass
     for fmt in (
         "%Y-%m-%d %H:%M:%S",
         "%Y-%m-%d %H:%M",
@@ -273,6 +278,222 @@ class FreeApiTrainAdapter(SkillAdapter):
         return {"status": "ready", "configured": bool(self.endpoint)}
 
 
+def _mcp_json(response: httpx.Response) -> dict[str, Any]:
+    """Decode either JSON or Streamable-HTTP SSE MCP responses."""
+    try:
+        body = response.json()
+        return body if isinstance(body, dict) else {}
+    except ValueError:
+        pass
+    for line in reversed(response.text.splitlines()):
+        if not line.startswith("data:"):
+            continue
+        try:
+            body = json.loads(line.removeprefix("data:").strip())
+        except ValueError:
+            continue
+        if isinstance(body, dict):
+            return body
+    return {}
+
+
+def _mcp_tool_payload(body: dict[str, Any]) -> dict[str, Any]:
+    result = body.get("result") if isinstance(body.get("result"), dict) else {}
+    if result.get("isError"):
+        return {}
+    content = result.get("content") if isinstance(result.get("content"), list) else []
+    for block in content:
+        if not isinstance(block, dict) or block.get("type") != "text":
+            continue
+        raw = block.get("text")
+        if isinstance(raw, dict):
+            return raw
+        try:
+            parsed = json.loads(_text(raw))
+        except ValueError:
+            continue
+        if isinstance(parsed, dict):
+            return parsed
+    return {}
+
+
+class Mcp12306TrainAdapter(SkillAdapter):
+    """Optional official-rail-data fallback exposed by mcp-server-12306.
+
+    A short-lived MCP session is used for each cached query.  This keeps the
+    adapter compatible with both the older JSON response and the current
+    Streamable-HTTP/SSE response without holding session state in web workers.
+    """
+
+    name = "mcp12306.train"
+    version = "1.0.0"
+    category = "travel_search_fallback"
+    timeout_seconds = 12
+    max_retries = 1
+    cache_ttl_seconds = 5 * 60
+
+    def __init__(self, endpoint: str):
+        endpoint = endpoint.strip().rstrip("/")
+        self.endpoint = endpoint if endpoint.endswith("/mcp") or not endpoint else f"{endpoint}/mcp"
+
+    async def validate_input(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return TrainFallbackInput.model_validate(payload).model_dump(mode="json")
+
+    async def execute(self, payload: dict[str, Any], _: SkillContext) -> SkillResult:
+        request = TrainFallbackInput.model_validate(payload)
+        if not self.endpoint:
+            return SkillResult(
+                success=False,
+                provider="铁路时刻备用服务",
+                warnings=["未配置铁路实时备用服务地址"],
+                error_code="SKILL_NOT_CONFIGURED",
+            )
+
+        started = time.perf_counter()
+        session_id: str | None = None
+        common_headers = {
+            "Accept": "application/json, text/event-stream",
+            "Content-Type": "application/json",
+        }
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+                initialize = await client.post(
+                    self.endpoint,
+                    headers=common_headers,
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "initialize",
+                        "params": {
+                            "protocolVersion": "2025-11-25",
+                            "capabilities": {},
+                            "clientInfo": {"name": "RoadMan", "version": "1.0"},
+                        },
+                    },
+                )
+                initialize.raise_for_status()
+                init_body = _mcp_json(initialize)
+                if not isinstance(init_body.get("result"), dict):
+                    raise ValueError("invalid MCP initialize response")
+                session_id = initialize.headers.get("mcp-session-id")
+                session_headers = dict(common_headers)
+                if session_id:
+                    session_headers["Mcp-Session-Id"] = session_id
+                    # The notification is required by handshake-era servers;
+                    # modern stateless servers simply acknowledge it.
+                    await client.post(
+                        self.endpoint,
+                        headers=session_headers,
+                        json={"jsonrpc": "2.0", "method": "notifications/initialized"},
+                    )
+                response = await client.post(
+                    self.endpoint,
+                    headers=session_headers,
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": 2,
+                        "method": "tools/call",
+                        "params": {
+                            "name": "query-tickets",
+                            "arguments": {
+                                "from_station": request.origin,
+                                "to_station": request.destination,
+                                "train_date": request.dep_date.isoformat(),
+                            },
+                        },
+                    },
+                )
+                response.raise_for_status()
+                tool_payload = _mcp_tool_payload(_mcp_json(response))
+                if session_id:
+                    try:
+                        await client.delete(
+                            self.endpoint,
+                            headers={"Mcp-Session-Id": session_id},
+                        )
+                    except httpx.HTTPError:
+                        pass
+        except (httpx.HTTPError, ValueError) as exc:
+            return SkillResult(
+                success=False,
+                provider="铁路时刻备用服务",
+                warnings=[f"铁路实时备用查询暂时不可用：{type(exc).__name__}"],
+                error_code="MCP_12306_UNAVAILABLE",
+                latency_ms=int((time.perf_counter() - started) * 1000),
+            )
+
+        rows = tool_payload.get("trains") if isinstance(tool_payload, dict) else None
+        if not tool_payload.get("success") or not isinstance(rows, list):
+            rows = []
+        items: list[dict[str, Any]] = []
+        for raw in rows:
+            if not isinstance(raw, dict):
+                continue
+            number = _text(_first(raw, "train_no", "train_code", "trainNumber"))
+            start_station = _first(raw, "from_station", "start_station", "departure_station")
+            end_station = _first(raw, "to_station", "end_station", "arrival_station")
+            dep = _parse_clock(_first(raw, "start_time", "departure_time"), request.dep_date)
+            arr = _parse_clock(_first(raw, "arrive_time", "arrival_time"), request.dep_date)
+            if not number or not dep or not arr or not start_station or not end_station:
+                continue
+            if arr <= dep:
+                arr += timedelta(days=1)
+            seats = raw.get("seats") if isinstance(raw.get("seats"), dict) else {}
+            available_seat = next(
+                (
+                    name
+                    for name, availability in seats.items()
+                    if _text(availability) not in {"", "0", "无", "--", "候补"}
+                ),
+                None,
+            )
+            items.append(
+                {
+                    "id": number,
+                    "departure_at": dep.isoformat(),
+                    "arrival_at": arr.isoformat(),
+                    "duration_minutes": _duration_minutes(None, dep, arr),
+                    "train_number": number,
+                    "service_number": number,
+                    "transport_name": "列车",
+                    "departure_station": _text(start_station),
+                    "arrival_station": _text(end_station),
+                    "service_status": "confirmed",
+                    "seat_class": available_seat,
+                    "seat_availability": seats,
+                }
+            )
+        if not items:
+            return SkillResult(
+                success=False,
+                provider="铁路时刻备用服务",
+                warnings=["铁路实时备用服务没有返回带真实车次号和时刻的班次"],
+                error_code="MCP_12306_NO_RESULTS",
+                latency_ms=int((time.perf_counter() - started) * 1000),
+            )
+        return SkillResult(
+            success=True,
+            provider="铁路时刻备用服务",
+            data={"items": items, "count": len(items), "fallback": True},
+            sources=[
+                SourceRecord(
+                    provider="铁路时刻备用服务",
+                    title="铁路实时余票与车次查询",
+                    url="https://github.com/drfccv/mcp-server-12306",
+                    source_type="open_data",
+                    confidence="high",
+                )
+            ],
+            latency_ms=int((time.perf_counter() - started) * 1000),
+        )
+
+    async def health_check(self) -> dict[str, Any]:
+        return {
+            "status": "ready" if self.endpoint else "degraded",
+            "configured": bool(self.endpoint),
+        }
+
+
 # A small metadata table is transport data, not intent recognition.  Unknown
 # cities deliberately return an unavailable result so the primary provider can
 # remain the source of truth instead of receiving a guessed airport code.
@@ -421,6 +642,127 @@ class SixApiFlightAdapter(SkillAdapter):
                     provider="航班备选服务",
                     title="公开航班查询",
                     url="https://www.6api.net/api/flight/",
+                    source_type="open_data",
+                    confidence="medium",
+                )
+            ],
+            latency_ms=int((time.perf_counter() - started) * 1000),
+        )
+
+    async def health_check(self) -> dict[str, Any]:
+        return {"status": "ready" if self.api_key else "degraded", "configured": bool(self.api_key)}
+
+
+class AviationstackFlightAdapter(SkillAdapter):
+    """Second independent flight source with strict, real-service output."""
+
+    name = "aviationstack.flight"
+    version = "1.0.0"
+    category = "travel_search_fallback"
+    timeout_seconds = 12
+    max_retries = 1
+    cache_ttl_seconds = 10 * 60
+
+    def __init__(self, endpoint: str, api_key: str):
+        self.endpoint = endpoint.rstrip("/")
+        self.api_key = api_key
+
+    async def validate_input(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return FlightFallbackInput.model_validate(payload).model_dump(mode="json", exclude_none=True)
+
+    async def execute(self, payload: dict[str, Any], _: SkillContext) -> SkillResult:
+        request = FlightFallbackInput.model_validate(payload)
+        if not self.api_key:
+            return SkillResult(
+                success=False,
+                provider="公开航班备选服务",
+                warnings=["未配置第二航班数据源密钥"],
+                error_code="SKILL_NOT_CONFIGURED",
+            )
+        dep_code = request.dep_code or _airport_code(request.origin)
+        arr_code = request.arr_code or _airport_code(request.destination)
+        if not dep_code or not arr_code:
+            return SkillResult(
+                success=False,
+                provider="公开航班备选服务",
+                warnings=["第二航班数据源无法确定机场代码"],
+                error_code="AVIATIONSTACK_AIRPORT_CODE_UNAVAILABLE",
+            )
+        started = time.perf_counter()
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+                response = await client.get(
+                    self.endpoint,
+                    params={
+                        "access_key": self.api_key,
+                        "flight_date": request.dep_date.isoformat(),
+                        "dep_iata": dep_code,
+                        "arr_iata": arr_code,
+                        "limit": 100,
+                    },
+                )
+                response.raise_for_status()
+                body = response.json()
+        except (httpx.HTTPError, ValueError) as exc:
+            return SkillResult(
+                success=False,
+                provider="公开航班备选服务",
+                warnings=[f"第二航班数据源暂时不可用：{type(exc).__name__}"],
+                error_code="AVIATIONSTACK_FLIGHT_UNAVAILABLE",
+                latency_ms=int((time.perf_counter() - started) * 1000),
+            )
+        rows = body.get("data") if isinstance(body, dict) else None
+        if not isinstance(rows, list):
+            rows = []
+        items: list[dict[str, Any]] = []
+        for raw in rows:
+            if not isinstance(raw, dict):
+                continue
+            departure = raw.get("departure") if isinstance(raw.get("departure"), dict) else {}
+            arrival = raw.get("arrival") if isinstance(raw.get("arrival"), dict) else {}
+            flight = raw.get("flight") if isinstance(raw.get("flight"), dict) else {}
+            airline = raw.get("airline") if isinstance(raw.get("airline"), dict) else {}
+            dep = _parse_clock(_first(departure, "scheduled", "estimated", "actual"), request.dep_date)
+            arr = _parse_clock(_first(arrival, "scheduled", "estimated", "actual"), request.dep_date)
+            number = _text(_first(flight, "iata", "icao", "number"))
+            if not dep or not arr or not number:
+                continue
+            if arr <= dep:
+                arr += timedelta(days=1)
+            items.append(
+                {
+                    "id": number,
+                    "departure_at": dep.isoformat(),
+                    "arrival_at": arr.isoformat(),
+                    "duration_minutes": _duration_minutes(None, dep, arr),
+                    "flight_number": number,
+                    "service_number": number,
+                    "carrier": _text(_first(airline, "name", "iata", "icao")) or None,
+                    "operator": _text(_first(airline, "name", "iata", "icao")) or None,
+                    "departure_city": request.origin,
+                    "arrival_city": request.destination,
+                    "departure_airport": _text(_first(departure, "airport", "iata", "icao")) or dep_code,
+                    "arrival_airport": _text(_first(arrival, "airport", "iata", "icao")) or arr_code,
+                    "service_status": "confirmed",
+                }
+            )
+        if not items:
+            return SkillResult(
+                success=False,
+                provider="公开航班备选服务",
+                warnings=["第二航班数据源没有返回带航班号的有效班次"],
+                error_code="AVIATIONSTACK_FLIGHT_NO_RESULTS",
+                latency_ms=int((time.perf_counter() - started) * 1000),
+            )
+        return SkillResult(
+            success=True,
+            provider="公开航班备选服务",
+            data={"items": items, "count": len(items), "fallback": True},
+            sources=[
+                SourceRecord(
+                    provider="公开航班备选服务",
+                    title="实时航班时刻查询",
+                    url="https://aviationstack.com/",
                     source_type="open_data",
                     confidence="medium",
                 )

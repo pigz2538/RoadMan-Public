@@ -6,6 +6,8 @@ from statistics import median
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from .poi_enrichment import _sanitize_candidate_copy
+
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 
 _INCOMFORTABLE_LODGING_RE = re.compile(
@@ -105,10 +107,246 @@ def _attraction_sort_key(candidate: dict[str, Any]) -> tuple[float, float, float
 
 
 def _suggested_duration(candidate: dict[str, Any], default: int) -> int:
+    """Return a comfortable visit window for one attraction.
+
+    Research agents can provide a measured duration. In its absence, a
+    recognized landmark receives a 3-hour baseline so the scheduler does not
+    turn a full-day scenic visit into a string of one-hour photo stops. A
+    compact/quick venue may opt out explicitly via ``visit_scale`` or
+    ``compact_visit``; this keeps the rule semantic rather than a place-name
+    table.
+    """
+    # A user-named/confirmed place is the traveller's primary reason for the
+    # trip.  Even if a provider labels it ``compact``, never compress it into
+    # a photo stop: the route builder must reserve a proper daytime block.
+    user_priority = bool(candidate.get("user_required") or candidate.get("user_confirmed"))
+    scale = str(
+        candidate.get("visit_scale")
+        or candidate.get("scale")
+        or candidate.get("visit_size")
+        or ""
+    ).strip().casefold()
+    compact = (not user_priority) and (
+        bool(candidate.get("compact_visit")) or scale in {
+        "compact",
+        "small",
+        "quick",
+        "short",
+        }
+    )
     try:
-        return max(45, min(240, int(candidate.get("suggested_minutes") or default)))
+        raw = int(candidate.get("suggested_minutes") or default)
     except (TypeError, ValueError):
-        return default
+        raw = int(default or 180)
+    if compact:
+        return max(45, min(150, raw))
+    # Keep a research-provided four-hour visit, but lift underspecified or
+    # suspiciously short defaults to a comfortable three-hour block.
+    return max(180, min(240, raw))
+
+
+def _attraction_is_schedulable(candidate: dict[str, Any] | None) -> bool:
+    """Return whether a reviewed POI may become an executable stop.
+
+    Suitability decisions deliberately do not delete provider results: the
+    UI can still show them as alternatives and explain why they were rejected.
+    Only an explicit user requirement/confirmation can override a negative
+    suitability decision for the actual itinerary.
+    """
+    if not candidate:
+        return False
+    if candidate.get("seasonal_excluded") and not (
+        candidate.get("user_required") or candidate.get("user_confirmed")
+    ):
+        return False
+    if candidate.get("agent_suitability") is False and not (
+        candidate.get("user_required") or candidate.get("user_confirmed")
+    ):
+        return False
+    return True
+
+
+def _comfortable_visit_minimum(candidate: dict[str, Any] | None) -> int:
+    """Return the minimum useful scenic visit block for a candidate."""
+    item = candidate or {}
+    if item.get("user_required") or item.get("user_confirmed"):
+        return 180
+    scale = str(
+        item.get("visit_scale")
+        or item.get("scale")
+        or item.get("visit_size")
+        or ""
+    ).strip().casefold()
+    if item.get("compact_visit") or scale in {"compact", "small", "quick", "short"}:
+        return 45
+    return 180
+
+
+def _stage_is_non_scenic(stage: dict[str, Any] | None) -> bool:
+    """Return whether a stage is clearly a transfer/check-in endpoint."""
+    if not isinstance(stage, dict):
+        return True
+    title = str(stage.get("title") or "")
+    return any(
+        token in title
+        for token in (
+            "住宿",
+            "酒店",
+            "入住",
+            "返回",
+            "返程",
+            "城市出发",
+            "机场",
+            "火车",
+            "高铁",
+            "车站",
+        )
+    )
+
+
+def _stage_can_host_attraction(stage: dict[str, Any] | None) -> bool:
+    """Return whether a movement stage is an attraction-bound leg.
+
+    Destination names are often embedded in hotel/store names (for example
+    ``宽窄巷子店``).  Containment matching against every stage therefore used
+    to attach a scenic activity to a hotel check-in leg.  Only legs explicitly
+    describing an attraction visit may use fuzzy source matching; exact
+    required-place matches are still handled by the requirement pass.
+    """
+    if not isinstance(stage, dict):
+        return False
+    if _stage_is_non_scenic(stage):
+        return False
+    title = str(stage.get("title") or "")
+    return any(token in title for token in ("景点", "景区", "游览", "参观", "前往"))
+
+
+def _shift_stage_chain(
+    stages: list[dict[str, Any]],
+    start_index: int,
+    delta: timedelta,
+) -> None:
+    """Move a local stage and every following stage by one continuous delta.
+
+    Route geometry and durations stay unchanged; only the calendar slot moves.
+    Keeping the suffix together prevents the return-to-hotel leg from being
+    pushed through a later airport/rail departure and creating a fake overlap.
+    """
+    if delta <= timedelta(0):
+        return
+    for stage in stages[start_index:]:
+        try:
+            start = datetime.fromisoformat(stage["planned_start"]) + delta
+            end = datetime.fromisoformat(stage["planned_end"]) + delta
+        except (KeyError, TypeError, ValueError):
+            continue
+        stage["planned_start"] = start.isoformat()
+        stage["planned_end"] = end.isoformat()
+
+
+def _ensure_anchor_visit_windows(
+    stages: list[dict[str, Any]],
+    *,
+    day_date: date,
+    return_cutoff: datetime | None,
+    source_for_stage: Any,
+) -> None:
+    """Reserve a genuine scenic window before the return-to-base connector.
+
+    A route builder can put the outbound and return connectors only a little
+    over an hour apart.  That leaves a misleading one-hour ``景点停留`` card
+    even though the request is explicitly centred on a named scenic anchor.
+    When there is room in the same day, move the return suffix as a unit so
+    the scheduler can place a three-hour visit.  If a terminal deadline leaves
+    no room, keep the original timing and let the verifier explain the limit.
+    """
+    for index, stage in enumerate(stages):
+        if index == 0 or "返回住宿或目的地核心区" not in str(stage.get("title") or ""):
+            continue
+        previous = stages[index - 1]
+        candidate = source_for_stage(previous)
+        if not candidate or not _attraction_is_schedulable(candidate):
+            continue
+        try:
+            previous_end = datetime.fromisoformat(previous["planned_end"])
+            return_start = datetime.fromisoformat(stage["planned_start"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if previous_end.date() != day_date or return_start.date() != day_date:
+            continue
+        # The scheduler keeps a 15-minute handoff before the next movement
+        # stage. Reserve that handoff in addition to the actual scenic visit
+        # so a nominal three-hour window is not silently truncated to 165m.
+        required_gap = timedelta(
+            minutes=_comfortable_visit_minimum(candidate) + 15
+        )
+        missing = required_gap - (return_start - previous_end)
+        if missing <= timedelta(0):
+            continue
+        latest_allowed = return_cutoff or datetime.combine(
+            day_date,
+            time(21, 30),
+            tzinfo=return_start.tzinfo,
+        )
+        try:
+            suffix_end = max(
+                datetime.fromisoformat(item["planned_end"])
+                for item in stages[index:]
+            )
+        except (KeyError, TypeError, ValueError):
+            suffix_end = return_start
+        available = latest_allowed - suffix_end
+        if available <= timedelta(0):
+            continue
+        _shift_stage_chain(stages, index, min(missing, available))
+
+
+def _ensure_scenic_visit_windows(
+    stages: list[dict[str, Any]],
+    *,
+    day_date: date,
+    return_cutoff: datetime | None,
+    source_for_stage: Any,
+) -> None:
+    """Reserve a comfortable dwell for every researched scenic stage.
+
+    Movement builders normally leave only a small hand-off gap between two
+    legs.  If that gap is used verbatim, a major attraction becomes a
+    misleading 45--90 minute photo stop.  Shift the following suffix as one
+    unit so each eligible stop gets a real three-hour window (or its explicit
+    compact-venue duration), while respecting the day boundary and a booked
+    intercity departure.
+    """
+    for index, stage in enumerate(stages[:-1]):
+        candidate = source_for_stage(stage)
+        if not candidate or not _attraction_is_schedulable(candidate):
+            continue
+        try:
+            visit_end = datetime.fromisoformat(stage["planned_end"])
+            next_start = datetime.fromisoformat(stages[index + 1]["planned_start"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if visit_end.date() != day_date or next_start.date() != day_date:
+            continue
+        required_gap = timedelta(minutes=_comfortable_visit_minimum(candidate) + 15)
+        missing = required_gap - (next_start - visit_end)
+        if missing <= timedelta(0):
+            continue
+        latest_allowed = return_cutoff or datetime.combine(
+            day_date,
+            time(21, 30),
+            tzinfo=next_start.tzinfo,
+        )
+        try:
+            suffix_end = max(
+                datetime.fromisoformat(item["planned_end"])
+                for item in stages[index + 1 :]
+            )
+        except (KeyError, TypeError, ValueError):
+            suffix_end = next_start
+        available = latest_allowed - suffix_end
+        if available > timedelta(0):
+            _shift_stage_chain(stages, index + 1, min(missing, available))
 
 
 def activity_checks(
@@ -161,7 +399,7 @@ def activity_checks(
         risk_note = risk_note or str(
             item.get("suitability_reason")
             or item.get("seasonal_warning")
-            or "Agent 复核认为当前日期或条件不适合"
+            or "智能体复核认为当前日期或条件不适合"
         )
     if item.get("suitability_confidence") in {"low", None} and item.get("agent_suitability") is not True:
         risk_tags.append("适配性待确认")
@@ -358,6 +596,7 @@ def schedule_tourism_activities(
     candidates: dict[str, list[dict[str, Any]]],
     confirmed_additions: list[dict[str, Any]] | None = None,
     destination: dict[str, Any] | None = None,
+    trip_request: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Attach executable attraction and overnight hotel activities to day plans."""
     # A confirmed edit is a user decision, not merely another provider hit.
@@ -444,7 +683,7 @@ def schedule_tourism_activities(
         item["place"]["name"]: item
         for item in candidates.get("attractions", [])
         if item.get("place", {}).get("name")
-        and (not item.get("seasonal_excluded") or item.get("user_required"))
+        and _attraction_is_schedulable(item)
     }
     attraction_source_keys = {
         _attraction_name_key(name): item
@@ -456,8 +695,17 @@ def schedule_tourism_activities(
         """Resolve a route destination to its researched attraction record."""
         destination_name = (stage.get("destination") or {}).get("name")
         exact = attraction_sources.get(destination_name)
-        if exact:
+        # Exact destination equality is safe on a neutral/anchor transfer
+        # (e.g. a requested scenic lake reached via ``目的地短途接驳``), while
+        # hotel/airport/return stages remain explicitly excluded.
+        if exact and (not _stage_is_non_scenic(stage) or exact.get("user_required")):
             return exact
+        # Fuzzy containment is useful for provider suffixes such as
+        # ``景区(东门)`` but unsafe for hotel/station names.  A hotel called
+        # ``宽窄巷子店`` must not turn its check-in connector into a scenic
+        # visit simply because it contains the attraction name.
+        if not _stage_can_host_attraction(stage):
+            return None
         destination_key = _attraction_name_key(destination_name)
         if not destination_key:
             return None
@@ -489,6 +737,13 @@ def schedule_tourism_activities(
         if item.get("type") == "meal" and item.get("place", {}).get("name")
     }
     selected_hotels: list[tuple[dict[str, Any], dict[str, Any] | None]] = []
+    local_anchor_request = bool(
+        trip_request
+        and (
+            str(trip_request.get("destination_scope") or "").strip().lower() == "poi"
+            or trip_request.get("stay_only_at_destination")
+        )
+    )
 
     for day_index, day in enumerate(day_plans):
         # Some agent-produced day dictionaries omit the optional model id.
@@ -504,6 +759,11 @@ def schedule_tourism_activities(
         day_date = datetime.fromisoformat(f"{day['date']}T00:00:00+08:00").date()
         activities: list[dict[str, Any]] = []
         for activity in list(day.get("activities", [])):
+            # Replans start from the previous persisted snapshot. Clean the
+            # activity itself before merging a refreshed candidate so an old
+            # provider slogan cannot survive when the new search times out.
+            if isinstance(activity, dict):
+                _sanitize_candidate_copy(activity)
             name = activity.get("place", {}).get("name")
             if activity.get("type") == "hotel" and not _comfortable_hotel(
                 {"place": activity.get("place") or {}}
@@ -513,18 +773,63 @@ def schedule_tourism_activities(
                 # a valid replacement.
                 continue
             if activity.get("type") == "attraction" and name:
+                source_candidate = attraction_sources.get(name)
+                if source_candidate is None:
+                    source_key = _attraction_name_key(name)
+                    source_candidate = attraction_source_keys.get(source_key)
+                if source_candidate is not None and not _attraction_is_schedulable(source_candidate):
+                    # A stale model activity may have been created before the
+                    # suitability pass. Keep the provider record in backups,
+                    # but do not leave the rejected venue in the itinerary.
+                    continue
                 if name in seasonal_excluded_names:
                     # A re-run of the review pass can encounter a stale
                     # activity created before seasonal filtering. Remove it
                     # from the formal plan and leave the candidate visible as
                     # a backup recommendation.
                     continue
+                if source_candidate is not None:
+                    try:
+                        existing_duration = int(
+                            (
+                                datetime.fromisoformat(activity["planned_end"])
+                                - datetime.fromisoformat(activity["planned_start"])
+                            ).total_seconds()
+                            // 60
+                        )
+                    except (KeyError, TypeError, ValueError):
+                        existing_duration = 0
+                    minimum_duration = _comfortable_visit_minimum(source_candidate)
+                    if existing_duration < minimum_duration:
+                        # Never carry a stale 45--90 minute scenic block
+                        # through a replan. The route-aware pass will reserve
+                        # a full window; compact venues keep their explicit
+                        # source-backed minimum.
+                        continue
                 if name in used_attraction_names:
                     # Agent candidates can repeat the destination attraction
                     # on every day. Keep the first occurrence and let the
                     # ranked pool fill later days with different places.
                     continue
                 used_attraction_names.add(name)
+                if local_anchor_request and not activity.get("required"):
+                    try:
+                        existing_duration = int(
+                            (
+                                datetime.fromisoformat(activity["planned_end"])
+                                - datetime.fromisoformat(activity["planned_start"])
+                            ).total_seconds()
+                            // 60
+                        )
+                    except (KeyError, TypeError, ValueError):
+                        existing_duration = 0
+                    if existing_duration < _comfortable_visit_minimum(source_candidate):
+                        # A stale model activity can survive between replans
+                        # with a compressed one-hour window. Scenic-anchor
+                        # trips require a useful block; let the route-aware
+                        # scheduler place a fresh stop instead.
+                        used_attraction_names.discard(name)
+                        continue
             if activity.get("type") in {"attraction", "meal", "hotel"}:
                 # Agent-produced activities can arrive without the structured
                 # check fields.  Normalize them before any scheduling pass so
@@ -552,9 +857,17 @@ def schedule_tourism_activities(
             final_stage = stages[-1]
             final_mode = final_stage.get("mode")
             final_title = str(final_stage.get("title") or "")
+            # A local ``返回住宿或目的地核心区`` connector is still part of
+            # the sightseeing day.  Treating every final driving stage as an
+            # intercity return incorrectly made its departure the hard
+            # cutoff, leaving no room for the named scenic visit.  Only
+            # scheduled public/air/sea transport or an explicitly labelled
+            # return-to-origin driving leg closes the day.
             is_return_stage = (
-                final_mode in {"train", "flight", "ferry", "driving"}
+                final_mode in {"train", "flight", "ferry"}
                 or "返程" in final_title
+                or "回程" in final_title
+                or "返回出发" in final_title
                 or "return" in final_title.lower()
             )
             if not is_return_stage:
@@ -564,6 +877,23 @@ def schedule_tourism_activities(
                     return_cutoff = datetime.fromisoformat(final_stage["planned_start"])
             except (KeyError, TypeError, ValueError):
                 return_cutoff = None
+        # Reserve scenic dwell time before meals are inserted.  Named-anchor
+        # trips use the stricter return-chain helper as well; the generic pass
+        # keeps ordinary city itineraries from collapsing every attraction to
+        # a one-hour transfer gap.
+        _ensure_scenic_visit_windows(
+            stages,
+            day_date=day_date,
+            return_cutoff=return_cutoff,
+            source_for_stage=source_for_stage,
+        )
+        if local_anchor_request:
+            _ensure_anchor_visit_windows(
+                stages,
+                day_date=day_date,
+                return_cutoff=return_cutoff,
+                source_for_stage=source_for_stage,
+            )
         existing_hotel = next(
             (item for item in activities if item.get("type") == "hotel"),
             None,
@@ -615,7 +945,7 @@ def schedule_tourism_activities(
             slot_end = (
                 next_start - timedelta(minutes=15)
                 if next_start
-                else start_at + timedelta(minutes=120)
+                else start_at + timedelta(minutes=195)
             )
             slot_end = min(slot_end, daylight_end)
             if slot_end <= start_at:
@@ -624,13 +954,36 @@ def schedule_tourism_activities(
                 start_at,
                 slot_end,
                 preferred=start_at,
-                duration_minutes=_suggested_duration(candidate, 90),
-                occupied=_occupied_ranges(activities),
+                duration_minutes=max(
+                    _suggested_duration(candidate, 90),
+                    _comfortable_visit_minimum(candidate),
+                ),
+                # Meals are re-slotted after scenic windows are reserved. Do
+                # not let a stale breakfast/lunch snapshot shrink a required
+                # attraction to a one-hour gap during a replan.
+                occupied=_occupied_ranges(
+                    [item for item in activities if item.get("type") != "meal"]
+                ),
                 minimum_minutes=45,
             )
             if not slot:
                 continue
             activity_start, duration = slot
+            if (
+                local_anchor_request
+                and
+                duration < _comfortable_visit_minimum(candidate)
+                and not candidate.get("user_required")
+                and not candidate.get("user_confirmed")
+            ):
+                # The route may arrive at a candidate just before another
+                # transfer. Do not display an implausible 40–90 minute scenic
+                # stop merely because a gap exists; keep it in alternatives.
+                continue
+            if duration < _comfortable_visit_minimum(candidate):
+                # Ordinary scenic stops should not be rendered as tiny photo
+                # breaks merely because another activity consumed the gap.
+                continue
             activities.append(
                 _activity(
                     day=day,
@@ -647,7 +1000,7 @@ def schedule_tourism_activities(
                     user_note=(
                         candidate.get("agent_reason")
                         or " · ".join(candidate.get("recommendation_reasons", []))
-                        or "由 POI Agent 综合来源、距离与偏好选入"
+                        or "由候选排序智能体综合来源、距离与偏好选入"
                     ),
                     description=candidate.get("description"),
                     image_url=candidate.get("image_url"),
@@ -697,6 +1050,7 @@ def schedule_tourism_activities(
                     if _attraction_name_key(
                         (stage.get("destination") or {}).get("name")
                     )
+                    and _stage_can_host_attraction(stage)
                     and (
                         _attraction_name_key(
                             (stage.get("destination") or {}).get("name")
@@ -734,7 +1088,10 @@ def schedule_tourism_activities(
                     start_at,
                     window_end,
                     preferred=preferred,
-                    duration_minutes=_suggested_duration(candidate, 90),
+                    duration_minutes=max(
+                        _suggested_duration(candidate, 90),
+                        _comfortable_visit_minimum(candidate),
+                    ),
                     occupied=occupied_required,
                     minimum_minutes=30,
                 )
@@ -791,6 +1148,39 @@ def schedule_tourism_activities(
         scheduled_attractions = [
             item for item in activities if item.get("type") == "attraction"
         ]
+        if local_anchor_request and len(scheduled_attractions) > 2:
+            # A short scenic-anchor trip is intentionally spacious. Keep the
+            # strongest two source-backed stops per day and leave the rest as
+            # visible alternatives instead of filling every gap with remote
+            # or low-value POIs.
+            ranked_existing = sorted(
+                scheduled_attractions,
+                key=lambda activity: (
+                    0 if activity.get("required") else 1,
+                    -_attraction_priority(attraction_sources.get((activity.get("place") or {}).get("name"), {})),
+                    str((activity.get("place") or {}).get("name") or ""),
+                ),
+            )
+            keep_ids = {id(item) for item in ranked_existing[:2]}
+            activities = [
+                item
+                for item in activities
+                if item.get("type") != "attraction" or id(item) in keep_ids
+            ]
+            used_attraction_names = {
+                item.get("place", {}).get("name")
+                for owner in day_plans[:day_index]
+                for item in owner.get("activities", [])
+                if item.get("type") == "attraction" and item.get("place", {}).get("name")
+            }
+            used_attraction_names.update(
+                item.get("place", {}).get("name")
+                for item in activities
+                if item.get("type") == "attraction" and item.get("place", {}).get("name")
+            )
+            scheduled_attractions = [
+                item for item in activities if item.get("type") == "attraction"
+            ]
         # A multi-day stay should not collapse into one transfer plus a
         # single attraction. Keep enough breathing room for a comfortable
         # morning/afternoon/evening plan while never exceeding four curated
@@ -810,10 +1200,22 @@ def schedule_tourism_activities(
             if remaining_priority
             else 0
         )
-        target_attractions = min(
-            4,
-            max(2, len(stages) + 1, priority_target),
+        required_count = sum(
+            1
+            for item in candidates.get("attractions", [])
+            if item.get("user_required")
+            and item.get("coverage_day_index") in {None, day_index + 1}
         )
+        # A comfortable city day is intentionally centered on at most two
+        # substantial attractions.  Explicit requirements are exempt from the
+        # cap so they are never silently dropped; optional highlights remain
+        # visible as ranked alternatives for later days.
+        target_attractions = max(
+            required_count,
+            min(3, max(2, len(stages) + 1, priority_target)),
+        )
+        if local_anchor_request:
+            target_attractions = min(2, target_attractions)
         travel_only_day = any(
             "跨天" in str(stage.get("title") or "")
             and stage.get("mode") == "driving"
@@ -846,7 +1248,12 @@ def schedule_tourism_activities(
                 )
                 for stage in stages
             ]
-            occupied = [*stage_ranges, *_occupied_ranges(activities)]
+            occupied = [
+                *stage_ranges,
+                *_occupied_ranges(
+                    [item for item in activities if item.get("type") != "meal"]
+                ),
+            ]
             ranked_candidates = sorted(
                 candidates.get("attractions", []),
                 key=lambda item: (
@@ -863,7 +1270,7 @@ def schedule_tourism_activities(
                 name = place.get("name")
                 if (
                     not name
-                    or (candidate.get("seasonal_excluded") and not candidate.get("user_required"))
+                    or not _attraction_is_schedulable(candidate)
                     or name in existing_names
                     or name in used_attraction_names
                 ):
@@ -888,13 +1295,30 @@ def schedule_tourism_activities(
                         time(15, 0),
                         tzinfo=SHANGHAI,
                     ),
-                    duration_minutes=_suggested_duration(candidate, 75),
+                    duration_minutes=max(
+                        _suggested_duration(candidate, 75),
+                        _comfortable_visit_minimum(candidate),
+                    ),
                     occupied=occupied,
                     minimum_minutes=45,
                 )
                 if not slot:
                     continue
                 activity_start, duration = slot
+                if (
+                    local_anchor_request
+                    and
+                    duration < _comfortable_visit_minimum(candidate)
+                    and not candidate.get("user_required")
+                    and not candidate.get("user_confirmed")
+                ):
+                    # Do not manufacture a one-hour “visit” by truncating a
+                    # three-hour scenic block between meals or transfers. The
+                    # stop remains a ranked backup and the free window stays
+                    # visible to the traveller.
+                    continue
+                if duration < _comfortable_visit_minimum(candidate):
+                    continue
                 activities.append(
                     _activity(
                         day=day,
@@ -911,7 +1335,7 @@ def schedule_tourism_activities(
                         user_note=(
                             candidate.get("agent_reason")
                             or " · ".join(candidate.get("recommendation_reasons", []))
-                            or "由 POI Agent 综合来源、距离与偏好选入"
+                            or "由候选排序智能体综合来源、距离与偏好选入"
                         ),
                         description=candidate.get("description"),
                         image_url=candidate.get("image_url"),
@@ -988,7 +1412,7 @@ def schedule_tourism_activities(
                     ticket_or_price=hotel.get("ticket_or_price"),
                     user_note=(
                         " · ".join(hotel.get("recommendation_reasons", []))
-                        or "由住宿 Agent 综合位置、时间和来源选入"
+                        or "由住宿智能体综合位置、时间和来源选入"
                     ),
                     image_url=hotel.get("image_url"),
                     detail_url=hotel.get("detail_url"),
@@ -1485,6 +1909,7 @@ def review_daily_schedule(
     candidates: dict[str, list[dict[str, Any]]],
     confirmed_additions: list[dict[str, Any]] | None = None,
     destination: dict[str, Any] | None = None,
+    trip_request: dict[str, Any] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Run a second pass over every day and phase after the first schedule.
 
@@ -1500,6 +1925,7 @@ def review_daily_schedule(
         candidates,
         confirmed_additions,
         destination,
+        trip_request,
     )
     notes: list[dict[str, Any]] = []
     for day in reviewed:

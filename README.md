@@ -78,7 +78,7 @@ RoadMan 的做法是：**把「内容建议」放进可执行工作流**。一�
 从「自然语言需求」到「可执行、可修改、可验证的行程」，再落到 Markdown / HTML / PDF / PPTX / 长图多格式交付：
 
 <!--
-  ██ 预留位置：Agent 规划过程动态 GIF ██
+  ██ 预留位置：智能体规划过程动态 GIF ██
   1) 录制需求输入 → 预检确认 → 后台渐进规划（地图逐段出现、阶段卡片逐项生成）
      → 复核修复提示 → 完成后的语义编辑预览与导出过程；
   2) 将 gif 文件保存为 docs/screenshots/agent-planning.gif；
@@ -87,7 +87,7 @@ RoadMan 的做法是：**把「内容建议」放进可执行工作流**。一�
 -->
 <!--
 <div align="center">
-  <img src="docs/screenshots/agent-planning.gif" alt="RoadMan Agent 规划过程" width="85%"/>
+  <img src="docs/screenshots/agent-planning.gif" alt="RoadMan 智能体规划过程" width="85%"/>
 </div>
 -->
 
@@ -164,7 +164,7 @@ RoadMan 的做法是：**把「内容建议」放进可执行工作流**。一�
 flowchart TB
     subgraph Browser["浏览器 Vue 3"]
         H["首页：需求录入 / 预检问答 / 历史行程 / 车型管理 / 3D 车辆 / 天气"]
-        P["规划页：SSE 进度 / 地图 / 阶段卡片 / 活动列表 / Agent 面板 / 导出"]
+        P["规划页：SSE 进度 / 地图 / 阶段卡片 / 活动列表 / 智能体面板 / 导出"]
     end
 
     subgraph API["FastAPI API"]
@@ -352,4 +352,6 @@ submission/  参赛方案书与生成审计工具
 RoadMan 不连接或控制车辆。天气、补能与路线服务失败时会显示可解释降级，不把估算点或示意路线冒充实时事实；数据收集、30 天附件保留和行程级联删除范围见 [docs/safety-and-data-boundary.md](docs/safety-and-data-boundary.md)。
 ### 交通与油价公开备选
 
-主旅行信息服务没有返回有效班次时，系统会自动尝试公开车次接口（`TRAIN_FALLBACK_URL`）；航班备选需要配置 `FLIGHT_FALLBACK_API_KEY`，油价查询需要 `OIL_APP_ID` 与 `OIL_APP_SECRET`。所有备选结果都会保留来源、真实车次/航班号和可用状态，未配置或无结果时只提示降级，不生成虚假班次。默认使用非思考模式（`DEEPSEEK_THINKING=false`、`DEEPSEEK_REASONING_EFFORT=low`），需要专项深度评测时再显式开启。
+班次查询会并行调用多个数据源、按班次号和时间去重后择优。火车使用主旅行信息服务与 `TRAIN_FALLBACK_URL`；航班使用主服务、`FLIGHT_FALLBACK_API_KEY` 对应的备选源与可选的 `AVIATIONSTACK_API_KEY`。只有同时带真实班次号、起终站场和可解析时刻的结果才能进入行程；所有数据源均失败时返回可操作的不可用原因，不生成“机场待确认”或“航班号未返回”之类伪班次。
+
+交通默认规则是：用户没有说交通方式时，跨城与市内全程使用驾车；用户明确说飞机、高铁或火车往返时，跨城使用真实班次，目的地市内再使用公共交通/步行接驳。系统不会因为时间窗口较短而擅自把默认自驾改成飞机或火车。默认使用非思考模式（`DEEPSEEK_THINKING=false`、`DEEPSEEK_REASONING_EFFORT=low`）。

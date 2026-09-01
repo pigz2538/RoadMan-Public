@@ -56,7 +56,7 @@ async def extract_attachment(
         elif mime_type.startswith("image/"):
             warnings.append("图像识别服务未返回结构化结果，请人工补充或重试")
     else:
-        warnings.append("未配置附件理解 Agent，仅保留文本预览，未进行语义猜测")
+        warnings.append("未配置附件理解智能体，仅保留文本预览，未进行语义猜测")
     extracted.warnings.extend(warnings)
     return extracted
 

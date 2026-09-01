@@ -63,6 +63,7 @@ export interface VehicleCatalogItem {
   detail_source_url?: string
   specifications?: VehicleSpecification[]
   specs_missing?: string[]
+  estimated_fields?: string[]
 }
 
 export interface VehicleCatalogSearch {

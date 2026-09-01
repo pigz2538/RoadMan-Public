@@ -90,12 +90,16 @@ function catalogSpec(item: VehicleCatalogItem, ...labels: string[]): string | nu
 
 function catalogSummary(item: VehicleCatalogItem): string {
   const summary = [
-    item.rated_range_km ? `续航 ${item.rated_range_km} km` : catalogSpec(item, '续航'),
+    item.rated_range_km
+      ? `${item.estimated_fields?.includes('rated_range_km') ? '车型标称续航' : '续航'} ${item.rated_range_km} km`
+      : catalogSpec(item, '续航'),
     item.consumption_per_100km ? `能耗 ${item.consumption_per_100km}/100km` : catalogSpec(item, '耗电', '油耗'),
     item.battery_kwh ? `电池 ${item.battery_kwh} kWh` : catalogSpec(item, '电池能量', '电池容量'),
     item.seats ? `${item.seats} 座` : catalogSpec(item, '车身结构', '座位数'),
   ].filter(Boolean)
-  return summary.length ? summary.join(' · ') : '已获取详细参数，可展开查看'
+  return summary.length
+    ? summary.join(' · ')
+    : '该年款详情源暂未返回续航、电池与能耗，选择后需补充确认'
 }
 
 function newVehicleDraft(): VehicleInput {
@@ -114,6 +118,20 @@ function newVehicleDraft(): VehicleInput {
     mountain_ready: true,
     unpaved_ready: false,
     safe_energy_reserve_percent: 15,
+  }
+}
+
+function blankVehicleDraft(): VehicleInput {
+  return {
+    ...newVehicleDraft(),
+    brand: '',
+    series: '',
+    model: '',
+    rated_range_km: undefined,
+    battery_kwh: undefined,
+    consumption_per_100km: undefined,
+    max_charge_kw: undefined,
+    specifications: [],
   }
 }
 
@@ -187,7 +205,7 @@ function selectVehicle(vehicleId: string) {
 
 function beginAddVehicle() {
   vehicleEditingId.value = null
-  vehicleDraft.value = newVehicleDraft()
+  vehicleDraft.value = blankVehicleDraft()
   vehicleError.value = ''
   resetVehicleCatalog()
   vehicleFormOpen.value = true
@@ -244,6 +262,7 @@ async function searchVehicleModels() {
 function applyVehicleCatalogItem(item: VehicleCatalogItem) {
   const existing = vehicleDraft.value
   const editing = Boolean(vehicleEditingId.value)
+  const sameCatalogRecord = editing && existing.source_id === item.source_id
   vehicleDraft.value = {
     ...existing,
     brand: item.brand,
@@ -254,12 +273,12 @@ function applyVehicleCatalogItem(item: VehicleCatalogItem) {
     // The catalog does not promise trim-specific technical specs. Preserve
     // verified values while editing; a new vehicle leaves them blank so the
     // user cannot mistake a demo SUV's values for this model's values.
-    rated_range_km: item.rated_range_km ?? (editing ? existing.rated_range_km : undefined),
-    battery_kwh: item.battery_kwh ?? (editing ? existing.battery_kwh : undefined),
-    consumption_per_100km: item.consumption_per_100km ?? (editing ? existing.consumption_per_100km : undefined),
-    max_charge_kw: item.max_charge_kw ?? (editing ? existing.max_charge_kw : undefined),
-    height_m: item.height_m ?? (editing ? existing.height_m : undefined),
-    width_m: item.width_m ?? (editing ? existing.width_m : undefined),
+    rated_range_km: item.rated_range_km ?? (sameCatalogRecord ? existing.rated_range_km : undefined),
+    battery_kwh: item.battery_kwh ?? (sameCatalogRecord ? existing.battery_kwh : undefined),
+    consumption_per_100km: item.consumption_per_100km ?? (sameCatalogRecord ? existing.consumption_per_100km : undefined),
+    max_charge_kw: item.max_charge_kw ?? (sameCatalogRecord ? existing.max_charge_kw : undefined),
+    height_m: item.height_m ?? (sameCatalogRecord ? existing.height_m : undefined),
+    width_m: item.width_m ?? (sameCatalogRecord ? existing.width_m : undefined),
     seats: item.seats ?? existing.seats ?? 5,
     current_energy_percent: item.current_energy_percent ?? existing.current_energy_percent ?? 80,
     source_id: item.source_id,
@@ -267,7 +286,7 @@ function applyVehicleCatalogItem(item: VehicleCatalogItem) {
     detail_source_url: item.detail_source_url,
     price_min_cny: item.price_min_cny,
     price_max_cny: item.price_max_cny,
-    specifications: item.specifications || existing.specifications || [],
+    specifications: item.specifications || (sameCatalogRecord ? existing.specifications : []) || [],
   }
   vehicleCatalogError.value = item.specs_missing?.length
     ? `已填入 ${item.brand} ${item.model}。${item.specs_missing.join('、')}需按具体配置确认。`
@@ -927,7 +946,7 @@ function activate(label: string) {
             <section class="vehicle-catalog" aria-label="车型数据库搜索">
               <div class="vehicle-catalog-head">
                 <strong>一键搜索具体车型</strong>
-                <small>CarInfo Skill · 汽车品牌/车系/年款数据库</small>
+                <small>车型资料智能体 · 汽车品牌/车系/年款数据库</small>
               </div>
               <div class="vehicle-catalog-search-row">
                 <input
@@ -942,7 +961,17 @@ function activate(label: string) {
                 </button>
               </div>
               <small class="vehicle-catalog-note">选择结果会自动填入品牌、车系、动力和年款；续航、能耗等配置以你的具体版本为准。</small>
-              <div v-if="vehicleCatalogResults.length" class="vehicle-catalog-results">
+              <div v-if="vehicleCatalogResults.length" class="vehicle-catalog-results-head">
+                <span>找到 {{ vehicleCatalogResults.length }} 个具体年款</span>
+                <small>在下方区域滚动查看更多</small>
+              </div>
+              <div
+                v-if="vehicleCatalogResults.length"
+                class="vehicle-catalog-results"
+                role="listbox"
+                tabindex="0"
+                aria-label="车型搜索结果，可上下滚动"
+              >
                 <div
                   v-for="item in vehicleCatalogResults"
                   :key="item.id"
@@ -964,20 +993,20 @@ function activate(label: string) {
               <small v-if="vehicleCatalogError" class="vehicle-catalog-error">{{ vehicleCatalogError }}</small>
             </section>
             <div class="vehicle-form-grid">
-              <input v-model="vehicleDraft.brand" required placeholder="品牌" aria-label="品牌">
-              <input v-model="vehicleDraft.series" required placeholder="车系" aria-label="车系">
-              <input v-model="vehicleDraft.model" required placeholder="车型名称" aria-label="车型名称">
-              <select v-model="vehicleDraft.power_type" aria-label="动力类型">
-                <option value="electric">纯电</option>
-                <option value="hybrid">混动</option>
-                <option value="fuel">燃油</option>
-              </select>
-              <input v-model.number="vehicleDraft.rated_range_km" type="number" min="1" placeholder="额定续航 km" aria-label="额定续航">
-              <input v-model.number="vehicleDraft.current_energy_percent" type="number" min="0" max="100" placeholder="当前电量 %" aria-label="当前电量">
-              <input v-model.number="vehicleDraft.battery_kwh" type="number" min="1" placeholder="电池容量 kWh" aria-label="电池容量">
-              <input v-model.number="vehicleDraft.consumption_per_100km" type="number" min="1" placeholder="百公里能耗" aria-label="百公里能耗">
-              <input v-model.number="vehicleDraft.seats" type="number" min="1" max="20" placeholder="座位数" aria-label="座位数">
-              <input v-model.number="vehicleDraft.safe_energy_reserve_percent" type="number" min="5" max="40" placeholder="安全余量 %" aria-label="安全余量">
+              <label class="vehicle-field"><span>品牌</span><input v-model="vehicleDraft.brand" required placeholder="例如：小鹏汽车"></label>
+              <label class="vehicle-field"><span>车系</span><input v-model="vehicleDraft.series" required placeholder="例如：小鹏 P7"></label>
+              <label class="vehicle-field"><span>具体车型 / 年款</span><input v-model="vehicleDraft.model" required placeholder="请选择搜索结果"></label>
+              <label class="vehicle-field"><span>动力类型</span><select v-model="vehicleDraft.power_type">
+                  <option value="electric">纯电</option>
+                  <option value="hybrid">混动</option>
+                  <option value="fuel">燃油</option>
+                </select></label>
+              <label class="vehicle-field"><span>额定续航（km）</span><input v-model.number="vehicleDraft.rated_range_km" type="number" min="1" placeholder="由具体年款自动填入"></label>
+              <label class="vehicle-field"><span>电池容量（kWh）</span><input v-model.number="vehicleDraft.battery_kwh" type="number" min="1" placeholder="由具体年款自动填入"></label>
+              <label class="vehicle-field"><span>当前电量（%）</span><input v-model.number="vehicleDraft.current_energy_percent" type="number" min="0" max="100" placeholder="80"></label>
+              <label class="vehicle-field"><span>百公里能耗</span><input v-model.number="vehicleDraft.consumption_per_100km" type="number" min="1" placeholder="电耗 kWh / 油耗 L"></label>
+              <label class="vehicle-field"><span>座位数</span><input v-model.number="vehicleDraft.seats" type="number" min="1" max="20" placeholder="5"></label>
+              <label class="vehicle-field"><span>安全余量（%）</span><input v-model.number="vehicleDraft.safe_energy_reserve_percent" type="number" min="5" max="40" placeholder="15"></label>
             </div>
             <label class="vehicle-check"><input v-model="vehicleDraft.has_etc" type="checkbox"> 已办理 ETC</label>
             <label class="vehicle-check"><input v-model="vehicleDraft.mountain_ready" type="checkbox"> 适合山路</label>

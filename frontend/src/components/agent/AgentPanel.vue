@@ -13,6 +13,7 @@ import {
   type RecommendationCandidate,
 } from '../../api/trips'
 import { useTripStore } from '../../stores/trip'
+import { humanizeDisplayText } from '../../utils/displayLabels'
 
 const store = useTripStore()
 const emit = defineEmits<{ 'replan-requested': [] }>()
@@ -270,7 +271,7 @@ watch(() => store.pendingPatch?.id, (patchId) => {
             <b>#{{ candidate.rank }} {{ candidate.place.name }}</b>
             <span>{{ candidate.score.toFixed(1) }} 分</span>
           </header>
-          <p>{{ candidate.agent_reason || candidate.recommendation_reasons?.join(' · ') || candidate.place.address || '综合距离与偏好排序' }}</p>
+          <p>{{ humanizeDisplayText(candidate.agent_reason || candidate.recommendation_reasons?.join(' · ') || candidate.place.address || '综合距离与偏好排序') }}</p>
           <p v-if="candidate.seasonal_excluded" class="recommendation-seasonal-warning">
             {{ candidate.seasonal_warning || candidate.seasonal_reason || '当前出行日期可能不适合，已降为备选' }}
           </p>
@@ -317,7 +318,7 @@ watch(() => store.pendingPatch?.id, (patchId) => {
         我正在拆解路线、核对真实道路，并为每天安排景点、用餐、住宿、休息和补能。
       </div>
       <div v-for="(event, index) in recentPlanningEvents" :key="`${event.event}-${event.node}-${index}`" class="message ai planning-message">
-        <strong>{{ event.progress }}%</strong>{{ event.label }}
+        <strong>{{ event.progress }}%</strong>{{ humanizeDisplayText(event.label) }}
       </div>
       <div v-for="(item, index) in messages" :key="index" :class="['message', item.side]">
         {{ item.text }}

@@ -22,8 +22,7 @@ const DISPLAY_REPLACEMENTS: Array<[RegExp, string]> = [
   [/高德/gi, '地图服务'],
   [/\bPOI\b/gi, '地点候选'],
   [/\bMock\b/gi, '示例'],
-  [/\bAgents\b/gi, '智能体'],
-  [/\bAgent\b/gi, '智能体'],
+  [/Agents?/gi, '智能体'],
   [/ollama/gi, '语义分析'],
 ]
 

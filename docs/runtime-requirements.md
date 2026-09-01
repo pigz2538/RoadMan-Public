@@ -36,9 +36,11 @@ RoadMan 支持两种运行方式：Docker Compose（推荐，生产风格）与�
 | `AMAP_WEBSERVICE_KEY` | 真实驾车/步行/骑行/公交路线、地理编码、POI | 必需；缺失则上述能力降级 |
 | `FLYAI_API_KEY` | 旅行搜索、住宿、餐饮补充 | 推荐 |
 | `TRAIN_FALLBACK_URL` | 主车次服务不可用时的公开车次备选 | 默认 `https://api.lolimi.cn/API/hc/api`，无需密钥；结果必须有真实车次号 |
-| `MCP_12306_URL` | 可选的 12306 MCP 服务地址 | 可选；留空不影响公开车次备选 |
+| `MCP_12306_URL` | 可选的铁路实时 MCP 服务地址 | 填服务根地址或 `/mcp` 地址；规划器会完成 MCP 握手并调用 `query-tickets`。留空时继续使用其它车次源；项目许可仅限学习研究，商业部署前需另行确认 |
 | `FLIGHT_FALLBACK_URL` | 主航班服务不可用时的公开航班备选 | 默认 `https://open.6api.net/flight/getTicket` |
 | `FLIGHT_FALLBACK_API_KEY` | 公开航班备选密钥 | 可选；未配置时明确标记不可用 |
+| `AVIATIONSTACK_URL` | 第二独立航班备选地址 | 默认 `https://api.aviationstack.com/v1/flights` |
+| `AVIATIONSTACK_API_KEY` | 第二独立航班备选密钥 | 可选；有效班次必须带真实航班号与机场 |
 | `OIL_API_URL` | 今日油价公开接口 | 默认 `https://www.mxnzp.com/api/oil/search` |
 | `OIL_APP_ID` / `OIL_APP_SECRET` | 今日油价接口凭据 | 可选；缺少时跳过油价，不阻塞规划 |
 | `OPENTRIPMAP_API_KEY` | 国际/开放景点数据补充 | 可选 |
