@@ -61,6 +61,7 @@ export interface VehicleCatalogItem {
   state_label?: string
   source_url?: string
   detail_source_url?: string
+  catalog_source?: string
   specifications?: VehicleSpecification[]
   specs_missing?: string[]
   estimated_fields?: string[]

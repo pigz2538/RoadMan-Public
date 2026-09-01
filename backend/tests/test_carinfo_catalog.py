@@ -1,6 +1,9 @@
 from app.skills.carinfo import (
     _catalog_brand_ids_for_query,
     _catalog_detail_probe_items,
+    _catalog_model_key,
+    _catalog_needs_public_lookup,
+    _catalog_query_match_rank,
     _catalog_search_queries,
     _catalog_series_expansion_requests,
     _catalog_series_expansion_queries,
@@ -8,6 +11,9 @@ from app.skills.carinfo import (
     _extract_detail_specs,
     _infer_catalog_name_range,
     _infer_power_type_from_text,
+    _parse_public_trim_links,
+    _parse_public_trim_page,
+    _public_vehicle_seed_items,
 )
 
 
@@ -87,6 +93,89 @@ def test_catalog_search_adds_trim_suffix_for_literal_provider_index():
         "Model 3",
         "特斯拉Model3",
     ]
+
+
+def test_public_fallback_detects_su7_ultra_as_an_incomplete_su7_match():
+    primary_ultra = [
+        {
+            "brand": "小米汽车",
+            "series": "小米SU7 Ultra",
+            "model": "小米汽车小米SU7 Ultra 2025款 Ultra",
+        }
+    ]
+
+    assert _catalog_model_key("小米SU7") == "su7"
+    assert _catalog_model_key("SU7 Max") == "su7max"
+    assert _catalog_needs_public_lookup("小米SU7", primary_ultra) is True
+    assert _catalog_needs_public_lookup("小米SU7 Ultra", primary_ultra) is False
+
+
+def test_public_su7_seed_covers_standard_pro_and_max_when_public_pages_miss():
+    seeds = _public_vehicle_seed_items("小米SU7")
+    assert {item["model"] for item in seeds} == {
+        "小米SU7 2024款 标准版",
+        "小米SU7 2024款 Pro版",
+        "小米SU7 2024款 四驱Max版",
+    }
+    assert len(_public_vehicle_seed_items("SU7 Max")) == 1
+    assert _public_vehicle_seed_items("SU7 Max")[0]["rated_range_km"] == 800
+
+
+def test_requested_base_trim_is_sorted_before_ultra_variant():
+    assert _catalog_query_match_rank(
+        {"model": "小米SU7 2024款 四驱Max版"},
+        "su7",
+    ) == 1
+    assert _catalog_query_match_rank(
+        {"model": "小米汽车小米SU7 Ultra2025款 Ultra"},
+        "su7",
+    ) == 2
+
+
+def test_public_trim_parser_keeps_concrete_trim_and_specs():
+    model_page = '''
+      <a class="trim" href="/database/xiaomi-auto/xiaomi-auto-su7/2024/800km-495kw-0-22040">
+        <b class="mr-2">Xiaomi Auto SU7 2024 Xiaomi SU7 2024 4WD Max</b>
+      </a>
+    '''
+    trims = _parse_public_trim_links(
+        model_page,
+        "https://data.carnewschina.com/database/xiaomi-auto/xiaomi-auto-su7/2024",
+        {"brand_name": "Xiaomi Auto", "name": "Xiaomi Auto SU7"},
+    )
+    assert len(trims) == 1
+
+    trim_page = '''
+      <h1 class="h2">Xiaomi Auto SU7 2024 Xiaomi SU7 2024 4WD Max</h1>
+      <div class="table__row">
+        <div class="table__cell table__cell-param-name">Range (CLTC)</div>
+        <div><div class="table__cell">800 km</div></div>
+      </div>
+      <div class="table__row">
+        <div class="table__cell table__cell-param-name">Battery capacity</div>
+        <div><div class="table__cell">101 kWh</div></div>
+      </div>
+      <div class="table__row">
+        <div class="table__cell table__cell-param-name">Consumption</div>
+        <div><div class="table__cell">13.7 kWh/100km</div></div>
+      </div>
+      <div class="table__row">
+        <div class="table__cell table__cell-param-name">Fuel type</div>
+        <div><div class="table__cell">BEV</div></div>
+      </div>
+    '''
+    item = _parse_public_trim_page(
+        trim_page,
+        trims[0]["url"],
+        trims[0],
+    )
+    assert item is not None
+    assert item["series"] == "小米SU7"
+    assert item["model"].endswith("四驱Max版")
+    assert item["rated_range_km"] == 800
+    assert item["battery_kwh"] == 101
+    assert item["consumption_per_100km"] == 13.7
+    assert item["power_type"] == "electric"
 
 
 def test_catalog_detail_specs_map_to_planner_fields():

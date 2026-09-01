@@ -281,6 +281,7 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .vehicle-specifications { display: grid; gap: 4px; max-height: 180px; overflow-y: auto; margin: 10px 0 4px; padding: 8px 10px; border: 1px solid #e0e9f5; border-radius: 10px; background: #fbfdff; }
 .vehicle-specifications span { color: #5e7591; font-size: 10px; line-height: 1.35; }
 .vehicle-catalog-specs { color: #3267a8 !important; }
+.vehicle-catalog-source { color: #8294aa !important; font-size: 9px !important; }
 .drawer-enter-active,.drawer-leave-active { transition: .2s ease; }.drawer-enter-from,.drawer-leave-to { transform: translateX(30px); opacity: 0; }
 
 /* Planning */

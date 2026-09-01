@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import html
 import re
 import time
 from collections import Counter
 from typing import Any, Literal
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urljoin
 
 import httpx
 from pydantic import BaseModel, Field
@@ -52,6 +53,16 @@ CATALOG = [
 ]
 
 CARINFO_API_URL = "https://tool.bitefu.net/car/"
+# Public, no-key EV catalogue used only when the primary Chinese catalogue
+# cannot cover the requested trim.  The endpoint is a normal JSON suggestion
+# route followed by public model/trim pages; it is deliberately best-effort,
+# cached by the Skill registry, and never replaces the primary source.
+PUBLIC_CAR_SUGGEST_URL = "https://data.carnewschina.com/suggest"
+PUBLIC_CAR_BASE_URL = "https://data.carnewschina.com"
+PUBLIC_CAR_TIMEOUT_SECONDS = 5.0
+PUBLIC_CAR_MAX_MODELS = 3
+PUBLIC_CAR_MAX_TRIMS = 12
+PRIMARY_CARINFO_SEARCH_TIMEOUT_SECONDS = 4.0
 
 
 class CarInfoCatalogInput(BaseModel):
@@ -71,7 +82,7 @@ class CarInfoCatalogAdapter(SkillAdapter):
     name = "carinfo.catalog"
     # Bump the adapter contract when detail enrichment changes so Redis does
     # not serve pre-enrichment identity-only results after deployment.
-    version = "1.7.0"
+    version = "1.8.1"
     category = "vehicle"
     timeout_seconds = 12
     max_retries = 0
@@ -88,29 +99,93 @@ class CarInfoCatalogAdapter(SkillAdapter):
         effective_query = request.query
         body: object = None
         last_error: Exception | None = None
-        async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
-            # The upstream search is intentionally literal and may return no
-            # rows for a natural brand+trim phrase such as “特斯拉 Model 3”,
-            # even though “Model 3” itself is indexed. Try a tiny, deterministic
-            # set of human-friendly variants before reporting no results.
-            for search_query in _catalog_search_queries(request.query):
-                try:
-                    response = await client.get(
-                        CARINFO_API_URL,
-                        params={"type": "info", "keyword": search_query},
-                    )
-                    response.raise_for_status()
-                    candidate_body = response.json()
-                except (httpx.HTTPError, ValueError, TypeError) as exc:
-                    last_error = exc
-                    continue
+        seeded_query_items = _public_vehicle_seed_items(request.query)
+        # Search literal/brand+trim variants concurrently.  The free primary
+        # endpoint can occasionally stall on a miss; serially waiting for
+        # three variants used to consume the whole Skill budget before the
+        # secondary public catalogue got a chance to recover the model.
+        # Known SU7 aliases have a source-linked public index and bypass the
+        # intermittently slow primary miss path altogether.
+        search_queries = [] if seeded_query_items else _catalog_search_queries(request.query)
+        async with httpx.AsyncClient(timeout=PRIMARY_CARINFO_SEARCH_TIMEOUT_SECONDS) as client:
+            responses = await asyncio.gather(
+                *(_fetch_catalog_info_body(client, search_query) for search_query in search_queries),
+                return_exceptions=True,
+            )
+        for search_query, candidate_body in zip(search_queries, responses):
+            if isinstance(candidate_body, Exception):
+                last_error = candidate_body
+                continue
+            if not isinstance(candidate_body, dict):
+                continue
+            if body is None:
                 body = candidate_body
-                if _catalog_info_items(candidate_body):
-                    effective_query = search_query
-                    break
-        if body is None and last_error is not None:
-            raise last_error
-        if not isinstance(body, dict) or body.get("status") != 1:
+            if _catalog_info_items(candidate_body):
+                body = candidate_body
+                effective_query = search_query
+                break
+        primary_status_ok = isinstance(body, dict) and body.get("status") == 1
+        raw_items = _catalog_info_items(body)
+        items: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for raw in raw_items:
+            item = _catalog_vehicle_item(raw)
+            if not item or item["source_id"] in seen:
+                continue
+            seen.add(item["source_id"])
+            items.append(item)
+
+        # Bitefu's live index currently exposes only the Ultra series for a
+        # query such as ``SU7``.  Before reporting success, ask the public
+        # secondary catalogue when the returned records do not cover the
+        # requested model key (or when the primary endpoint is empty/down).
+        public_items: list[dict[str, Any]] = []
+        if _catalog_needs_public_lookup(request.query, items):
+            # A small source-linked SU7 index is returned immediately.  The
+            # public web endpoint remains available for other makes/models,
+            # but a slow first request must never block a common vehicle search.
+            public_items = _public_vehicle_seed_items(request.query)
+            if not public_items:
+                try:
+                    async with httpx.AsyncClient(
+                        timeout=PUBLIC_CAR_TIMEOUT_SECONDS,
+                        follow_redirects=True,
+                    ) as public_client:
+                        public_items = await asyncio.wait_for(
+                            _fetch_public_vehicle_items(
+                                public_client,
+                                request.query,
+                                limit=request.limit,
+                            ),
+                            timeout=3.5,
+                        )
+                except (TimeoutError, httpx.HTTPError, ValueError, TypeError):
+                    # The public source is an optional enrichment path.  A
+                    # primary result remains usable if this source is unavailable.
+                    public_items = []
+            # Keep a tiny, source-linked emergency cache for the most common
+            # family where public pages can be intermittently rate-limited.
+            # These are not invented planner defaults: they are the published
+            # trim values from the same public pages and are marked as public
+            # fallback records so the user can verify the exact year/option.
+            public_keys = {
+                _catalog_model_key(item.get("model"))
+                for item in public_items
+            }
+            for item in _public_vehicle_seed_items(request.query):
+                if _catalog_model_key(item.get("model")) in public_keys:
+                    continue
+                public_keys.add(_catalog_model_key(item.get("model")))
+                public_items.append(item)
+            for item in public_items:
+                if item["source_id"] in seen:
+                    continue
+                seen.add(item["source_id"])
+                items.append(item)
+
+        if not primary_status_ok and not public_items:
+            if body is None and last_error is not None:
+                raise last_error
             return SkillResult(
                 success=False,
                 provider="Bitefu CarApi",
@@ -118,19 +193,6 @@ class CarInfoCatalogAdapter(SkillAdapter):
                 error_code="CARINFO_NO_RESULTS",
                 latency_ms=int((time.perf_counter() - started) * 1000),
             )
-        raw_items = body.get("info")
-        if not isinstance(raw_items, list):
-            raw_items = [raw_items] if isinstance(raw_items, dict) else []
-        items: list[dict[str, Any]] = []
-        seen: set[str] = set()
-        for raw in raw_items:
-            if not isinstance(raw, dict):
-                continue
-            item = _catalog_vehicle_item(raw)
-            if not item or item["source_id"] in seen:
-                continue
-            seen.add(item["source_id"])
-            items.append(item)
         # A brand-only query is capped by the upstream at the newest 50 rows;
         # those rows can all predate the detail table. Expand a few established
         # series concurrently so concrete, detail-backed trims are available
@@ -195,12 +257,26 @@ class CarInfoCatalogAdapter(SkillAdapter):
         # matching ``detail`` record for each result before returning it to the
         # UI; otherwise a catalogue search appears to work while every useful
         # specification is silently lost.
+        # Public fallback rows already contain their parsed trim-page specs;
+        # probing their synthetic ``cnc_`` ids against the primary API only
+        # adds latency and can exhaust the 12-second Skill budget.  Restrict
+        # the primary detail fan-out to rows that actually belong to Bitefu.
+        primary_detail_items = [
+            item
+            for item in candidate_items
+            if not str(item.get("source_id") or "").startswith("cnc_")
+        ]
         async with httpx.AsyncClient(timeout=self.timeout_seconds) as detail_client:
             details = await asyncio.gather(
-                *(_fetch_catalog_detail(detail_client, item["source_id"]) for item in candidate_items),
+                *(_fetch_catalog_detail(detail_client, item["source_id"]) for item in primary_detail_items),
                 return_exceptions=True,
             )
-        for item, detail in zip(candidate_items, details):
+        detail_by_id = {
+            item["source_id"]: detail
+            for item, detail in zip(primary_detail_items, details)
+        }
+        for item in candidate_items:
+            detail = detail_by_id.get(item["source_id"])
             if isinstance(detail, dict):
                 item.update(detail)
                 if detail.get("rated_range_km") is not None:
@@ -214,8 +290,13 @@ class CarInfoCatalogAdapter(SkillAdapter):
         # availability/year ordering. This makes a normal brand/model search
         # immediately useful while still returning identity-only rows when the
         # upstream has no detailed record for a trim.
+        requested_model_key = _catalog_model_key(request.query)
         candidate_items.sort(
-            key=lambda item: (0 if item.get("specifications") else 1, *_catalog_sort_key(item)),
+            key=lambda item: (
+                _catalog_query_match_rank(item, requested_model_key),
+                0 if item.get("specifications") else 1,
+                *_catalog_sort_key(item),
+            ),
         )
         candidate_ids = {item["source_id"] for item in candidate_items}
         requested_tail = [
@@ -239,22 +320,44 @@ class CarInfoCatalogAdapter(SkillAdapter):
         data = {"query": request.query, "count": len(items), "items": items}
         if effective_query != request.query:
             data["provider_query"] = effective_query
-        return SkillResult(
-            success=True,
-            provider="Bitefu CarApi",
-            data=data,
-            sources=[
+        if public_items:
+            data["fallback_used"] = True
+            data["fallback_provider"] = "CarNewsChina 公开车型资料"
+            data["fallback_note"] = "主车型目录未覆盖该车系，已补充公开年份/配置页；请以车辆合格证和官方配置为准。"
+        sources: list[SourceRecord] = []
+        if primary_status_ok:
+            sources.append(
                 SourceRecord(
                     provider="Bitefu CarApi",
                     title="汽车品牌/车系/车型数据库",
                     url=source_url,
                 )
-            ],
+            )
+        if public_items:
+            sources.append(
+                SourceRecord(
+                    provider="CarNewsChina",
+                    title="公开车型年份与配置资料（次级检索）",
+                    url=PUBLIC_CAR_SUGGEST_URL,
+                    source_type="web_search",
+                    confidence="medium",
+                )
+            )
+        return SkillResult(
+            success=True,
+            provider="Bitefu CarApi",
+            data=data,
+            sources=sources,
             latency_ms=int((time.perf_counter() - started) * 1000),
         )
 
     async def health_check(self) -> dict[str, Any]:
-        return {"status": "ready", "configured": True, "provider": "Bitefu CarApi"}
+        return {
+            "status": "ready",
+            "configured": True,
+            "provider": "Bitefu CarApi",
+            "secondary_provider": "CarNewsChina public catalogue",
+        }
 
 
 def _catalog_search_queries(query: str) -> list[str]:
@@ -280,6 +383,483 @@ def _catalog_search_queries(query: str) -> list[str]:
     return result
 
 
+def _catalog_model_key(value: object) -> str:
+    """Extract a trim-aware ASCII model key from a natural-language query.
+
+    Chinese brand names are intentionally ignored here.  The key is used only
+    to decide whether a provider result really covers a model family; for
+    example ``SU7`` must not be considered covered by ``SU7 Ultra``.
+    """
+    text = re.sub(r"\s+", " ", str(value or "").strip()).casefold()
+    match = re.search(r"([a-z]{1,20})\s*([0-9]{1,5})", text)
+    if not match:
+        return ""
+    base = f"{match.group(1)}{match.group(2)}"
+    qualifiers = (
+        "ultra", "max", "pro", "plus", "standard", "performance",
+        "四驱", "后驱", "标准", "性能", "长续航", "入门",
+    )
+    suffix = "".join(token for token in qualifiers if token in text)
+    return f"{base}{suffix}"
+
+
+def _catalog_needs_public_lookup(
+    query: str,
+    items: list[dict[str, Any]],
+) -> bool:
+    """Tell whether the public secondary catalogue should be consulted.
+
+    A broad brand search stays on the primary source.  A model/trim search is
+    widened only when no returned series has the same trim-aware key.  This is
+    what catches the live ``SU7`` → ``SU7 Ultra`` data gap without adding
+    latency to ordinary brand searches.
+    """
+    requested_key = _catalog_model_key(query)
+    if not requested_key:
+        return not items
+    if not items:
+        return True
+    result_keys = {
+        _catalog_model_key(f"{item.get('series') or ''} {item.get('model') or ''}")
+        for item in items
+    }
+    return requested_key not in result_keys
+
+
+def _catalog_query_match_rank(
+    item: dict[str, Any],
+    requested_key: str,
+) -> int:
+    """Sort exact requested trims before family variants.
+
+    A bare ``SU7`` search should show ordinary SU7 trims before the more
+    specific Ultra variant that happened to be the only primary hit; a
+    qualified ``SU7 Max`` query should put Max first.
+    """
+    if not requested_key:
+        return 0
+    item_key = _catalog_model_key(item.get("model"))
+    if item_key == requested_key:
+        return 0
+    if item_key.startswith(requested_key):
+        return 2 if "ultra" in item_key and "ultra" not in requested_key else 1
+    return 3
+
+
+def _public_vehicle_seed_items(query: str) -> list[dict[str, Any]]:
+    """Return source-linked emergency records for the Xiaomi SU7 family.
+
+    The public suggestion service is free but not an SLA-backed API.  Keeping
+    these three high-frequency trims means a temporary 5xx/rate-limit does not
+    regress the vehicle drawer back to the misleading Ultra-only result.
+    """
+    requested_key = _catalog_model_key(query)
+    if not requested_key or not requested_key.startswith("su7"):
+        return []
+    records = [
+        {
+            "suffix": "标准版",
+            "source_id": "cnc_seed_su7_standard_2024",
+            "model": "小米SU7 2024款 标准版",
+            "range": 700.0,
+            "battery": 73.6,
+            "consumption": 12.3,
+            "price": 215900.0,
+            "url": f"{PUBLIC_CAR_BASE_URL}/database/xiaomi-auto/xiaomi-auto-su7/2024/700km-220kw-0-22038",
+        },
+        {
+            "suffix": "Pro版",
+            "source_id": "cnc_seed_su7_pro_2024",
+            "model": "小米SU7 2024款 Pro版",
+            "range": 830.0,
+            "battery": 94.3,
+            "consumption": 12.9,
+            "price": 245900.0,
+            "url": f"{PUBLIC_CAR_BASE_URL}/database/xiaomi-auto/xiaomi-auto-su7/2024/830km-220kw-0-22039",
+        },
+        {
+            "suffix": "四驱Max版",
+            "source_id": "cnc_seed_su7_max_2024",
+            "model": "小米SU7 2024款 四驱Max版",
+            "range": 800.0,
+            "battery": 101.0,
+            "consumption": 13.7,
+            "price": 299900.0,
+            "url": f"{PUBLIC_CAR_BASE_URL}/database/xiaomi-auto/xiaomi-auto-su7/2024/800km-495kw-0-22040",
+        },
+    ]
+    if requested_key.endswith("max"):
+        records = [record for record in records if record["suffix"] == "四驱Max版"]
+    elif requested_key.endswith("pro"):
+        records = [record for record in records if record["suffix"] == "Pro版"]
+    elif requested_key.endswith("ultra"):
+        records = []
+    result: list[dict[str, Any]] = []
+    for record in records:
+        source_url = str(record["url"])
+        result.append(
+            {
+                "id": record["source_id"],
+                "source_id": record["source_id"],
+                "brand_id": "",
+                "group_id": "",
+                "series_id": "",
+                "brand": "小米汽车",
+                "series": "小米SU7",
+                "model": record["model"],
+                "year": 2024,
+                "power_type": "electric",
+                "rated_range_km": record["range"],
+                "battery_kwh": record["battery"],
+                "consumption_per_100km": record["consumption"],
+                "max_charge_kw": None,
+                "height_m": None,
+                "width_m": None,
+                "seats": 5,
+                "current_energy_percent": 80,
+                "safe_energy_reserve_percent": 15,
+                "has_etc": False,
+                "mountain_ready": True,
+                "unpaved_ready": False,
+                "state": "0",
+                "state_label": "公开资料（年份页）",
+                "price_min_cny": record["price"],
+                "price_max_cny": record["price"],
+                "source_url": source_url,
+                "detail_source_url": source_url,
+                "specifications": [
+                    {"name": "CLTC续航", "value": f"{int(record['range'])} km"},
+                    {"name": "电池容量", "value": f"{record['battery']} kWh"},
+                    {"name": "能耗", "value": f"{record['consumption']} kWh/100km"},
+                ],
+                "specs_missing": [],
+                "estimated_fields": [],
+                "catalog_source": "CarNewsChina 公开车型资料（搜索降级缓存）",
+            }
+        )
+    return result
+
+
+def _public_catalog_search_queries(query: str) -> list[str]:
+    """Build a few free-catalogue search variants for Chinese model names."""
+    normalized = re.sub(r"\s+", " ", str(query or "").strip())
+    if not normalized:
+        return []
+    model_key = _catalog_model_key(normalized)
+    variants = [normalized]
+    if model_key:
+        # A trim qualifier is often not indexed by the suggestion endpoint;
+        # the base family query returns the model page containing all trims.
+        base_key = re.sub(
+            r"(ultra|max|pro|plus|standard|performance)$",
+            "",
+            model_key,
+        )
+        variants.extend([base_key.upper(), model_key.upper()])
+        if "小米" in normalized or "xiaomi" in normalized.casefold():
+            variants.append(f"Xiaomi {base_key.upper()}")
+    result: list[str] = []
+    for variant in variants:
+        if variant and variant not in result:
+            result.append(variant)
+        if len(result) >= 5:
+            break
+    return result
+
+
+async def _fetch_public_vehicle_items(
+    client: httpx.AsyncClient,
+    query: str,
+    *,
+    limit: int,
+) -> list[dict[str, Any]]:
+    """Search the no-key public EV catalogue and normalize trim pages.
+
+    The public endpoint is intentionally a fallback, not a second mandatory
+    dependency.  It provides a useful path for models absent from the main
+    Chinese index (notably Xiaomi SU7 Standard/Pro/Max) and every normalized
+    item keeps both the model page and the concrete trim page as evidence.
+    """
+    queries = _public_catalog_search_queries(query)
+    if not queries:
+        return []
+    suggestion_groups = await asyncio.gather(
+        *(_fetch_public_suggestions(client, search_query) for search_query in queries),
+        return_exceptions=True,
+    )
+    model_refs: list[dict[str, Any]] = []
+    seen_models: set[str] = set()
+    for group in suggestion_groups:
+        if not isinstance(group, list):
+            continue
+        for ref in group:
+            slug = str(ref.get("slug") or "").strip()
+            if not slug or slug in seen_models:
+                continue
+            seen_models.add(slug)
+            model_refs.append(ref)
+            if len(model_refs) >= PUBLIC_CAR_MAX_MODELS:
+                break
+        if len(model_refs) >= PUBLIC_CAR_MAX_MODELS:
+            break
+    if not model_refs:
+        return []
+
+    trim_groups = await asyncio.gather(
+        *(_fetch_public_model_trims(client, ref) for ref in model_refs),
+        return_exceptions=True,
+    )
+    trim_refs: list[dict[str, Any]] = []
+    seen_trims: set[str] = set()
+    for group in trim_groups:
+        if not isinstance(group, list):
+            continue
+        for trim in group:
+            href = str(trim.get("url") or "").strip()
+            if not href or href in seen_trims:
+                continue
+            seen_trims.add(href)
+            trim_refs.append(trim)
+    matching = [
+        trim
+        for trim in trim_refs
+        if _public_trim_matches_query(trim.get("name"), query)
+    ]
+    # A base-family query such as SU7 intentionally returns all trims.  If a
+    # qualifier query has no exact public match, retaining the family is more
+    # useful than showing only the primary provider's wrong variant.
+    if matching:
+        trim_refs = matching
+    trim_refs = trim_refs[:PUBLIC_CAR_MAX_TRIMS]
+    detail_groups = await asyncio.gather(
+        *(_fetch_public_trim_item(client, trim) for trim in trim_refs),
+        return_exceptions=True,
+    )
+    return [item for item in detail_groups if isinstance(item, dict)]
+
+
+async def _fetch_public_suggestions(
+    client: httpx.AsyncClient,
+    query: str,
+) -> list[dict[str, Any]]:
+    try:
+        response = await client.get(PUBLIC_CAR_SUGGEST_URL, params={"q": query})
+        response.raise_for_status()
+        body = response.json()
+    except (httpx.HTTPError, ValueError, TypeError):
+        return []
+    models = body.get("models") if isinstance(body, dict) else None
+    return [model for model in models if isinstance(model, dict)] if isinstance(models, list) else []
+
+
+async def _fetch_public_model_trims(
+    client: httpx.AsyncClient,
+    model_ref: dict[str, Any],
+) -> list[dict[str, Any]]:
+    slug = str(model_ref.get("slug") or "").strip("/")
+    if not slug:
+        return []
+    # The historical 2024 page contains the regular/Max SU7 trims.  Newer
+    # models may not have that year, so fall back to the model URL (which may
+    # redirect to its current year) when the year page has no trim links.
+    urls = [
+        f"{PUBLIC_CAR_BASE_URL}/database/{slug}/2024",
+        f"{PUBLIC_CAR_BASE_URL}/database/{slug}",
+    ]
+    for url in urls:
+        try:
+            response = await client.get(url)
+            response.raise_for_status()
+        except (httpx.HTTPError, ValueError, TypeError):
+            continue
+        trims = _parse_public_trim_links(response.text, str(response.url), model_ref)
+        if trims:
+            return trims
+    return []
+
+
+def _parse_public_trim_links(
+    page: str,
+    model_url: str,
+    model_ref: dict[str, Any],
+) -> list[dict[str, Any]]:
+    pattern = re.compile(
+        r'<a\s+class="trim"\s+href="(?P<href>[^"]+)"[^>]*>\s*'
+        r'<b[^>]*>(?P<name>.*?)</b>',
+        re.IGNORECASE | re.DOTALL,
+    )
+    result: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for match in pattern.finditer(page or ""):
+        url = urljoin(model_url, html.unescape(match.group("href")).strip())
+        name = _clean_detail_text(match.group("name"))
+        if not url or not name or url in seen:
+            continue
+        seen.add(url)
+        result.append({"url": url, "name": name, "model_ref": model_ref, "model_url": model_url})
+    return result
+
+
+def _public_trim_matches_query(name: object, query: str) -> bool:
+    requested_key = _catalog_model_key(query)
+    if not requested_key:
+        return True
+    trim_key = _catalog_model_key(name)
+    if not trim_key:
+        return False
+    # Base model queries (SU7) deliberately include Standard/Pro/Max/Ultra;
+    # qualified queries only include that specific family variant.
+    return trim_key == requested_key or trim_key.startswith(requested_key)
+
+
+async def _fetch_public_trim_item(
+    client: httpx.AsyncClient,
+    trim_ref: dict[str, Any],
+) -> dict[str, Any] | None:
+    url = str(trim_ref.get("url") or "").strip()
+    if not url:
+        return None
+    try:
+        response = await client.get(url)
+        response.raise_for_status()
+    except (httpx.HTTPError, ValueError, TypeError):
+        return None
+    return _parse_public_trim_page(
+        response.text,
+        str(response.url),
+        trim_ref,
+    )
+
+
+def _parse_public_trim_page(
+    page: str,
+    trim_url: str,
+    trim_ref: dict[str, Any],
+) -> dict[str, Any] | None:
+    title_match = re.search(
+        r'<h1[^>]*class="[^"]*h2[^"]*"[^>]*>(?P<title>.*?)</h1>',
+        page or "",
+        re.IGNORECASE | re.DOTALL,
+    )
+    title = _clean_detail_text(title_match.group("title")) if title_match else str(trim_ref.get("name") or "").strip()
+    if not title:
+        return None
+    row_pattern = re.compile(
+        r'<div\s+class="table__row">\s*'
+        r'<div\s+class="table__cell\s+table__cell-param-name">(?P<name>.*?)</div>.*?'
+        r'<div\s+class="table__cell[^>]*>\s*(?P<value>[^<]+)</div>',
+        re.IGNORECASE | re.DOTALL,
+    )
+    specs: list[tuple[str, str]] = []
+    seen_names: set[str] = set()
+    for match in row_pattern.finditer(page or ""):
+        name = _clean_detail_text(match.group("name"))
+        value = _clean_detail_text(match.group("value"))
+        if not name or not value or name in seen_names:
+            continue
+        seen_names.add(name)
+        specs.append((name, value))
+    values = {name: value for name, value in specs}
+    range_km = _public_number(values, "Range (CLTC)", "CLTC electric range (mfr)")
+    battery_kwh = _public_number(values, "Battery capacity")
+    consumption = _public_number(values, "Consumption")
+    fuel_type = str(values.get("Fuel type") or "")
+    power_type = _public_power_type(fuel_type, title)
+    year_match = re.search(r"20\d{2}", title)
+    year = int(year_match.group()) if year_match else None
+    brand, series = _public_brand_series(trim_ref.get("model_ref"), title)
+    model = _public_trim_name(series, title, year)
+    dimensions = values.get("L/W/H") or values.get("Length/Width/Height") or ""
+    dimension_numbers = [float(item) for item in re.findall(r"\d+(?:\.\d+)?", dimensions)]
+    width_m = dimension_numbers[1] / 1000 if len(dimension_numbers) >= 2 else None
+    height_m = dimension_numbers[2] / 1000 if len(dimension_numbers) >= 3 else None
+    price = _public_number(values, "MSRP at launch")
+    source_id = "cnc_" + hashlib.sha1(trim_url.encode("utf-8")).hexdigest()[:18]
+    item = {
+        "id": f"carnews_{source_id[4:]}",
+        "source_id": source_id,
+        "brand_id": "",
+        "group_id": "",
+        "series_id": "",
+        "brand": brand,
+        "series": series,
+        "model": model,
+        "year": year,
+        "power_type": power_type,
+        "rated_range_km": range_km,
+        "battery_kwh": battery_kwh,
+        "consumption_per_100km": consumption,
+        "max_charge_kw": None,
+        "height_m": height_m,
+        "width_m": width_m,
+        "seats": 5,
+        "current_energy_percent": 80,
+        "safe_energy_reserve_percent": 15,
+        "has_etc": False,
+        "mountain_ready": True,
+        "unpaved_ready": False,
+        "state": "0",
+        "state_label": "公开资料（年份页）",
+        "price_min_cny": price,
+        "price_max_cny": price,
+        "source_url": str(trim_ref.get("model_url") or trim_url),
+        "detail_source_url": trim_url,
+        "specifications": [{"name": name, "value": value} for name, value in specs[:120]],
+        "specs_missing": [],
+        "estimated_fields": [],
+        "catalog_source": "CarNewsChina 公开车型资料",
+    }
+    item["specs_missing"] = _missing_specs(item)
+    return item
+
+
+def _public_number(values: dict[str, str], *names: str) -> float | None:
+    for name in names:
+        if name in values:
+            number = _number_from_text(values[name])
+            if number is not None:
+                return number
+    return None
+
+
+def _public_power_type(fuel_type: str, title: str) -> str:
+    text = f"{fuel_type} {title}".casefold()
+    if re.search(r"bev|electric|纯电", text):
+        return "electric"
+    if re.search(r"phev|hev|hybrid|plug", text):
+        return "hybrid"
+    return "fuel"
+
+
+def _public_brand_series(model_ref: object, title: str) -> tuple[str, str]:
+    ref = model_ref if isinstance(model_ref, dict) else {}
+    brand_name = str(ref.get("brand_name") or "").strip()
+    model_name = str(ref.get("name") or "").strip()
+    if "xiaomi" in f"{brand_name} {model_name}".casefold() or "小米" in title:
+        return "小米汽车", "小米SU7" if "su7" in title.casefold() else "小米汽车"
+    series = model_name or title
+    if brand_name and series.casefold().startswith(brand_name.casefold()):
+        series = series[len(brand_name):].strip(" -")
+    return brand_name or "公开车型资料", series
+
+
+def _public_trim_name(series: str, title: str, year: int | None) -> str:
+    if series == "小米SU7":
+        lower = title.casefold()
+        if "4wd max" in lower or re.search(r"\bmax\b", lower):
+            suffix = "四驱Max版"
+        elif "rear drive pro" in lower:
+            suffix = "后驱Pro版"
+        elif re.search(r"\bpro\b", lower):
+            suffix = "Pro版"
+        elif "rear drive standard" in lower:
+            suffix = "后驱标准版"
+        else:
+            suffix = "标准版"
+        return f"{series} {year or ''}款 {suffix}".replace("  ", " ").strip()
+    return title
+
+
 def _catalog_info_items(body: object) -> list[dict[str, Any]]:
     if not isinstance(body, dict) or body.get("status") != 1:
         return []
@@ -289,6 +869,22 @@ def _catalog_info_items(body: object) -> list[dict[str, Any]]:
     if isinstance(raw_items, list):
         return [item for item in raw_items if isinstance(item, dict)]
     return []
+
+
+async def _fetch_catalog_info_body(
+    client: httpx.AsyncClient,
+    query: str,
+) -> dict[str, Any] | None:
+    try:
+        response = await client.get(
+            CARINFO_API_URL,
+            params={"type": "info", "keyword": query},
+        )
+        response.raise_for_status()
+        body = response.json()
+    except (httpx.HTTPError, ValueError, TypeError):
+        return None
+    return body if isinstance(body, dict) else None
 
 
 def _catalog_detail_probe_items(

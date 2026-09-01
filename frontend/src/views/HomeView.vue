@@ -982,6 +982,7 @@ function activate(label: string) {
                     <strong>{{ item.brand }} · {{ item.series }}</strong>
                     <small>{{ item.model }} · {{ item.year || '年款待核实' }} · {{ item.state_label || '状态待核实' }}</small>
                     <small class="vehicle-catalog-specs">{{ catalogSummary(item) }}</small>
+                    <small v-if="item.catalog_source" class="vehicle-catalog-source">资料：{{ item.catalog_source }}</small>
                     </span>
                     <em>填入</em>
                   </button>
