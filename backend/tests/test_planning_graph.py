@@ -10,6 +10,7 @@ from app.db import SessionLocal, create_tables
 from app.domain.models import SkillResult, TripCreate, TripRequest, VehicleProfile
 from app.planning.graph import (
     _ensure_coordinates,
+    _merge_extracted_place,
     _current_weather_sample,
     _destination_focus_radius,
     _is_local_destination_anchor,
@@ -55,6 +56,20 @@ def test_return_deadline_allows_small_drift_and_half_day_grace():
     assert blocker is not None
     assert blocker["code"] == "RETURN_DEADLINE_UNACHIEVABLE"
     assert blocker["severity"] == "blocker"
+
+
+def test_fresh_semantic_destination_replaces_stale_parent_without_losing_same_anchor_metadata():
+    stale = {
+        "name": "河南",
+        "coordinates": {"longitude": 113.6, "latitude": 34.7},
+        "source_id": "old-geocode",
+    }
+    replaced = _merge_extracted_place(stale, "郑州", "city")
+    assert replaced == {"name": "郑州", "destination_scope": "city"}
+
+    same = _merge_extracted_place(stale, "河南省", "province")
+    assert same["coordinates"] == stale["coordinates"]
+    assert same["name"] == "河南省"
 
 
 def test_scheduled_routes_reject_missing_real_service_numbers():

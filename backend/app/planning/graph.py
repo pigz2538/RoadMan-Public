@@ -58,6 +58,7 @@ from .poi_enrichment import enrich_scheduled_activities, enrich_tourism_candidat
 from .seasonality import apply_seasonal_guard, parse_trip_date
 from .state import RoadManState
 from .tourism import (
+    deduplicate_attraction_candidates,
     review_daily_schedule,
     schedule_tourism_activities,
     select_primary_hotel,
@@ -165,6 +166,40 @@ def _poi_name_matches(requested: Any, candidate: Any) -> bool:
     return min(len(requested_key), len(candidate_key)) >= 2 and (
         requested_key in candidate_key or candidate_key in requested_key
     )
+
+
+def _merge_extracted_place(
+    existing: dict[str, Any] | None,
+    extracted_name: Any,
+    extracted_scope: Any = None,
+) -> dict[str, Any]:
+    """Reconcile a fresh semantic place with a persisted request.
+
+    Requirement extraction runs again when a planning job starts (and on a
+    replan).  Keeping an old nested place whenever it already exists caused a
+    new, more-specific answer such as ``郑州`` to be stored only in the
+    top-level fields while the route continued geocoding stale ``河南``.  If
+    the semantic name changed, discard the old coordinates/POI metadata; if it
+    is the same administrative place, preserve the provider-backed coordinates.
+    """
+    name = str(extracted_name or "").strip()
+    if not name:
+        return dict(existing or {})
+    scope = str(extracted_scope or "").strip().lower()
+    administrative_scopes = {"city", "province", "region", "multi_destination"}
+    old_name = str((existing or {}).get("name") or "").strip()
+    old_key = _normalize_poi_name(old_name)
+    new_key = _normalize_poi_name(name)
+    same_place = old_key == new_key
+    if not same_place and scope in administrative_scopes:
+        # “郑州” and “郑州市” are the same administrative anchor, whereas
+        # “北京片皮烤鸭” and “北京” are intentionally different.
+        same_place = _scope_name(old_name) == _scope_name(name)
+    merged = dict(existing or {}) if same_place else {}
+    merged["name"] = name
+    if scope:
+        merged["destination_scope"] = scope
+    return merged
 
 
 def _mark_existing_required_candidates(
@@ -396,7 +431,14 @@ EXPLICIT_LOCAL_FOCUS_RADIUS_KM = 35.0
 def _scope_name(value: Any) -> str:
     """Normalize a place label for generic city/POI scope comparison."""
     text = _normalize_poi_name(value)
-    return re.sub(r"(?:特别行政区|自治区|自治州|地区|市|县|区)$", "", text)
+    # Provider and model responses alternate between bare administrative names
+    # ("河南", "郑州") and their formal suffixes ("河南省", "郑州市").
+    # Treat those spellings as one anchor, but leave ordinary POI names intact.
+    return re.sub(
+        r"(?:特别行政区|自治区|自治州|地区|省|市|县|区|盟|旗)$",
+        "",
+        text,
+    )
 
 
 def _is_local_destination_anchor(destination: dict[str, Any] | None) -> bool:
@@ -519,14 +561,23 @@ def build_planning_graph(
         await emit(state, "extract_trip_request", "正在理解出发地、目的地与日期", 15)
         extracted = await extractor.extract(state["raw_input"], _local_today())
         current = dict(state.get("trip_request", {}))
-        if extracted.get("origin_name") and not current.get("origin"):
-            current["origin"] = {"name": extracted["origin_name"]}
-        if extracted.get("destination_name") and not current.get("destination"):
-            current["destination"] = {
-                "name": extracted["destination_name"],
-                "destination_scope": extracted.get("destination_scope", "unknown"),
-            }
-        if extracted.get("destination_scope") and current.get("destination"):
+        # A fresh semantic extraction is authoritative for route anchors. Do
+        # not merely fill an empty nested object: preflight may have stored a
+        # broad parent (河南) while the worker's second Agent turn resolves
+        # the explicit child (郑州). Merging by field leaves the UI and map on
+        # different places and makes destination research use a stale center.
+        if extracted.get("origin_name"):
+            current["origin"] = _merge_extracted_place(
+                current.get("origin"),
+                extracted.get("origin_name"),
+            )
+        if extracted.get("destination_name"):
+            current["destination"] = _merge_extracted_place(
+                current.get("destination"),
+                extracted.get("destination_name"),
+                extracted.get("destination_scope"),
+            )
+        elif extracted.get("destination_scope") and current.get("destination"):
             current["destination"]["destination_scope"] = extracted["destination_scope"]
         destination_names = extracted.get("destination_names")
         if isinstance(destination_names, list):
@@ -2192,6 +2243,9 @@ def build_planning_graph(
             candidates,
             state.get("excluded_places"),
         )
+        candidates["attractions"] = deduplicate_attraction_candidates(
+            candidates.get("attractions", [])
+        )
         destination_research["attraction_coverage"] = plan_attraction_coverage(
             candidates.get("attractions", []),
             len(state.get("day_plans", [])),
@@ -2303,6 +2357,7 @@ def build_planning_graph(
                 if nearby or (not destination_point and same_city):
                     filtered_candidates.append(candidate)
             attraction_candidates = filtered_candidates
+        attraction_candidates = deduplicate_attraction_candidates(attraction_candidates)
         if not attraction_candidates:
             return {
                 "local_routes": [],
@@ -3526,41 +3581,72 @@ def build_planning_graph(
                 and bool(day_defs)
             )
             if needs_day_base_connector:
-                base_origin = stages[-1].destination.model_dump(mode="json")
                 local_mode = "driving" if driving_requested else "transit"
-                connector_route = await _route(
-                    registry,
-                    base_origin,
-                    day_base,
-                    state["trip_id"],
-                    preferred_mode=local_mode,
-                    fallback_modes=stage_fallback_modes,
+                # A local sightseeing chain must close at the booked base
+                # before the night.  Reusing the previous ``local_start``
+                # (which includes a full sightseeing dwell) used to push the
+                # connector to 23:00–01:00 and move the hotel check-in onto
+                # the next calendar day.  For a comfortable itinerary, remove
+                # the latest optional local leg and recompute the connector
+                # until it ends by 22:30.  This is destination-agnostic and
+                # preserves required places whenever there is a feasible slot.
+                connector_latest_end = datetime.combine(
+                    day_date,
+                    time(22, 30) if index < len(day_defs) - 1 else time(23, 15),
+                    tzinfo=SHANGHAI,
                 )
-                if not connector_route.get("success"):
-                    connector_route = _fallback_local_route(
+
+                async def build_day_base_connector(
+                    start_at: datetime,
+                ) -> MovementStage:
+                    base_origin = stages[-1].destination.model_dump(mode="json")
+                    connector_route = await _route(
+                        registry,
                         base_origin,
                         day_base,
-                        local_mode,
+                        state["trip_id"],
+                        preferred_mode=local_mode,
+                        fallback_modes=stage_fallback_modes,
                     )
-                connector_route = await prepare_route(connector_route)
-                connector_stage = _movement_stage(
-                    day_id=f"day_{index + 1}",
-                    sequence=len(stages),
-                    title="返回住宿或目的地核心区",
-                    origin=base_origin,
-                    destination=day_base,
-                    route=connector_route,
-                    # ``local_start`` includes the deliberate sightseeing
-                    # dwell after the last transfer. Starting the return
-                    # connector at ``stage_end + 15`` discarded that dwell
-                    # and left the scheduler with a one-hour fake visit.
-                    start_at=max(
+                    if not connector_route.get("success"):
+                        connector_route = _fallback_local_route(
+                            base_origin,
+                            day_base,
+                            local_mode,
+                        )
+                    connector_route = await prepare_route(connector_route)
+                    return _movement_stage(
+                        day_id=f"day_{index + 1}",
+                        sequence=len(stages),
+                        title="返回住宿或目的地核心区",
+                        origin=base_origin,
+                        destination=day_base,
+                        route=connector_route,
+                        start_at=start_at,
+                    )
+
+                connector_stage = await build_day_base_connector(
+                    max(
                         stages[-1].planned_end + timedelta(minutes=15),
                         local_start,
-                    ),
+                    )
                 )
-                stages.append(connector_stage)
-                local_start = connector_stage.planned_end + timedelta(minutes=15)
+                while (
+                    connector_stage.planned_end > connector_latest_end
+                    and len(stages) > 1
+                    and index < len(day_defs) - 1
+                ):
+                    # Do not remove the outbound arrival itself. If even the
+                    # hotel connector cannot fit after that arrival, keeping
+                    # the route is more truthful than inventing a teleport;
+                    # ordinary city trips have enough room here.
+                    stages.pop()
+                    connector_stage = await build_day_base_connector(
+                        stages[-1].planned_end + timedelta(minutes=15)
+                    )
+                if connector_stage.planned_end <= connector_latest_end or len(stages) <= 1:
+                    stages.append(connector_stage)
+                    local_start = connector_stage.planned_end + timedelta(minutes=15)
             if index == len(day_defs) - 1 and not long_driving_return:
                 # Finish the hotel-to-terminal leg explicitly.  The flight or
                 # train route itself starts at the terminal, not at the hotel.
@@ -6300,6 +6386,7 @@ def _select_itinerary_places(
     return_candidates: bool = False,
 ) -> list[dict[str, Any]]:
     """Greedily balance Agent score with transfer distance to avoid scattered POIs."""
+    candidates = deduplicate_attraction_candidates(candidates)
     remaining: list[dict[str, Any]] = []
     seen_names: set[str] = set()
     seen_coordinates: list[tuple[float, float]] = []

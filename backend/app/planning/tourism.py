@@ -442,6 +442,183 @@ def _attraction_name_key(value: Any) -> str:
     return re.sub(r"[\s\u00b7•\-—–_/|（）()【】\[\]，,。；;:：]+", "", str(value or "")).casefold()
 
 
+_ATTRACTION_SERVICE_SUFFIX_RE = re.compile(
+    r"(?:服务区|收费站|停车场|停车区|停车楼|检票口|售票处|游客服务中心|游客中心|"
+    r"服务中心|出入口|入口|观景平台|观景台|东门|西门|南门|北门|正门|"
+    r"地铁站|公交站|高铁站|火车站|机场).*$",
+    re.IGNORECASE,
+)
+
+
+def _attraction_identity_key(value: Any) -> str:
+    """Return a conservative identity for one real attraction.
+
+    Map/search providers expose entrances, ticket gates, parking lots and
+    service areas as separate POIs.  Those records should not become repeated
+    sightseeing stops, while genuinely different landmarks with a shared
+    short name must remain separate.  Only explicit facility suffixes are
+    removed; no destination-specific name table is involved.
+    """
+    key = _attraction_name_key(value)
+    if not key:
+        return ""
+    previous = None
+    while key and key != previous:
+        previous = key
+        key = _ATTRACTION_SERVICE_SUFFIX_RE.sub("", key)
+    return key or _attraction_name_key(value)
+
+
+def _attraction_family_key(value: Any) -> str:
+    """Return the landmark portion of a provider's branch/entrance label.
+
+    Search results frequently spell one landmark as ``景区-东门`` or
+    ``景区（观景台）``.  The exact identity pass above handles explicit
+    facility suffixes; this second, coordinate-gated family key also handles
+    named sub-points such as ``黄河文化公园-星海湖`` without merging two
+    unrelated attractions that merely happen to be in the same city.
+    """
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    # Split before punctuation is removed so the parent landmark remains
+    # visible.  Keep the first non-empty segment; a provider may put a city
+    # prefix before the same landmark, which containment below still matches.
+    parent = re.split(r"[-—–_/|（）()【】\[\]·•]", text, maxsplit=1)[0]
+    return _attraction_identity_key(parent)
+
+
+def _merge_attraction_evidence(winner: dict[str, Any], discarded: dict[str, Any]) -> None:
+    """Keep alternate labels and evidence when collapsing one candidate."""
+    winner.setdefault("alternate_names", [])
+    discarded_name = str((discarded.get("place") or {}).get("name") or "").strip()
+    winner_name = str((winner.get("place") or {}).get("name") or "").strip()
+    if discarded_name and discarded_name != winner_name:
+        if discarded_name not in winner["alternate_names"]:
+            winner["alternate_names"].append(discarded_name)
+    existing_sources = winner.setdefault("source_records", [])
+    for source in discarded.get("source_records", []) or []:
+        if source not in existing_sources:
+            existing_sources.append(source)
+    if discarded.get("image_url") and not winner.get("image_url"):
+        winner["image_url"] = discarded["image_url"]
+    if discarded.get("detail_url") and not winner.get("detail_url"):
+        winner["detail_url"] = discarded["detail_url"]
+
+
+def _attraction_variant_nearby(left: dict[str, Any], right: dict[str, Any]) -> bool:
+    """Return whether two nearby labels are variants of one landmark."""
+    left_place = left.get("place") or {}
+    right_place = right.get("place") or {}
+    left_point = left_place.get("coordinates") or {}
+    right_point = right_place.get("coordinates") or {}
+    try:
+        # A few kilometres is appropriate for a scenic-area family: providers
+        # may geocode its gate, visitor centre and named sub-valley several
+        # kilometres apart.  The textual parent check below prevents this
+        # from merging unrelated attractions in the same district.
+        longitude_delta = float(left_point["longitude"]) - float(right_point["longitude"])
+        latitude_delta = float(left_point["latitude"]) - float(right_point["latitude"])
+        # One degree is roughly 111 km.  This equirectangular approximation is
+        # more than adequate for the <=1 km identity gate and avoids coupling
+        # the tourism module to the route graph's geometry helpers.
+        distance = ((longitude_delta**2 + latitude_delta**2) ** 0.5) * 111.0
+    except (KeyError, TypeError, ValueError):
+        return False
+    if distance > 5.0:
+        return False
+    left_key = _attraction_family_key(left_place.get("name"))
+    right_key = _attraction_family_key(right_place.get("name"))
+    if not left_key or not right_key:
+        return False
+    shorter, longer = sorted((left_key, right_key), key=len)
+    return len(shorter) >= 4 and (shorter in longer or longer.startswith(shorter))
+
+
+def deduplicate_attraction_candidates(
+    candidates: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Collapse provider variants of the same attraction before scheduling.
+
+    Explicit user requirements and source-backed high-priority records win the
+    canonical slot; evidence and alternate labels from the discarded records
+    are retained on that slot for traceability and UI detail panels.
+    """
+    kept: list[dict[str, Any]] = []
+    by_identity: dict[str, int] = {}
+
+    def rank(item: dict[str, Any]) -> tuple[int, int, float, float]:
+        try:
+            priority = float(item.get("destination_research_priority") or 0)
+        except (TypeError, ValueError):
+            priority = 0.0
+        try:
+            score = float(item.get("score") or 0)
+        except (TypeError, ValueError):
+            score = 0.0
+        try:
+            rating = float(item.get("rating") or 0)
+        except (TypeError, ValueError):
+            rating = 0.0
+        return (
+            1 if item.get("user_required") or item.get("user_confirmed") else 0,
+            1 if item.get("must_see") else 0,
+            priority + score / 100.0,
+            rating,
+        )
+
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            continue
+        place = candidate.get("place") or {}
+        name = str(place.get("name") or "").strip()
+        identity = _attraction_identity_key(name)
+        if not name or not identity:
+            kept.append(candidate)
+            continue
+        existing_index = by_identity.get(identity)
+        if existing_index is None:
+            by_identity[identity] = len(kept)
+            kept.append(candidate)
+            continue
+        existing = kept[existing_index]
+        if rank(candidate) > rank(existing):
+            winner, discarded = candidate, existing
+            kept[existing_index] = winner
+        else:
+            winner, discarded = existing, candidate
+        _merge_attraction_evidence(winner, discarded)
+
+    # A parent attraction and its named sub-points often have different
+    # suffixes rather than an explicit facility word.  Collapse only when
+    # their coordinates are within a few kilometres and the labels share a
+    # substantial parent key; this remains generic and avoids a hard-coded
+    # destination list.
+    index = 0
+    while index < len(kept):
+        candidate = kept[index]
+        merge_index = next(
+            (
+                other_index
+                for other_index, other in enumerate(kept[:index])
+                if _attraction_variant_nearby(other, candidate)
+            ),
+            None,
+        )
+        if merge_index is None:
+            index += 1
+            continue
+        existing = kept[merge_index]
+        if rank(candidate) > rank(existing):
+            kept[merge_index] = candidate
+            winner, discarded = candidate, existing
+        else:
+            winner, discarded = existing, candidate
+        _merge_attraction_evidence(winner, discarded)
+        kept.pop(index)
+    return kept
+
+
 def _place_distance_km(left: dict[str, Any] | None, right: dict[str, Any] | None) -> float | None:
     if not left or not right:
         return None
@@ -457,6 +634,56 @@ def _place_distance_km(left: dict[str, Any] | None, right: dict[str, Any] | None
         return 6371.0088 * 2 * asin(sqrt(value))
     except (KeyError, TypeError, ValueError):
         return None
+
+
+def _candidate_matches_route(
+    candidate: dict[str, Any],
+    stages: list[dict[str, Any]],
+    *,
+    max_distance_km: float = 5.0,
+) -> bool:
+    """Return whether an optional attraction is represented by this day's route.
+
+    The split-day model draft can contain ranked POIs that the route builder
+    ultimately did not visit.  Adding those cards during the later filler pass
+    makes the map and the daily list disagree.  Match both ends of every
+    scenic stage by normalized name, then use a small coordinate radius for
+    provider naming variants.  Required/user-locked places deliberately bypass
+    this guard and are handled by the explicit requirement pass.
+    """
+    candidate_place = candidate.get("place") or {}
+    candidate_name = str(candidate_place.get("name") or "").strip()
+    if not candidate_name:
+        return False
+    candidate_key = _attraction_name_key(candidate_name)
+    candidate_identity = _attraction_identity_key(candidate_name)
+    for stage in stages:
+        if _stage_is_non_scenic(stage):
+            continue
+        endpoints = [
+            stage.get("origin") or {},
+            stage.get("destination") or {},
+        ]
+        for endpoint in endpoints:
+            endpoint_name = str(endpoint.get("name") or "").strip()
+            if endpoint_name:
+                endpoint_key = _attraction_name_key(endpoint_name)
+                endpoint_identity = _attraction_identity_key(endpoint_name)
+                if (
+                    candidate_key == endpoint_key
+                    or candidate_key in endpoint_key
+                    or endpoint_key in candidate_key
+                    or candidate_identity == endpoint_identity
+                    or candidate_identity in endpoint_identity
+                    or endpoint_identity in candidate_identity
+                ):
+                    return True
+            if (
+                _place_distance_km(candidate_place, endpoint) is not None
+                and _place_distance_km(candidate_place, endpoint) <= max_distance_km
+            ):
+                return True
+    return False
 
 
 def _hotel_for_day(
@@ -625,6 +852,14 @@ def schedule_tourism_activities(
             ):
                 existing.update(candidate)
                 break
+    # Normalize provider variants before both hotel-base scoring and activity
+    # filling.  Without this pass, a gate/parking/entrance label for the same
+    # landmark can consume a second day's sightseeing slot.
+    # Some degraded providers return only hotels/meals.  Keep the planner
+    # executable in that case instead of indexing a missing category.
+    candidates["attractions"] = deduplicate_attraction_candidates(
+        candidates.get("attractions", [])
+    )
     hotels = [item for item in candidates.get("hotels", []) if _comfortable_hotel(item)]
     # A travel-platform result can be a valid hotel but still be hundreds of
     # kilometres from the selected gateway (common when the destination is a
@@ -757,6 +992,7 @@ def schedule_tourism_activities(
         # the final persistence step.
         day.setdefault("title", f"第 {day.get('day_index', day_index + 1)} 天")
         day_date = datetime.fromisoformat(f"{day['date']}T00:00:00+08:00").date()
+        stages = sorted(day.get("stages", []), key=lambda item: item.get("sequence", 0))
         activities: list[dict[str, Any]] = []
         for activity in list(day.get("activities", [])):
             # Replans start from the previous persisted snapshot. Clean the
@@ -788,6 +1024,71 @@ def schedule_tourism_activities(
                     # from the formal plan and leave the candidate visible as
                     # a backup recommendation.
                     continue
+                # A previous model round may have persisted an attraction in
+                # the narrow gap after a late arrival (for example
+                # 19:30–22:30 on the outbound day).  Keeping that stale
+                # record bypasses the route-aware daylight scheduler and is
+                # how a supposedly comfortable trip ended up with evening or
+                # midnight sightseeing.  Drop it here; the required-place
+                # pass below will attempt a daytime slot, otherwise the
+                # verifier reports the honest unresolved requirement.
+                try:
+                    existing_start = datetime.fromisoformat(activity["planned_start"])
+                    existing_end = datetime.fromisoformat(activity["planned_end"])
+                except (KeyError, TypeError, ValueError):
+                    existing_start = existing_end = None
+                if (
+                    existing_start is None
+                    or existing_end is None
+                    or existing_start.date() != day_date
+                    or existing_end.date() != day_date
+                    or existing_start.time() < time(7, 0)
+                    or existing_end.time() > time(21, 0)
+                ):
+                    used_attraction_names.discard(name)
+                    continue
+                # The split-day Agent can carry an attraction from its draft
+                # even when the route builder later chose a different cluster
+                # (or no local route at all).  Rendering that orphan card
+                # makes the map and the daily list disagree.  Keep only a
+                # requirement explicitly named by the traveller, or a place
+                # that is represented by a scenic movement endpoint; the
+                # normal route-aware filler will add the latter consistently.
+                def _route_represents_attraction(stage: dict[str, Any]) -> bool:
+                    activity_key = _attraction_name_key(name)
+                    endpoint_names = [
+                        str((stage.get("origin") or {}).get("name") or "").strip(),
+                        str((stage.get("destination") or {}).get("name") or "").strip(),
+                    ]
+                    for stage_name in endpoint_names:
+                        if not stage_name:
+                            continue
+                        stage_key = _attraction_name_key(stage_name)
+                        activity_identity = _attraction_identity_key(name)
+                        stage_identity = _attraction_identity_key(stage_name)
+                        # An exact endpoint is authoritative even for a
+                        # minimal legacy stage that omitted its descriptive
+                        # title.  Check both ends: an attraction can be the
+                        # origin of the next connector after the route builder
+                        # has split the previous scenic leg.
+                        if activity_key == _attraction_identity_key(stage_name):
+                            return True
+                        if (
+                            activity_identity == stage_identity
+                            or activity_identity in stage_identity
+                            or stage_identity in activity_identity
+                        ):
+                            return True
+                        if _stage_is_non_scenic(stage):
+                            continue
+                        if activity_key in stage_key or stage_key in activity_key:
+                            return True
+                    return False
+
+                if stages and not any(_route_represents_attraction(stage) for stage in stages):
+                    if not activity.get("required") and not activity.get("locked"):
+                        used_attraction_names.discard(name)
+                        continue
                 if source_candidate is not None:
                     try:
                         existing_duration = int(
@@ -847,7 +1148,6 @@ def schedule_tourism_activities(
                 for key, value in existing_checks.items():
                     activity.setdefault(key, value)
             activities.append(activity)
-        stages = sorted(day.get("stages", []), key=lambda item: item.get("sequence", 0))
         # On a return day the final stage is the intercity leg home.  Local
         # attraction filling must stop before that departure; otherwise the
         # generic gap filler can put a destination POI *after* the traveller
@@ -1274,6 +1574,18 @@ def schedule_tourism_activities(
                     or name in existing_names
                     or name in used_attraction_names
                 ):
+                    continue
+                if (
+                    stages
+                    and not candidate.get("user_required")
+                    and not candidate.get("locked")
+                    and not candidate.get("user_confirmed")
+                    and not _candidate_matches_route(candidate, stages)
+                ):
+                    # Never add a ranked POI merely because a free clock slot
+                    # exists.  It must be one of today's route endpoints (or
+                    # sit within the small endpoint radius); otherwise it is
+                    # an alternative, not an executable itinerary activity.
                     continue
                 activity_day_start = datetime.combine(
                     datetime.fromisoformat(f"{day['date']}T00:00:00+08:00").date(),

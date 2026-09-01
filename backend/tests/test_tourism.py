@@ -12,6 +12,7 @@ from app.planning.recommendations import (
 from app.planning.tourism import (
     _suggested_duration,
     activity_checks,
+    deduplicate_attraction_candidates,
     review_daily_schedule,
     schedule_tourism_activities,
     select_primary_hotel,
@@ -112,6 +113,29 @@ def test_tourism_scheduler_adds_attraction_and_overnight_hotel():
     assert hotel["planned_end"].startswith("2026-08-03")
     assert hotel["source_records"][0]["provider"] == "高德地图"
     assert verify_tourism_plan(scheduled, candidates) == []
+
+
+def test_attraction_variants_share_one_itinerary_slot_and_preserve_evidence():
+    candidates = [
+        {
+            "place": {"name": "黄河游览区检票口"},
+            "destination_research_priority": 60,
+            "score": 70,
+            "source_records": [{"provider": "地图"}],
+        },
+        {
+            "place": {"name": "黄河游览区停车场"},
+            "destination_research_priority": 40,
+            "score": 50,
+            "source_records": [{"provider": "旅行信息"}],
+        },
+    ]
+
+    result = deduplicate_attraction_candidates(candidates)
+
+    assert [item["place"]["name"] for item in result] == ["黄河游览区检票口"]
+    assert result[0]["alternate_names"] == ["黄河游览区停车场"]
+    assert len(result[0]["source_records"]) == 2
 
 
 def test_attraction_duration_defaults_to_comfortable_block_but_compact_can_opt_out():
@@ -827,6 +851,49 @@ def test_tourism_scheduler_removes_repeated_agent_attraction_activities():
         for item in day["activities"]
         if item["type"] == "attraction"
     ) == 1
+
+
+def test_tourism_scheduler_drops_optional_attraction_not_represented_by_route():
+    day = {
+        "id": "day_1",
+        "date": "2026-08-02",
+        "items": [],
+        "stages": [
+            {
+                "id": "stage_1",
+                "sequence": 0,
+                "title": "目的地短途接驳",
+                "destination": {"name": "黄河文化公园"},
+                "planned_start": "2026-08-02T09:00:00+08:00",
+                "planned_end": "2026-08-02T09:30:00+08:00",
+            }
+        ],
+        "activities": [
+            {
+                "id": "activity_orphan",
+                "type": "attraction",
+                "place": {"name": "无路线的商场"},
+                "planned_start": "2026-08-02T10:00:00+08:00",
+                "planned_end": "2026-08-02T13:00:00+08:00",
+                "duration_minutes": 180,
+            }
+        ],
+    }
+    scheduled = schedule_tourism_activities(
+        [day],
+        {
+            "attractions": [
+                {"place": {"name": "无路线的商场"}, "agent_suitability": True}
+            ],
+            "hotels": [],
+            "meals": [],
+        },
+    )
+    assert not any(
+        item.get("type") == "attraction"
+        and item.get("place", {}).get("name") == "无路线的商场"
+        for item in scheduled[0]["activities"]
+    )
 
 
 @pytest.mark.asyncio

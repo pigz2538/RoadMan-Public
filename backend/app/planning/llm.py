@@ -61,6 +61,11 @@ async def deepseek_complete(
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
         "stream": False,
+        # Semantic extraction is a structured decision, not creative writing.
+        # Keep sampling deterministic so the same natural-language request
+        # cannot alternate between an administrative parent and its explicit
+        # child city on successive planning attempts.
+        "temperature": 0.0,
         "thinking": {"type": "enabled" if thinking else "disabled"},
         "reasoning_effort": effort,
         "max_tokens": max_tokens,
@@ -169,9 +174,13 @@ class DeepSeekRequirementExtractor:
             "list of places explicitly requested by the user. Never stringify a list into destination_name. "
             "destination_scope must be exactly one of poi, city, province, region, multi_destination, unknown. "
             "For a province/region/city, keep the administrative name itself; never replace it with a nearby hotel, "
-            "restaurant, university, campus or other POI. For multiple regions/cities, preserve every destination in "
-            "destination_names and use the first explicitly ordered region as destination_name only when a route anchor "
-            "is needed. travel_intents contains the user's actual experience goals (for example stargazing or food), "
+            "restaurant, university, campus or other POI. If the same destination phrase contains an administrative "
+            "parent and a more specific child city/area (for example ‘河南郑州附近’), the child is the canonical "
+            "route anchor: return destination_name=郑州, destination_scope=city and do not treat 河南 as a second "
+            "stop. ‘附近/周边/及其周边’ is a scope modifier, not another destination. Only keep the parent in "
+            "destination_names when the user explicitly intends multiple separate stops. For multiple regions/cities, "
+            "preserve every destination in destination_names and use the first explicitly ordered region as "
+            "destination_name only when a route anchor is needed. travel_intents contains the user's actual experience goals (for example stargazing or food), "
             "not guessed place names. "
             "Only fill start_date/end_date when the user's text explicitly gives a calendar date, a relative date "
             "such as 今天/明天/后天/前天, or an unambiguous weekday. English relative dates and weekdays "
@@ -225,6 +234,10 @@ class DeepSeekRequirementExtractor:
             # is unavailable, the original response remains intact and the
             # normal clarification flow is allowed to ask the user plainly.
             parsed, semantic_repair_used = await self._repair_missing_core_fields(
+                raw_text,
+                parsed,
+            )
+            parsed, destination_adjudication_used = await self._adjudicate_destination_anchor(
                 raw_text,
                 parsed,
             )
@@ -350,10 +363,16 @@ class DeepSeekRequirementExtractor:
                 )
                 merged["_intent_status"] = "ok"
                 merged["_intent_source"] = (
-                    "deepseek_repair" if semantic_repair_used else "deepseek"
+                    "deepseek_destination_adjudication"
+                    if destination_adjudication_used
+                    else "deepseek_repair"
+                    if semantic_repair_used
+                    else "deepseek"
                 )
                 if semantic_repair_used:
                     merged["_intent_repair_attempted"] = True
+                if destination_adjudication_used:
+                    merged["_destination_adjudication_used"] = True
             merged["_source_raw_text"] = raw_text
             return merged
         except (httpx.HTTPError, ValueError, TypeError, json.JSONDecodeError):
@@ -479,6 +498,76 @@ class DeepSeekRequirementExtractor:
                 result["destination_names"] = [canonical]
                 changed = True
         return result, changed
+
+    async def _adjudicate_destination_anchor(
+        self,
+        raw_text: str,
+        parsed: dict[str, Any],
+    ) -> tuple[dict[str, Any], bool]:
+        """Resolve an administrative parent/child ambiguity with the Agent.
+
+        A first extraction can legitimately identify both ``河南`` and
+        ``郑州``.  Sending that pair straight to geocoding makes the province
+        win by accident and moves the whole trip to a province centroid.  This
+        focused semantic turn asks the same model to decide entity boundaries;
+        no city table, keyword parser or nearby POI is used here.  Province-only
+        requests remain provinces, while a more specific city/area mentioned in
+        the same destination phrase becomes the route anchor.
+        """
+        if not isinstance(parsed, dict):
+            return parsed, False
+        scope = str(parsed.get("destination_scope") or "unknown").strip().lower()
+        names = _normalize_destination_names(parsed.get("destination_names"))
+        # Multi-destination output is already an explicit ordered list.  A
+        # province/region result, or a non-multi list with multiple names, is
+        # the ambiguity shape that needs an entity-boundary adjudication.
+        if scope not in {"province", "region"} and not (
+            len(names) > 1 and scope != "multi_destination"
+        ):
+            return parsed, False
+        prompt = (
+            "你是 RoadMan 目的地实体边界复核智能体，只复核目的地字段，不规划路线，也不查询附近 POI。"
+            "请重新阅读用户原文和上一回合结果。若同一目的地短语同时出现上级行政区与更具体的城市、"
+            "县区或景区（例如‘河南郑州附近’），必须选择更具体且实际承载游览的下级作为 destination_name，"
+            "scope 设为 city/district/poi 中最合适的一项；‘附近、周边、及其周边’只是范围修饰，不是第二个地点。"
+            "只有用户明确要去多个互相独立的城市/地区时，才保留 multi_destination 和完整有序列表。"
+            "如果原文只写省份或大区，没有更具体子地点，就保留省份/大区及 province/region scope，不能擅自挑城市。"
+            "严禁把餐馆、酒店、学校、园区、站点或搜索结果当成行政区。"
+            "只返回 JSON：{\"destination_name\":\"...\",\"destination_names\":[\"...\"],"
+            "\"destination_scope\":\"poi|city|province|region|multi_destination|unknown\"}。"
+            f"用户原文：{raw_text}；上一回合：{json.dumps({k: parsed.get(k) for k in ('destination_name', 'destination_names', 'destination_scope')}, ensure_ascii=False)}"
+        )
+        try:
+            adjudicated = _parse_unfiltered_json_object(
+                await deepseek_complete(
+                    self.settings,
+                    prompt,
+                    timeout=min(self.settings.deepseek_timeout_seconds, 45),
+                    agent_name="destination_entity_adjudicator",
+                )
+            )
+        except (httpx.HTTPError, ValueError, TypeError, json.JSONDecodeError):
+            return parsed, False
+        if _destination_payload_needs_repair(adjudicated):
+            return parsed, False
+        result = dict(parsed)
+        name = adjudicated.get("destination_name")
+        normalized_name = _normalize_place_name(name) if isinstance(name, str) else ""
+        normalized_names = _normalize_destination_names(adjudicated.get("destination_names"))
+        if normalized_name:
+            result["destination_name"] = normalized_name
+        if normalized_names:
+            result["destination_names"] = normalized_names
+        elif normalized_name:
+            result["destination_names"] = [normalized_name]
+        adjudicated_scope = str(adjudicated.get("destination_scope") or "").strip().lower()
+        if adjudicated_scope in {"poi", "city", "province", "region", "multi_destination", "unknown"}:
+            result["destination_scope"] = adjudicated_scope
+        # An adjudicator that returned no usable destination did not make a
+        # decision; retain the first extraction and allow normal clarification.
+        if not result.get("destination_name") and not result.get("destination_names"):
+            return parsed, False
+        return result, True
 
 
 class DeepSeekRequirementValidator:
@@ -763,6 +852,12 @@ class DeepSeekDestinationResearchAgent:
             or trip_request.get("stay_only_at_destination")
             else ""
         )
+        preference_instruction = (
+            "用户偏好自然景观：每天优先安排有公开证据的河流、湖泊、山地、湿地、公园或近郊景区，"
+            "可以覆盖目的地周边代表性区域，但不要用普通城区商业点凑数。"
+            if any("自然" in str(value) or "户外" in str(value) for value in trip_request.get("preferences", []))
+            else ""
+        )
         prompt = (
             "You are RoadMan Destination Research Agent. Based ONLY on supplied web/FlyAI evidence, "
             "identify famous, source-backed must-see attractions and representative local foods. "
@@ -772,7 +867,7 @@ class DeepSeekDestinationResearchAgent:
             "return enough distinct attractions for the number of travel days (up to 12 attraction recommendations). "
             "Do not invent names, choose a restaurant/university/campus as a province or city destination, or promote "
             "obscure nearby POIs just because they are close to a geocoder point. Do not turn an experience into a place name. "
-            f"{local_anchor_instruction} "
+            f"{local_anchor_instruction} {preference_instruction} "
             "Return JSON only: {\"recommendations\":[{\"name\":\"...\",\"category\":\"attractions|meals\","
             "\"importance\":0,\"area\":\"城区或地理片区\",\"suggested_minutes\":180,"
             "\"visit_scale\":\"major|compact|indoor|outdoor|unknown\","
@@ -881,13 +976,19 @@ class DeepSeekDestinationPlanAgent:
             or trip_request.get("stay_only_at_destination")
             else ""
         )
+        preference_instruction = (
+            "用户偏好自然景观：每天优先安排有公开证据的河流、湖泊、山地、湿地、公园或近郊景区，"
+            "可以覆盖目的地周边代表性区域，但不要用普通城区商业点凑数。"
+            if any("自然" in str(value) or "户外" in str(value) for value in trip_request.get("preferences", []))
+            else ""
+        )
         prompt = (
             "你是 RoadMan 目的地行程策划 Agent。你已经拿到公开网页和旅行信息服务的证据，"
             "现在只写一份供路线 Agent 执行的高层计划单，不直接返回地图坐标。"
             "对于省份/大区域，必须拆成有代表性的城市或景区片区；对于城市，必须覆盖不同片区的著名地标，"
             "不要只围绕酒店，不要把学校、餐馆或搜索结果中的偶然地点当作目的地。"
             "根据用户日期、交通、人数和舒适度约束安排每天的主轴，给出景点、三餐和住宿区域的建议。"
-            f"{local_anchor_instruction} "
+            f"{local_anchor_instruction} {preference_instruction} "
             "没有证据支持的地点不要写入 selected_attractions。只返回 JSON："
             '{"strategy":"中文总体策略","selected_attractions":[{"name":"...","destination":"...",'
             '"area":"...","reason":"..."}],"day_plans":[{"day":1,"focus":"...",'

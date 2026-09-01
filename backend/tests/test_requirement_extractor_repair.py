@@ -72,3 +72,39 @@ async def test_requirement_agent_does_not_overwrite_existing_anchor(monkeypatch)
     assert result["origin_name"] == "武汉"
     assert result["destination_name"] == "北京"
     assert result["_intent_source"] == "deepseek"
+
+
+@pytest.mark.asyncio
+async def test_requirement_agent_adjudicates_parent_city_destination(monkeypatch):
+    """A province plus explicit city must resolve to the city anchor."""
+
+    calls: list[str] = []
+
+    async def fake_complete(settings, prompt, *, timeout=None, json_output=True, agent_name=""):
+        calls.append(agent_name)
+        if agent_name == "requirement_extractor":
+            return (
+                '{"origin_name":"武汉","destination_name":"河南",'
+                '"destination_names":["河南","郑州"],"destination_scope":"province",'
+                '"start_date":"2026-09-07","end_date":"2026-09-10",'
+                '"travelers":2,"transport_modes":["driving"],"preferences":["自然景观"]}'
+            )
+        assert agent_name == "destination_entity_adjudicator"
+        return (
+            '{"destination_name":"郑州","destination_names":["郑州"],'
+            '"destination_scope":"city"}'
+        )
+
+    monkeypatch.setattr("app.planning.llm.deepseek_complete", fake_complete)
+    result = await DeepSeekRequirementExtractor(
+        Settings(deepseek_api_key="test-key", deepseek_thinking=False)
+    ).extract(
+        "周一早上从武汉出发，去河南郑州附近，周四晚八点前回来，情侣出游，自驾，喜欢自然景观",
+        today=__import__("datetime").date(2026, 9, 1),
+    )
+
+    assert calls == ["requirement_extractor", "destination_entity_adjudicator"]
+    assert result["destination_name"] == "郑州"
+    assert result["destination_names"] == ["郑州"]
+    assert result["destination_scope"] == "city"
+    assert result["_destination_adjudication_used"] is True
