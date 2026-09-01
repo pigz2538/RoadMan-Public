@@ -18,6 +18,12 @@ class GeocodeInput(BaseModel):
     city: str | None = None
 
 
+class ReverseGeocodeInput(BaseModel):
+    location: str = Field(pattern=r"^-?\d+(\.\d+)?,-?\d+(\.\d+)?$")
+    radius: int = Field(default=1000, ge=0, le=5000)
+    extensions: Literal["base", "all"] = "base"
+
+
 class DrivingInput(BaseModel):
     origin: str = Field(pattern=r"^-?\d+(\.\d+)?,-?\d+(\.\d+)?$")
     destination: str = Field(pattern=r"^-?\d+(\.\d+)?,-?\d+(\.\d+)?$")
@@ -173,6 +179,84 @@ class AmapGeocodeAdapter(SkillAdapter):
                 "adcode": item.get("adcode"),
             },
             sources=[SourceRecord(provider="高德地图", title="地理编码 API", url=f"{AMAP_BASE_URL}/v3/geocode/geo")],
+            latency_ms=int((time.perf_counter() - started) * 1000),
+        )
+
+    async def health_check(self) -> dict[str, Any]:
+        return {"status": "ready" if self.api_key else "degraded", "configured": bool(self.api_key)}
+
+
+class AmapReverseGeocodeAdapter(SkillAdapter):
+    """Resolve browser coordinates to a compact city/district label.
+
+    The home weather card deliberately uses the browser's coordinates for the
+    forecast.  This small reverse-geocode call only supplies a human-readable
+    label; if it is unavailable, the card still shows ``当前位置`` and keeps the
+    coordinate-based weather result instead of falling back to a fixed city.
+    """
+
+    name = "amap.reverse_geocode"
+    category = "geocoding"
+    cache_ttl_seconds = 7 * 24 * 3600
+
+    def __init__(self, api_key: str):
+        self.api_key = api_key
+
+    async def validate_input(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return ReverseGeocodeInput.model_validate(payload).model_dump()
+
+    async def execute(self, payload: dict[str, Any], _: SkillContext) -> SkillResult:
+        if not self.api_key:
+            return SkillResult(
+                success=False,
+                provider="位置服务",
+                warnings=["未配置位置服务密钥"],
+                error_code="SKILL_NOT_CONFIGURED",
+            )
+        started = time.perf_counter()
+        endpoint = f"{AMAP_BASE_URL}/v3/geocode/regeo"
+        request = ReverseGeocodeInput.model_validate(payload)
+        async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+            response = await client.get(
+                endpoint,
+                params={
+                    "key": self.api_key,
+                    "location": request.location,
+                    "radius": request.radius,
+                    "extensions": request.extensions,
+                },
+            )
+            response.raise_for_status()
+            body = response.json()
+        regeocode = body.get("regeocode") or {}
+        component = regeocode.get("addressComponent") or {}
+        if body.get("status") != "1" or not regeocode:
+            return SkillResult(
+                success=False,
+                provider="位置服务",
+                warnings=[body.get("info", "未解析出当前位置")],
+                error_code="AMAP_REVERSE_GEOCODE_FAILED",
+                latency_ms=int((time.perf_counter() - started) * 1000),
+            )
+        city = component.get("city")
+        # AMap returns an empty list for municipality-level cities.  Prefer the
+        # province in that case so Beijing/Shanghai are still displayed.
+        if isinstance(city, list):
+            city = None
+        label = city or component.get("province") or component.get("district") or "当前位置"
+        return SkillResult(
+            success=True,
+            provider="位置服务",
+            data={
+                "label": str(label),
+                "formatted_address": regeocode.get("formatted_address"),
+                "province": component.get("province"),
+                "city": city,
+                "district": component.get("district"),
+                "township": component.get("township"),
+                "location": request.location,
+            },
+            sources=[SourceRecord(provider="位置服务", title="当前位置解析", url=endpoint)],
             latency_ms=int((time.perf_counter() - started) * 1000),
         )
 

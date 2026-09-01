@@ -598,6 +598,16 @@ async def test_amap_missing_key_degrades_cleanly(client):
 
 
 @pytest.mark.asyncio
+async def test_amap_reverse_geocode_missing_key_degrades_cleanly(client):
+    response = await client.post(
+        "/api/v1/skills/amap/regeocode",
+        json={"location": "114.3055,30.5928"},
+    )
+    assert response.status_code == 200
+    assert response.json()["error_code"] == "SKILL_NOT_CONFIGURED"
+
+
+@pytest.mark.asyncio
 async def test_validation_errors_use_unified_contract(client):
     response = await client.post("/api/v1/trips", json={})
 

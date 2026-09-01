@@ -135,6 +135,7 @@ data: {"event":"node_started","trip_id":"trip_x","node":"build_stages","tool":nu
 | `GET` | `/api/v1/skills/calls?limit=N` | Skill 调用审计 |
 | `GET` | `/api/v1/skills/metrics` | Skill 成功率/缓存/延迟汇总 |
 | `POST` | `/api/v1/skills/amap/geocode` | 高德地理编码 |
+| `POST` | `/api/v1/skills/amap/regeocode` | 浏览器坐标反向解析为城市/区域标签（天气卡片辅助） |
 | `POST` | `/api/v1/skills/amap/driving` | 高德驾车路线 |
 | `POST` | `/api/v1/skills/amap/route` | 驾车/骑行/步行/公共交通统一路线 |
 | `POST` | `/api/v1/skills/amap/poi` | 高德 POI |

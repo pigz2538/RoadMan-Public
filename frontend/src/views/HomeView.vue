@@ -11,6 +11,7 @@ import {
   fetchWeatherForecast,
   listTrips,
   preflightTrip,
+  reverseGeocodeLocation,
   startPlanning as startPlanningRequest,
   type PreflightResult,
 } from '../api/trips'
@@ -35,7 +36,28 @@ const historyTrips = ref<Trip[]>([])
 const historyDeletingId = ref<string | null>(null)
 const historySelectedIds = ref<string[]>([])
 const historyBulkDeleting = ref(false)
-const weather = ref({ temperature: '--', condition: '晴', location: '武汉' })
+type WeatherState = {
+  temperature: string
+  condition: string
+  location: string
+  status: 'locating' | 'loading' | 'ready' | 'unavailable'
+}
+
+type WeatherCoordinates = {
+  latitude: number
+  longitude: number
+  location: string
+  source: 'browser' | 'remembered'
+}
+
+const WEATHER_LOCATION_STORAGE_KEY = 'roadman:last-weather-location'
+const weather = ref<WeatherState>({
+  temperature: '--',
+  condition: '正在定位',
+  location: '正在获取位置',
+  status: 'locating',
+})
+let weatherRequestId = 0
 const activeMenu = ref('账户设置')
 const drawerOpen = ref(false)
 const accountMenuOpen = ref(false)
@@ -404,49 +426,135 @@ function weatherCondition(code: number | null | undefined) {
   return '晴'
 }
 
-function browserCoordinates() {
-  const fallback = { latitude: 30.5928, longitude: 114.3055, location: '武汉' }
-  if (!navigator.geolocation) return Promise.resolve(fallback)
-  return new Promise<typeof fallback>((resolve) => {
+function readRememberedWeatherLocation(): WeatherCoordinates | null {
+  try {
+    const raw = window.localStorage.getItem(WEATHER_LOCATION_STORAGE_KEY)
+    if (!raw) return null
+    const value = JSON.parse(raw) as Partial<WeatherCoordinates>
+    if (
+      typeof value.latitude !== 'number'
+      || typeof value.longitude !== 'number'
+      || !Number.isFinite(value.latitude)
+      || !Number.isFinite(value.longitude)
+    ) return null
+    return {
+      latitude: value.latitude,
+      longitude: value.longitude,
+      location: '上次位置',
+      source: 'remembered',
+    }
+  } catch {
+    return null
+  }
+}
+
+function browserCoordinates(): Promise<WeatherCoordinates | null> {
+  const remembered = readRememberedWeatherLocation()
+  if (typeof navigator === 'undefined' || !navigator.geolocation) {
+    return Promise.resolve(remembered)
+  }
+
+  // Browser permission prompts and cold-start GPS fixes regularly take more
+  // than a second.  The previous 1.2s/1.4s timeout made every slow but valid
+  // location silently fall back to a hard-coded Wuhan coordinate.  Keep a
+  // bounded wait, but allow the browser enough time to return the approved
+  // position; a remembered position is only used if the request really fails.
+  return new Promise<WeatherCoordinates | null>((resolve) => {
     let settled = false
-    const finish = (value: typeof fallback) => {
+    const finish = (value: WeatherCoordinates | null) => {
       if (settled) return
       settled = true
       resolve(value)
     }
-    const timer = window.setTimeout(() => finish(fallback), 1400)
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        window.clearTimeout(timer)
-        finish({
-          latitude: position.coords.latitude,
-          longitude: position.coords.longitude,
-          location: '当前位置',
-        })
-      },
-      () => {
-        window.clearTimeout(timer)
-        finish(fallback)
-      },
-      { enableHighAccuracy: false, maximumAge: 10 * 60 * 1000, timeout: 1200 },
-    )
+    const timer = window.setTimeout(() => finish(remembered), 15_000)
+    try {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          window.clearTimeout(timer)
+          const coordinates: WeatherCoordinates = {
+            latitude: position.coords.latitude,
+            longitude: position.coords.longitude,
+            location: '当前位置',
+            source: 'browser',
+          }
+          try {
+            window.localStorage.setItem(
+              WEATHER_LOCATION_STORAGE_KEY,
+              JSON.stringify({ latitude: coordinates.latitude, longitude: coordinates.longitude }),
+            )
+          } catch {
+            // Storage can be disabled in private browsing; the live result is
+            // still useful and should not be discarded.
+          }
+          finish(coordinates)
+        },
+        () => {
+          window.clearTimeout(timer)
+          finish(remembered)
+        },
+        { enableHighAccuracy: false, maximumAge: 5 * 60 * 1000, timeout: 12_000 },
+      )
+    } catch {
+      window.clearTimeout(timer)
+      finish(remembered)
+    }
   })
 }
 
 async function loadHomeWeather() {
+  const requestId = ++weatherRequestId
+  weather.value = {
+    temperature: '--',
+    condition: '正在定位',
+    location: '正在获取位置',
+    status: 'locating',
+  }
   const coordinates = await browserCoordinates()
+  if (requestId !== weatherRequestId) return
+  if (!coordinates) {
+    weather.value = {
+      temperature: '--',
+      condition: '天气待更新',
+      location: '位置未获取',
+      status: 'unavailable',
+    }
+    return
+  }
+
+  weather.value = {
+    temperature: '--',
+    condition: '天气加载中',
+    location: coordinates.location,
+    status: 'loading',
+  }
   try {
-    const result = await fetchWeatherForecast(coordinates.latitude, coordinates.longitude)
+    const weatherPromise = fetchWeatherForecast(coordinates.latitude, coordinates.longitude)
+    const labelPromise = coordinates.source === 'browser'
+      ? reverseGeocodeLocation(coordinates.latitude, coordinates.longitude).catch(() => null)
+      : Promise.resolve(null)
+    const [result, labelResult] = await Promise.all([weatherPromise, labelPromise])
+    const location = labelResult?.success
+      ? String(labelResult.data?.label || labelResult.data?.city || labelResult.data?.district || coordinates.location)
+      : coordinates.location
     const current = result.data?.current
-    const temperature = current?.temperature_2m
-    const code = current?.weather_code
+    if (!result.success || !current) throw new Error('weather response is incomplete')
+    const temperature = current.temperature_2m
+    const code = current.weather_code
+    if (requestId !== weatherRequestId) return
     weather.value = {
       temperature: typeof temperature === 'number' ? String(Math.round(temperature)) : '--',
       condition: weatherCondition(typeof code === 'number' ? code : null),
-      location: coordinates.location,
+      location,
+      status: 'ready',
     }
   } catch {
-    weather.value = { temperature: '--', condition: '天气待更新', location: coordinates.location }
+    if (requestId !== weatherRequestId) return
+    weather.value = {
+      temperature: '--',
+      condition: '天气待更新',
+      location: coordinates.location,
+      status: 'unavailable',
+    }
   }
 }
 
@@ -594,7 +702,15 @@ function activate(label: string) {
         <ChevronDown :size="20" :class="{ rotated: accountMenuOpen }" />
       </button>
       <div class="top-stats">
-        <span><CloudSun class="sun-icon" /> {{ weather.temperature }}°C&nbsp; {{ weather.condition }} <small>{{ weather.location }}</small></span>
+        <span
+          class="weather-status"
+          role="button"
+          tabindex="0"
+          :title="weather.status === 'ready' ? '点击重新获取当前位置天气' : '点击重试定位与天气'"
+          @click="loadHomeWeather"
+          @keydown.enter.prevent="loadHomeWeather"
+          @keydown.space.prevent="loadHomeWeather"
+        ><CloudSun class="sun-icon" /> {{ weather.temperature }}°C&nbsp; {{ weather.condition }} <small>{{ weather.location }}</small></span>
         <span><CarFront class="mint-icon" /> <strong>{{ availableRange }}</strong> km <small>估算可用</small></span>
         <button class="history-button" type="button" @click="historyOpen = !historyOpen">
           <History :size="20" />历史规划<span>{{ historyTrips.length }}</span>

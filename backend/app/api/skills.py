@@ -45,6 +45,15 @@ async def geocode(
     return await registry.execute("amap.geocode", payload, context)
 
 
+@router.post("/amap/regeocode")
+async def reverse_geocode(
+    payload: dict,
+    context: SkillContext = Depends(context_from_request),
+    registry: SkillRegistry = Depends(get_registry),
+):
+    return await registry.execute("amap.reverse_geocode", payload, context)
+
+
 @router.post("/amap/driving")
 async def driving(
     payload: dict,

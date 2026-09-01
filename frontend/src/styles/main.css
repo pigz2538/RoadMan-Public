@@ -89,6 +89,8 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
   font-size: 22px; font-weight: 800; color: #315686;
 }
 .top-stats { min-width: 0; gap: clamp(16px, 2.5vw, 48px); }
+.top-stats .weather-status { cursor: pointer; transition: opacity .2s ease, transform .2s ease; }
+.top-stats .weather-status:hover, .top-stats .weather-status:focus-visible { opacity: .82; transform: translateY(-1px); outline: none; }
 .top-stats span { gap: 10px; font-size: 20px; white-space: nowrap; }
 .top-stats svg { width: 29px; height: 29px; }
 .top-stats small { padding: 3px 7px; border-radius: 20px; background: #ebf4ff; color: var(--blue); font-size: 10px; }

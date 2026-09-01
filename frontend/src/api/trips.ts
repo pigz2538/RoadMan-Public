@@ -202,6 +202,17 @@ export async function fetchWeatherForecast(
   }))
 }
 
+export async function reverseGeocodeLocation(
+  latitude: number,
+  longitude: number,
+): Promise<{ success: boolean; data?: { label?: string; city?: string; district?: string; province?: string } }> {
+  return json(await fetch(`${API_BASE}/api/v1/skills/amap/regeocode`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ location: `${longitude},${latitude}` }),
+  }))
+}
+
 export async function preflightTrip(
   rawText: string,
   answers: Record<string, string> = {},

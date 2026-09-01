@@ -3,6 +3,7 @@ from ..repositories.skill_calls import record_skill_call
 from ..skills.amap import (
     AmapDrivingAdapter,
     AmapGeocodeAdapter,
+    AmapReverseGeocodeAdapter,
     AmapPoiAdapter,
     AmapPoiDetailAdapter,
     AmapRouteAdapter,
@@ -42,6 +43,7 @@ def build_skill_registry(settings: Settings | None = None) -> SkillRegistry:
         audit_sink=record_skill_call,
     )
     registry.register(AmapGeocodeAdapter(config.amap_webservice_key))
+    registry.register(AmapReverseGeocodeAdapter(config.amap_webservice_key))
     registry.register(AmapDrivingAdapter(config.amap_webservice_key))
     registry.register(AmapRouteAdapter(config.amap_webservice_key))
     registry.register(AmapPoiAdapter(config.amap_webservice_key))
