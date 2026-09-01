@@ -3442,6 +3442,7 @@ def build_planning_graph(
                         route=connector_route,
                         start_at=connector_start,
                     )
+                    same_return_anchor = False
                     while connector_stage.planned_end > return_cutoff and stages:
                         stages.pop()
                         if stages:
@@ -3476,18 +3477,31 @@ def build_planning_graph(
                             # terminal-to-terminal placeholder.
                             connector_origin = hotel_place
                             connector_destination = return_origin
+                            same_return_anchor = _same_place(
+                                connector_origin,
+                                connector_destination,
+                            )
+                            if same_return_anchor:
+                                local_start = max(
+                                    local_start,
+                                    _request_clock(day_date, "08:00", default=time(8, 0)),
+                                )
                             connector_mode = (
                                 "driving"
                                 if driving_requested
                                 else "transit"
                             )
-                            connector_route = await _route(
-                                registry,
-                                connector_origin,
-                                connector_destination,
-                                state["trip_id"],
-                                preferred_mode=connector_mode,
-                                fallback_modes=stage_fallback_modes,
+                            connector_route = (
+                                {"success": False}
+                                if same_return_anchor
+                                else await _route(
+                                    registry,
+                                    connector_origin,
+                                    connector_destination,
+                                    state["trip_id"],
+                                    preferred_mode=connector_mode,
+                                    fallback_modes=stage_fallback_modes,
+                                )
                             )
                             if not connector_route.get("success"):
                                 connector_route = _fallback_local_route(
@@ -3514,7 +3528,10 @@ def build_planning_graph(
                                 start_at=connector_start,
                             )
                             break
-                    if not stages or connector_stage.planned_end <= return_cutoff:
+                    if (
+                        (not stages or connector_stage.planned_end <= return_cutoff)
+                        and not same_return_anchor
+                    ):
                         stages.append(connector_stage)
                         local_start = connector_stage.planned_end + timedelta(minutes=15)
                 elif not stages:
@@ -3523,18 +3540,35 @@ def build_planning_graph(
                     # the overnight hotel to the departure terminal.
                     connector_origin = hotel_place
                     connector_destination = return_origin
+                    same_return_anchor = _same_place(
+                        connector_origin,
+                        connector_destination,
+                    )
+                    if same_return_anchor:
+                        # A nearby hotel and the return anchor represent the
+                        # same place.  Do not expose a zero-minute
+                        # hotel-to-hotel stage; resume from a comfortable
+                        # daytime window for the actual return leg.
+                        local_start = max(
+                            local_start,
+                            _request_clock(day_date, "08:00", default=time(8, 0)),
+                        )
                     connector_mode = (
                         "driving"
                         if driving_requested
                         else "transit"
                     )
-                    connector_route = await _route(
-                        registry,
-                        connector_origin,
-                        connector_destination,
-                        state["trip_id"],
-                        preferred_mode=connector_mode,
-                        fallback_modes=stage_fallback_modes,
+                    connector_route = (
+                        {"success": False}
+                        if same_return_anchor
+                        else await _route(
+                            registry,
+                            connector_origin,
+                            connector_destination,
+                            state["trip_id"],
+                            preferred_mode=connector_mode,
+                            fallback_modes=stage_fallback_modes,
+                        )
                     )
                     if not connector_route.get("success"):
                         connector_route = _fallback_local_route(
@@ -3555,7 +3589,10 @@ def build_planning_graph(
                         route=connector_route,
                         start_at=connector_start,
                     )
-                    if connector_stage.planned_end <= return_cutoff:
+                    if (
+                        connector_stage.planned_end <= return_cutoff
+                        and not same_return_anchor
+                    ):
                         stages.append(connector_stage)
                         local_start = connector_stage.planned_end + timedelta(minutes=15)
             # Every calendar day must finish at the booked hotel base before the
@@ -3863,6 +3900,19 @@ def build_planning_graph(
                             start_at=stages[-1].planned_end + timedelta(minutes=15),
                         )
                     )
+            # Provider fallbacks can still produce a same-place connector
+            # while trimming a tight terminal window.  It carries no actual
+            # movement and would fail the positive-duration invariant, so
+            # remove only that invalid placeholder before persisting the day.
+            stages = [
+                stage
+                for stage in stages
+                if stage.duration_minutes > 0
+                or not _same_place(
+                    stage.origin.model_dump(mode="json"),
+                    stage.destination.model_dump(mode="json"),
+                )
+            ]
             plan = DayPlan(
                 id=f"day_{index + 1}",
                 day_index=index + 1,
@@ -6695,7 +6745,18 @@ def _return_stage_start(
     except (TypeError, ValueError):
         duration_minutes = 0
     latest_start = deadline - timedelta(minutes=max(0, duration_minutes))
-    return max(earliest_start, latest_start)
+    scheduled_start = max(earliest_start, latest_start)
+    # A road return should never be scheduled in the middle of the night just
+    # because an explicit arrival clock is earlier than the driving duration.
+    # Keep the leg in a daylight window and let the normal half-day return
+    # grace surface any resulting delay as a warning.  Long cross-day drives
+    # are handled by ``enrich_deep_drive_plan`` and do not use this helper.
+    if str((route.get("data") or {}).get("selected_mode") or "").casefold() == "driving":
+        scheduled_start = max(
+            scheduled_start,
+            _request_clock(day, "07:00", default=time(7, 0)),
+        )
+    return scheduled_start
 
 
 def _fallback_local_route(

@@ -605,6 +605,30 @@ def test_return_time_is_scheduled_as_arrival_deadline():
     )
 
 
+def test_driving_return_deadline_never_starts_before_daylight():
+    """An early arrival target must not create a midnight road departure."""
+    scheduled = _return_stage_start(
+        date(2026, 9, 6),
+        "08:00",
+        datetime(2026, 9, 6, 0, 44, tzinfo=ZoneInfo("Asia/Shanghai")),
+        {
+            "data": {
+                "selected_mode": "driving",
+                "duration_minutes": 342,
+            }
+        },
+    )
+
+    assert scheduled == datetime(
+        2026,
+        9,
+        6,
+        7,
+        0,
+        tzinfo=ZoneInfo("Asia/Shanghai"),
+    )
+
+
 class FakeGeocodeAdapter(SkillAdapter):
     name = "amap.geocode"
 
