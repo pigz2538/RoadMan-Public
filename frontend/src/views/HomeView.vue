@@ -168,11 +168,32 @@ const menus = [
   { label: '其他设置', icon: Grid2X2 },
 ]
 const quickActions = [
-  ['🚙', '周边单日短途推荐'],
-  ['🏞️', '沿途风景路线探索'],
-  ['⚡', '新能源补能规划'],
-  ['🌦️', '天气变化重规划'],
+  {
+    icon: '🚙',
+    label: '周末周边轻松游',
+    prompt: '这周六早上想从武汉开车带对象去仙岛湖玩两天一夜，住得舒服一点，别排太满，沿途有好看的地方可以顺路停停，周日晚饭前回武汉。',
+  },
+  {
+    icon: '🏞️',
+    label: '沿途风景慢慢玩',
+    prompt: '下周找个三天小长假，从武汉自驾去恩施，想把沿途值得看的自然风景、好吃的和合适的住宿一起安排好，晚上别赶山路。',
+  },
+  {
+    icon: '⚡',
+    label: '新能源补能安排',
+    prompt: '我开新能源车，准备周末从武汉去宜昌玩两天，景点和餐厅尽量错开，帮我按实际续航安排充电、休息和沿途方便停车的地方。',
+  },
+  {
+    icon: '🌦️',
+    label: '下雨自动重排',
+    prompt: '周六准备从武汉自驾去黄石看湖景，如果当天有雨就把户外景点换成室内，保留吃饭和返程时间，给我一份能直接执行的安排。',
+  },
 ]
+
+function useQuickPrompt(value: string) {
+  prompt.value = value
+  resetPreflight()
+}
 
 onMounted(() => {
   prompt.value = window.sessionStorage.getItem(PROMPT_STORAGE_KEY) || ''
@@ -988,8 +1009,14 @@ function activate(label: string) {
       </div>
 
       <div class="quick-grid">
-        <button v-for="[icon, label] in quickActions" :key="label" @click="prompt = String(label)">
-          <span>{{ icon }}</span>{{ label }}<Route :size="17" />
+        <button
+          v-for="item in quickActions"
+          :key="item.label"
+          type="button"
+          :title="item.prompt"
+          @click="useQuickPrompt(item.prompt)"
+        >
+          <span>{{ item.icon }}</span>{{ item.label }}<Route :size="17" />
         </button>
       </div>
     </section>
