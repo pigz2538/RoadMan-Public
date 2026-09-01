@@ -95,6 +95,7 @@ function catalogSummary(item: VehicleCatalogItem): string {
       : catalogSpec(item, '续航'),
     item.consumption_per_100km ? `能耗 ${item.consumption_per_100km}/100km` : catalogSpec(item, '耗电', '油耗'),
     item.battery_kwh ? `电池 ${item.battery_kwh} kWh` : catalogSpec(item, '电池能量', '电池容量'),
+    item.dc_charge_time_hours ? `直流快充 30-80% ${item.dc_charge_time_hours} h` : catalogSpec(item, '直流快充', 'DC charging', 'Charging time'),
     item.seats ? `${item.seats} 座` : catalogSpec(item, '车身结构', '座位数'),
   ].filter(Boolean)
   return summary.length
@@ -277,6 +278,7 @@ function applyVehicleCatalogItem(item: VehicleCatalogItem) {
     battery_kwh: item.battery_kwh ?? (sameCatalogRecord ? existing.battery_kwh : undefined),
     consumption_per_100km: item.consumption_per_100km ?? (sameCatalogRecord ? existing.consumption_per_100km : undefined),
     max_charge_kw: item.max_charge_kw ?? (sameCatalogRecord ? existing.max_charge_kw : undefined),
+    dc_charge_time_hours: item.dc_charge_time_hours ?? (sameCatalogRecord ? existing.dc_charge_time_hours : undefined),
     height_m: item.height_m ?? (sameCatalogRecord ? existing.height_m : undefined),
     width_m: item.width_m ?? (sameCatalogRecord ? existing.width_m : undefined),
     seats: item.seats ?? existing.seats ?? 5,
@@ -1006,6 +1008,7 @@ function activate(label: string) {
               <label class="vehicle-field"><span>电池容量（kWh）</span><input v-model.number="vehicleDraft.battery_kwh" type="number" min="1" placeholder="由具体年款自动填入"></label>
               <label class="vehicle-field"><span>当前电量（%）</span><input v-model.number="vehicleDraft.current_energy_percent" type="number" min="0" max="100" placeholder="80"></label>
               <label class="vehicle-field"><span>百公里能耗</span><input v-model.number="vehicleDraft.consumption_per_100km" type="number" min="1" placeholder="电耗 kWh / 油耗 L"></label>
+              <label class="vehicle-field"><span>直流快充 30-80%（小时）</span><input v-model.number="vehicleDraft.dc_charge_time_hours" type="number" min="0.01" step="0.01" placeholder="公开年款有数据时自动填入"></label>
               <label class="vehicle-field"><span>座位数</span><input v-model.number="vehicleDraft.seats" type="number" min="1" max="20" placeholder="5"></label>
               <label class="vehicle-field"><span>安全余量（%）</span><input v-model.number="vehicleDraft.safe_energy_reserve_percent" type="number" min="5" max="40" placeholder="15"></label>
             </div>

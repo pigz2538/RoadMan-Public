@@ -14,6 +14,7 @@
 | [runtime-requirements.md](runtime-requirements.md) | Python/Node/PostgreSQL/Redis 依赖、Conda 与 Docker 两种运行方式 |
 | [operations.md](operations.md) | 部署、健康检查、验收脚本、备份恢复、Nginx/HTTPS、排障与凭据管理 |
 | [carinfo-catalog.md](carinfo-catalog.md) | 车型目录搜索、确定性回退与前端车辆抽屉接入 |
+| [vehicle-public-fallback.md](vehicle-public-fallback.md) | AutoSeeker、OpenEV、AppByte 与网页车型资料的动态降级链 |
 | [mobility-and-poi-data-contract.md](mobility-and-poi-data-contract.md) | 景点事实、票务预约、停车、图片、公共交通与跨城班次的数据契约和未知状态 |
 | [safety-and-data-boundary.md](safety-and-data-boundary.md) | 不接车辆控制、诚实降级、数据最小化、保留与级联删除 |
 | [README.md](README.md) | 本文档索引 |

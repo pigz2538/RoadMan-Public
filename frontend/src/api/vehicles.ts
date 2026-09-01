@@ -19,6 +19,7 @@ export interface Vehicle {
   battery_kwh?: number | null
   consumption_per_100km?: number | null
   max_charge_kw?: number | null
+  dc_charge_time_hours?: number | null
   height_m?: number | null
   width_m?: number | null
   seats: number
@@ -51,6 +52,7 @@ export interface VehicleCatalogItem {
   battery_kwh?: number | null
   consumption_per_100km?: number | null
   max_charge_kw?: number | null
+  dc_charge_time_hours?: number | null
   height_m?: number | null
   width_m?: number | null
   seats?: number | null

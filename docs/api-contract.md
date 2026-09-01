@@ -158,7 +158,7 @@ data: {"event":"node_started","trip_id":"trip_x","node":"build_stages","tool":nu
 | `POST` | `/api/v1/jobs/{job_id}/cancel` | 取消任务 |
 | `GET` | `/api/v1/ops/metrics` | 服务请求指标与 Skill 汇总 |
 
-车型目录的搜索与表单接入见 [carinfo-catalog.md](carinfo-catalog.md)。当主目录未覆盖具体车系时，响应 `data.fallback_used=true`，并在条目中返回 `catalog_source`、`source_url` 和 `detail_source_url`，前端应显示来源并提示用户核对年款配置。
+车型目录的搜索与表单接入见 [carinfo-catalog.md](carinfo-catalog.md) 与 [vehicle-public-fallback.md](vehicle-public-fallback.md)。当主目录未覆盖具体车系时，响应 `data.fallback_used=true`，并在条目中返回 `catalog_source`、`source_url`、`detail_source_url`、`specifications`、`specs_missing` 和可选的 `dc_charge_time_hours`；前端应显示来源并提示用户核对年款配置。公开资料没有的字段保持 `null`，不能用演示车型默认值替代。
 
 ## 路线响应最低要求
 

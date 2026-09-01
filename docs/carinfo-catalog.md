@@ -1,53 +1,42 @@
-# 车型目录与车辆入库
+# 车型搜索与入库
 
-车型搜索由 `backend/app/skills/carinfo.py` 的 `CarInfoCatalogAdapter` 提供，接口为：
-
-```text
-POST /api/v1/skills/carinfo/search
-```
-
-请求示例：
+`POST /api/v1/skills/carinfo/search` 由 `CarInfoCatalogAdapter` 提供车型检索。输入用户自然语言中的品牌、车系、车型或年款，例如：
 
 ```json
-{ "query": "特斯拉 Model 3", "limit": 12 }
+{ "query": "小鹏 G6", "limit": 12 }
 ```
 
 ## 查询链路
 
-1. 先调用公开车型目录的 `type=info&keyword=...`，取得品牌、车系、具体年款、在售状态和价格区间。
-2. 仅输入品牌时，再用返回的 `brand_id` 调用 `type=series&brand_id=...`，选择有历史参数记录的代表车系，并按 `series_id` 扩展具体年款；不维护厂商白名单，也不会把具体车型查询扩大成整品牌。
-3. 对候选年款并发调用 `type=detail&id=...`，解析供应商返回的参数分组，保留原始参数名称和值，并映射续航、电池、能耗、快充功率、尺寸和座位数。
-4. 按“有可核验详情优先、在售和年款优先”排序，再返回用户请求的数量。每条记录都带 `source_id`、`source_url`、`detail_source_url` 和 `specifications`，前端可以追溯详情来源。
-5. 供应商搜索对“品牌 + 车型”有时过于严格。例如“特斯拉 Model 3”可能搜不到而“Model 3”可以命中。适配器会并发尝试少量安全变体，并在响应的 `provider_query` 中披露实际命中的词，不会改变用户的原始 `query`。
-6. 如果用户查询的是具体车系，而主目录没有覆盖请求的车系键（例如主目录把 `SU7` 误窄成 `SU7 Ultra`），再查询无需 Key 的公开车型资料建议接口，并读取公开年份/配置页。该降级路径会返回普通版、Pro、Max 等具体年款，记录 `fallback_used`、`fallback_provider`、`catalog_source` 和公开页 URL；主目录可用时不会为品牌搜索额外增加网络请求。
+1. 先查询主车型目录，获取品牌、车系、年款、在售状态、价格和参数详情。
+2. 对品牌搜索按 `brand_id` 展开车系，对具体车型按 `series_id` 查询年款；详情请求并发执行并限制数量，避免单个失效接口拖住页面。
+3. 主目录没有覆盖请求车型时，动态并行查询公开数据源：
+   - [AutoSeeker JSON](https://autoseeker.eu/data/models.json)：纯电、混动和燃油车型的续航/油耗、电池、座位、尺寸、功率和充电功率等；CC BY 4.0。
+   - [OpenEV Data](https://gaia-charge.github.io/evdb/v1/vehicles.json)：电动车版本、电池、WLTP/实测续航、直流充电功率和性能；CC BY-SA 4.0。
+   - [AppByte Fleet Catalog](https://fleetcatalog.disturbingbyte.pt)：公开 REST 车型目录，按品牌、车系和具体版本返回燃油/混动油耗、油箱、电池、动力、尺寸和年款。
+   - [CarNewsChina suggestion](https://data.carnewschina.com/suggest)：公开车型页和具体年款参数，作为网页级补充。
+4. 每个结果保留 `source_id`、`source_url`、`detail_source_url`、`catalog_source`、`fallback_used` 和原始 `specifications`，前端可以查看依据。
 
-详情接口并非覆盖所有年款：部分新款、进口款或旧款没有参数记录。此时保留身份信息，`specifications` 为空并填写 `specs_missing`，绝不伪造续航或电池数据；用户可以换一个有详情的具体年款或手动补充配置。这是上游数据缺失，不是前端丢字段。
+车型匹配完全基于用户输入和公开数据的品牌/车系/年款字段，不维护 SU7、Model 3 或其他车型白名单。中文品牌提示会参与匹配，避免把“小鹏 G6”误返回成其他品牌的 G6P；具体版本词（Max、Pro、Performance 等）会优先选择确实包含该版本的记录。
 
-## 前端选择与入库
+## 字段和诚实降级
 
-`frontend/src/views/HomeView.vue` 的车型抽屉支持：
+规划使用的字段映射为 `rated_range_km`、`battery_kwh`、`consumption_per_100km`、`max_charge_kw`、`dc_charge_time_hours`、`height_m`、`width_m` 和 `seats`。公开来源没有给出的字段保持 `null`，同时写入 `specs_missing`，不会用默认值冒充真实数据。WLTP 等非中国工况续航会标记在 `estimated_fields` 中，规划时应按保守余量使用。
 
-- 搜索品牌、车系或具体车型；点击结果会把身份和已核验配置回填表单。
-- “直接添加”会调用 `POST /api/v1/vehicles`；编辑保存调用 `PATCH`，删除调用 `DELETE`，当前车型选择保存在本地存储。
-- 已核验的参数在当前车型卡片中展示；缺失参数明确提示确认，不会把演示车型的默认值混入真实车型。
+SU7 Standard/Pro/Max 的固定缓存仍保留，但仅在公开网络完全不可用时作为最后保障，并带有原始公开页面链接；它不是通用车型列表，也不会覆盖动态数据源的结果。
 
-`VehicleProfile` 将来源和参数存入现有 JSON 文档字段，无需数据库迁移：
-`source_id`、`source_url`、`detail_source_url`、`price_min_cny`、`price_max_cny`、`specifications`。
+适配器版本当前为 `1.8.12`。版本变化会使旧的“只有车名”缓存失效；成功结果缓存 6 小时，空结果不会写入缓存。
 
-## 失败与缓存策略
+## 前端入库
 
-- `carinfo.catalog` 的适配器版本为 `1.8.1`。版本变化会使旧的“只有车名”的缓存失效，避免升级后继续显示旧结果；主目录查询使用并发的短超时，品牌扩展最多探查 4 个车系，详情查询使用有限并发窗口，较大的 `limit` 仍会返回完整数量而不会拖垮接口。
-- 没有命中返回 `CARINFO_NO_RESULTS`；网络或详情单条失败不会丢弃其他车型。
-- 次级公开资料源是 `https://data.carnewschina.com/suggest` 及其公开车型页，仅在主目录不能覆盖具体车型时触发，结果缓存 6 小时；SU7 常用标准/Pro/四驱 Max 另有带原始页链接的极小应急索引，避免公共网页偶发限流时再次只显示 Ultra。它不需要账号或 API Key，但属于公开网页资料，可能存在年份、地区和配置差异，保存车型前仍应以合格证/官方配置为准。
-- 详情请求是尽力而为，搜索仍可返回身份记录；规划端只有在用户保存了可靠续航/能耗后才使用这些数值。
-- 不带 `query` 的内部兼容调用仍走确定性的 `carinfo.demo`，用于旧规划测试，不会出现在真实车型搜索结果中。
+`frontend/src/views/HomeView.vue` 的车型抽屉支持搜索、查看来源和参数、直接添加、编辑、删除以及切换当前车型。保存到 `VehicleProfile` 的 JSON 文档中，无需数据库迁移；`dc_charge_time_hours` 与 `specifications` 会一并保存。
 
 ## 本地验证
 
 ```powershell
 Invoke-RestMethod http://127.0.0.1:8000/api/v1/skills/carinfo/search `
   -Method Post -ContentType 'application/json' `
-  -Body '{"query":"特斯拉 Model 3","limit":2}'
+  -Body '{"query":"小鹏 G6","limit":5}'
 ```
 
-验收应看到 `rated_range_km`、`battery_kwh`、`consumption_per_100km` 和非空 `specifications`（具体年款以上游详情覆盖为准），随后用返回条目创建、读取、修改、删除一条车型，确认参数在 CRUD 往返中保持不变。
+验收时应看到真实品牌、年款、续航、电池、能耗/充电参数和非空 `specifications`。当某一来源不可用时，响应仍应返回其他来源的结果或 `CARINFO_NO_RESULTS`，并在 `fallback_provider`/`specs_missing` 中说明原因。

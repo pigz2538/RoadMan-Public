@@ -111,6 +111,10 @@ class VehicleProfile(BaseModel):
     battery_kwh: float | None = Field(default=None, gt=0)
     consumption_per_100km: float | None = Field(default=None, gt=0)
     max_charge_kw: float | None = Field(default=None, gt=0)
+    # Public catalogues often publish a 30–80% DC charging duration while
+    # omitting the peak charger power. Keep that measured duration separately
+    # instead of deriving or inventing a kW value.
+    dc_charge_time_hours: float | None = Field(default=None, gt=0)
     height_m: float | None = Field(default=None, gt=0)
     width_m: float | None = Field(default=None, gt=0)
     seats: int = Field(default=5, ge=1, le=20)
@@ -141,6 +145,7 @@ class VehicleUpdate(BaseModel):
     battery_kwh: float | None = Field(default=None, gt=0)
     consumption_per_100km: float | None = Field(default=None, gt=0)
     max_charge_kw: float | None = Field(default=None, gt=0)
+    dc_charge_time_hours: float | None = Field(default=None, gt=0)
     height_m: float | None = Field(default=None, gt=0)
     width_m: float | None = Field(default=None, gt=0)
     seats: int | None = Field(default=None, ge=1, le=20)

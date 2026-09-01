@@ -55,9 +55,9 @@
 ### 车型目录服务（CarInfo，无需 key）
 
 - 已注册 Skill：`carinfo.catalog`、`carinfo.demo`。
-- 用途：品牌/车系/车型目录搜索；`CARINFO_API_URL = https://tool.bitefu.net/car/` 为公开接口。
+- 用途：品牌/车系/车型目录搜索；`CARINFO_API_URL = https://tool.bitefu.net/car/` 为公开接口。缺少具体年款详情时，适配器会并行动态查询 AutoSeeker、OpenEV Data、AppByte Fleet Catalog 以及 CarNewsChina 公开配置页，按用户输入匹配具体版本，补齐可核验的续航、电池、能耗、充电、油箱和尺寸字段。
 - 环境变量：无。
-- 是否必需：否；只导入目录身份信息，续航/能耗由用户确认。
+- 是否必需：否；所有外部资料均为公开补充，规划只使用明确返回的字段；没有来源的续航/能耗不猜测，并通过 `specs_missing` 提示用户确认。
 - 失败降级：目录服务不可用时车辆数据降级，行程以已有车辆上下文继续。
 
 ### DeepSeek 官方 Chat Completions（`DEEPSEEK_API_KEY`）
