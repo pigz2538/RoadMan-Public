@@ -96,10 +96,10 @@ const planningProgress = computed(() => {
   return Math.max(0, Math.min(100, Number(value) || 1))
 })
 const planningScenes = [
-  { key: 'understand', until: 29, title: '正在理解这次旅行', caption: '识别同行人、日期、城市与必去地点' },
-  { key: 'intercity', until: 59, title: '正在连接出发地与目的地', caption: '比较跨城交通并预留机场或车站接驳' },
-  { key: 'discover', until: 69, title: '正在点亮目的地', caption: '检索景点、餐饮、住宿与公开信息来源' },
-  { key: 'connect', until: 78, title: '正在编织每日路线', caption: '把酒店、景点和交通节点连成连续路径' },
+  { key: 'understand', until: 29, title: '正在理解这次旅行', caption: '扫描同行人、日期、偏好与必去地点，建立可行边界' },
+  { key: 'intercity', until: 59, title: '正在搜索出发与抵达', caption: '检索城市、机场车站和沿途接驳，先把大方向连起来' },
+  { key: 'discover', until: 69, title: '正在筛选目的地候选', caption: '逐个核对景点、餐饮和住宿的开放与适配信息' },
+  { key: 'connect', until: 78, title: '正在让智能体协作', caption: '路线、地点与天气智能体共享候选并相互校验' },
   { key: 'context', until: 89, title: '正在补齐旅行上下文', caption: '检查天气、开放信息、服务设施与适配性' },
   { key: 'schedule', until: 94, title: '正在编排全天节奏', caption: '安排三餐、停留、休息、住宿与返程时间' },
   { key: 'verify', until: 100, title: '正在做最后复核', caption: '逐段核验时间重叠、路线连续和必去地点' },
@@ -768,6 +768,56 @@ watch(bottomPanelCollapsed, (collapsed) => window.localStorage.setItem(panelStor
       <div v-if="planningBusy" class="planning-overlay" role="status" aria-live="polite">
         <section class="planning-wait-dialog glass-card">
           <div class="planning-map-animation" :data-scene="planningScene.key" aria-hidden="true">
+            <div class="planning-focus-visual">
+              <div class="planning-focus-panel focus-radar-panel">
+                <span class="focus-radar-ring ring-outer" />
+                <span class="focus-radar-ring ring-middle" />
+                <span class="focus-radar-ring ring-inner" />
+                <span class="focus-radar-sweep" />
+                <span class="focus-radar-center" />
+                <i class="focus-radar-ping ping-one" />
+                <i class="focus-radar-ping ping-two" />
+                <i class="focus-radar-ping ping-three" />
+                <b class="focus-panel-label">正在扫描旅行约束</b>
+                <small>同行人 · 时间 · 偏好 · 必去地点</small>
+              </div>
+              <div class="planning-focus-panel focus-search-panel">
+                <span class="focus-search-crosshair"><i /><b /></span>
+                <span class="focus-search-scanline" />
+                <svg class="focus-search-route" viewBox="0 0 520 230" preserveAspectRatio="none">
+                  <path d="M42 174 C126 154 146 74 248 91 S360 168 470 48" />
+                  <circle cx="42" cy="174" r="5" />
+                  <circle cx="248" cy="91" r="5" />
+                  <circle cx="470" cy="48" r="5" />
+                </svg>
+                <span class="focus-search-tag tag-origin">出发地</span>
+                <span class="focus-search-tag tag-destination">目的地</span>
+                <span class="focus-search-tag tag-transfer">接驳点</span>
+                <b class="focus-panel-label">正在搜索地点与交通</b>
+                <small>地图地点 · 车站机场 · 沿途候选</small>
+              </div>
+              <div class="planning-focus-panel focus-candidates-panel">
+                <span class="focus-candidate-dot candidate-one"><i /></span>
+                <span class="focus-candidate-dot candidate-two"><i /></span>
+                <span class="focus-candidate-dot candidate-three"><i /></span>
+                <span class="focus-candidate-card candidate-card-one"><b>景</b><i>自然风景</i></span>
+                <span class="focus-candidate-card candidate-card-two"><b>餐</b><i>附近餐饮</i></span>
+                <span class="focus-candidate-card candidate-card-three"><b>住</b><i>舒适住宿</i></span>
+                <b class="focus-panel-label">正在筛选目的地候选</b>
+                <small>开放时间 · 预约 · 季节适配</small>
+              </div>
+              <div class="planning-focus-panel focus-agents-panel">
+                <span class="focus-agent-link link-route" />
+                <span class="focus-agent-link link-place" />
+                <span class="focus-agent-link link-weather" />
+                <span class="focus-agent-node agent-route"><i>路</i><b>路线智能体</b></span>
+                <span class="focus-agent-node agent-place"><i>点</i><b>地点智能体</b></span>
+                <span class="focus-agent-node agent-weather"><i>天</i><b>天气智能体</b></span>
+                <span class="focus-agent-hub"><i>AI</i><b>协作中</b></span>
+                <b class="focus-panel-label">多个智能体正在协作</b>
+                <small>共享候选 · 相互校验 · 汇合成路线</small>
+              </div>
+            </div>
             <span class="planning-map-grid" />
             <span v-for="index in 5" :key="`road-${index}`" :class="`planning-ambient-road road-${index}`" />
             <svg viewBox="0 0 520 230" preserveAspectRatio="none">

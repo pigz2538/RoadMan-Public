@@ -856,6 +856,85 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .planning-map-animation[data-scene='verify'] .planning-map-route { opacity: 1; stroke: #229d91; stroke-dasharray: none; }
 .planning-map-animation[data-scene='verify'] .planning-map-pin { opacity: 1; transform: scale(.9); background: #229d91; }
 .planning-map-animation[data-scene='verify'] .planning-map-scan { opacity: 1; animation: planning-map-scan 9s ease-in-out infinite; }.planning-map-animation[data-scene='verify'] .planning-check-badge { animation: planning-check-in 9s ease-in-out infinite; }
+.planning-focus-visual { position: absolute; z-index: 24; inset: 0; pointer-events: none; }
+.planning-focus-panel { position: absolute; inset: 0; visibility: hidden; opacity: 0; transform: scale(.97); transition: opacity .7s ease, transform .7s ease, visibility .7s ease; }
+.planning-focus-panel .focus-panel-label { position: absolute; left: 50%; bottom: 29px; transform: translateX(-50%); color: #22466f; font-size: 12px; font-weight: 850; letter-spacing: .02em; white-space: nowrap; }
+.planning-focus-panel > small { position: absolute; left: 50%; bottom: 13px; transform: translateX(-50%); color: #6d86a5; font-size: 10px; white-space: nowrap; }
+.planning-map-animation[data-scene='understand'] .focus-radar-panel,
+.planning-map-animation[data-scene='intercity'] .focus-search-panel,
+.planning-map-animation[data-scene='discover'] .focus-candidates-panel,
+.planning-map-animation[data-scene='connect'] .focus-agents-panel { visibility: visible; opacity: 1; transform: none; }
+
+/* The first four stages use one calm focal animation at a time.  The older
+   route particles remain available for the schedule/verification scenes, but
+   are intentionally hidden here so the meaning of each early stage is clear. */
+.planning-map-animation:is([data-scene='understand'], [data-scene='intercity'], [data-scene='discover'], [data-scene='connect']) > svg,
+.planning-map-animation:is([data-scene='understand'], [data-scene='intercity'], [data-scene='discover'], [data-scene='connect']) :is(.planning-ambient-road, .planning-map-route-pulse, .planning-map-spark, .planning-map-bead, .planning-map-sheen, .planning-map-pin, .planning-map-origin, .planning-map-destination, .planning-map-traveller, .planning-map-scan, .planning-map-radar, .planning-map-orbit, .planning-map-cloud, .planning-map-card, .planning-itinerary-stack, .planning-check-badge, .planning-stage-beacons) { opacity: 0 !important; animation: none !important; }
+.planning-map-animation:is([data-scene='understand'], [data-scene='intercity'], [data-scene='discover'], [data-scene='connect'])::before,
+.planning-map-animation:is([data-scene='understand'], [data-scene='intercity'], [data-scene='discover'], [data-scene='connect'])::after { opacity: 0; animation: none; }
+
+/* 1. 需求理解：a restrained radar sweep and three soft pings. */
+.focus-radar-ring { position: absolute; left: 27%; top: 50%; border: 1px solid rgba(43,130,219,.22); border-radius: 50%; transform: translate(-50%,-50%); }
+.focus-radar-ring.ring-outer { width: 142px; height: 142px; }
+.focus-radar-ring.ring-middle { width: 98px; height: 98px; border-color: rgba(43,130,219,.28); }
+.focus-radar-ring.ring-inner { width: 55px; height: 55px; border-color: rgba(43,130,219,.34); }
+.focus-radar-sweep { position: absolute; left: calc(27% - 69px); top: calc(50% - 69px); width: 138px; height: 138px; border-radius: 50%; background: conic-gradient(from -32deg, transparent 0deg 306deg, rgba(44,139,226,.04) 324deg, rgba(44,139,226,.46) 351deg, transparent 360deg); animation: focus-radar-rotate 8s linear infinite; }
+.focus-radar-center { position: absolute; left: 27%; top: 50%; width: 10px; height: 10px; border: 2px solid #fff; border-radius: 50%; background: #2e84e8; box-shadow: 0 0 0 5px rgba(46,132,232,.14), 0 0 22px rgba(46,132,232,.34); transform: translate(-50%,-50%); animation: focus-center-breathe 4.8s ease-in-out infinite; }
+.focus-radar-ping { position: absolute; width: 7px; height: 7px; border: 2px solid #fff; border-radius: 50%; background: #3a9fd4; box-shadow: 0 0 0 3px rgba(58,159,212,.13); opacity: 0; transform: scale(.2); }
+.focus-radar-ping::after { content: ''; position: absolute; inset: -5px; border: 1px solid rgba(58,159,212,.35); border-radius: 50%; opacity: 0; animation: focus-ping-ring 6.5s ease-out infinite; }
+.focus-radar-ping.ping-one { left: 37%; top: 29%; animation: focus-ping-in 8s ease-in-out -1.2s infinite; }
+.focus-radar-ping.ping-two { left: 43%; top: 64%; animation: focus-ping-in 8s ease-in-out -4.2s infinite; }
+.focus-radar-ping.ping-three { left: 17%; top: 65%; animation: focus-ping-in 8s ease-in-out -6.1s infinite; }
+.focus-radar-ping.ping-one::after { animation-delay: -1.2s; }.focus-radar-ping.ping-two::after { animation-delay: -4.2s; }.focus-radar-ping.ping-three::after { animation-delay: -6.1s; }
+
+/* 2. 地图搜索：one route, one scanning line and three restrained labels. */
+.focus-search-route { position: absolute; z-index: 1; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.focus-search-route path { fill: none; stroke: #378ddd; stroke-width: 2.5; stroke-linecap: round; stroke-dasharray: 12 9; stroke-dashoffset: 130; opacity: .72; animation: focus-search-route-draw 9s ease-in-out infinite; }
+.focus-search-route circle { fill: #fff; stroke: #3489da; stroke-width: 2; opacity: 0; animation: focus-search-node 9s ease-in-out infinite; }
+.focus-search-route circle:nth-of-type(2) { animation-delay: .7s; }.focus-search-route circle:nth-of-type(3) { animation-delay: 1.4s; }
+.focus-search-crosshair { position: absolute; z-index: 3; left: 48%; top: 43%; width: 42px; height: 42px; border: 1px solid rgba(47,132,219,.4); border-radius: 50%; transform: translate(-50%,-50%); animation: focus-crosshair-breathe 5s ease-in-out infinite; }
+.focus-search-crosshair::before,.focus-search-crosshair::after { content: ''; position: absolute; background: rgba(47,132,219,.45); }
+.focus-search-crosshair::before { left: 50%; top: -8px; width: 1px; height: 58px; }.focus-search-crosshair::after { left: -8px; top: 50%; width: 58px; height: 1px; }
+.focus-search-crosshair i,.focus-search-crosshair b { position: absolute; display: block; width: 7px; height: 7px; border: 2px solid #fff; border-radius: 50%; background: #2f87dd; }
+.focus-search-crosshair i { left: -4px; top: 17px; }.focus-search-crosshair b { right: -4px; bottom: 7px; background: #27a69c; }
+.focus-search-scanline { position: absolute; z-index: 4; left: 8%; top: 19%; width: 84%; height: 1px; background: linear-gradient(90deg, transparent, rgba(45,143,228,.58), transparent); box-shadow: 0 0 12px rgba(45,143,228,.18); animation: focus-search-scan 7s ease-in-out infinite; }
+.focus-search-tag { position: absolute; z-index: 5; padding: 4px 8px; border: 1px solid rgba(131,177,224,.6); border-radius: 999px; background: rgba(255,255,255,.86); color: #376087; font-size: 10px; font-weight: 800; opacity: 0; box-shadow: 0 5px 12px rgba(45,92,151,.08); animation: focus-tag-appear 9s ease-in-out infinite; }
+.focus-search-tag::before { content: ''; display: inline-block; width: 5px; height: 5px; margin: 0 5px 1px 0; border-radius: 50%; background: #3388dc; }
+.focus-search-tag.tag-origin { left: 5%; top: 70%; }.focus-search-tag.tag-destination { right: 7%; top: 16%; animation-delay: .9s; }.focus-search-tag.tag-transfer { left: 53%; top: 58%; animation-delay: 1.8s; }.focus-search-tag.tag-destination::before { background: #27a69c; }.focus-search-tag.tag-transfer::before { background: #efad38; }
+
+/* 3. 候选地点：three points are evaluated one by one instead of six glowing pins. */
+.focus-candidate-dot { position: absolute; z-index: 2; width: 12px; height: 12px; border: 3px solid #fff; border-radius: 50%; background: #2f88de; box-shadow: 0 0 0 4px rgba(47,136,222,.13); opacity: 0; transform: scale(.45); animation: focus-candidate-dot 9s ease-in-out infinite; }
+.focus-candidate-dot i { position: absolute; inset: -8px; border: 1px solid rgba(47,136,222,.32); border-radius: 50%; opacity: 0; animation: focus-candidate-ring 9s ease-out infinite; }
+.focus-candidate-dot.candidate-one { left: 27%; top: 35%; }.focus-candidate-dot.candidate-two { left: 55%; top: 65%; animation-delay: 1.8s; }.focus-candidate-dot.candidate-three { left: 76%; top: 27%; animation-delay: 3.6s; }
+.focus-candidate-dot.candidate-two i { animation-delay: 1.8s; }.focus-candidate-dot.candidate-three i { animation-delay: 3.6s; }
+.focus-candidate-card { position: absolute; z-index: 4; display: flex; align-items: center; gap: 6px; padding: 5px 9px 5px 5px; border: 1px solid rgba(140,180,221,.58); border-radius: 10px; background: rgba(255,255,255,.9); color: #416281; font-size: 10px; font-weight: 800; box-shadow: 0 6px 14px rgba(46,94,148,.1); opacity: 0; transform: translateY(8px) scale(.94); animation: focus-candidate-card 9s ease-in-out infinite; }
+.focus-candidate-card b { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 6px; color: #fff; background: #2f88de; font-size: 10px; }.focus-candidate-card i { font-style: normal; white-space: nowrap; }.focus-candidate-card.candidate-card-one { left: 18%; top: 22%; }.focus-candidate-card.candidate-card-two { left: 47%; top: 73%; animation-delay: 1.8s; }.focus-candidate-card.candidate-card-three { right: 8%; top: 14%; animation-delay: 3.6s; }.focus-candidate-card.candidate-card-two b { background: #e58c55; }.focus-candidate-card.candidate-card-three b { background: #735edb; }
+
+/* 4. 智能体协作：a quiet hub-and-spoke diagram with a single moving signal. */
+.focus-agent-link { position: absolute; z-index: 1; left: 30%; top: 49%; width: 40%; height: 1px; background: linear-gradient(90deg, rgba(48,133,219,.12), rgba(48,133,219,.48), rgba(48,133,219,.12)); transform-origin: left center; }
+.focus-agent-link.link-route { transform: rotate(-25deg); }.focus-agent-link.link-place { transform: rotate(0deg); }.focus-agent-link.link-weather { transform: rotate(25deg); }
+.focus-agent-link::after { content: ''; position: absolute; left: 0; top: -2px; width: 5px; height: 5px; border-radius: 50%; background: #37a4df; box-shadow: 0 0 0 3px rgba(55,164,223,.12); animation: focus-agent-signal 4.8s ease-in-out infinite; }
+.focus-agent-link.link-place::after { animation-delay: -1.6s; background: #29a79b; }.focus-agent-link.link-weather::after { animation-delay: -3.2s; background: #efa93a; }
+.focus-agent-node { position: absolute; z-index: 3; display: grid; justify-items: center; gap: 3px; color: #45627f; font-size: 10px; font-weight: 800; opacity: 0; animation: focus-agent-node 7.5s ease-in-out infinite; }
+.focus-agent-node i { display: grid; place-items: center; width: 32px; height: 32px; border: 2px solid #fff; border-radius: 11px; background: #347fda; color: #fff; font-size: 12px; font-style: normal; box-shadow: 0 5px 13px rgba(45,105,183,.18); }.focus-agent-node b { font-weight: 800; white-space: nowrap; }.focus-agent-node.agent-route { left: 16%; top: 20%; }.focus-agent-node.agent-place { left: 16%; top: 64%; animation-delay: .8s; }.focus-agent-node.agent-weather { right: 16%; top: 42%; animation-delay: 1.6s; }.focus-agent-node.agent-place i { background: #28a699; }.focus-agent-node.agent-weather i { background: #e5a23a; }
+.focus-agent-hub { position: absolute; z-index: 4; left: 50%; top: 49%; display: grid; justify-items: center; gap: 3px; transform: translate(-50%,-50%); color: #294f79; font-size: 10px; font-weight: 850; animation: focus-hub-breathe 4.8s ease-in-out infinite; }.focus-agent-hub i { display: grid; place-items: center; width: 48px; height: 48px; border: 3px solid #fff; border-radius: 16px; background: linear-gradient(145deg,#326dd6,#6b65dc); color: #fff; font-size: 14px; font-style: normal; box-shadow: 0 8px 22px rgba(65,83,189,.24); }.focus-agent-hub b { font-weight: 850; white-space: nowrap; }
+
+@keyframes focus-panel-in { from { opacity: 0; transform: scale(.96); } to { opacity: 1; transform: none; } }
+@keyframes focus-radar-rotate { to { transform: rotate(360deg); } }
+@keyframes focus-center-breathe { 0%,100% { transform: translate(-50%,-50%) scale(.85); box-shadow: 0 0 0 4px rgba(46,132,232,.1), 0 0 14px rgba(46,132,232,.25); } 50% { transform: translate(-50%,-50%) scale(1.12); box-shadow: 0 0 0 9px rgba(46,132,232,.08), 0 0 24px rgba(46,132,232,.34); } }
+@keyframes focus-ping-in { 0%,12%,100% { opacity: 0; transform: scale(.25); } 26%,68% { opacity: 1; transform: scale(1); } 82% { opacity: .2; transform: scale(.82); } }
+@keyframes focus-ping-ring { 0%,22% { opacity: 0; transform: scale(.35); } 38% { opacity: .65; } 78%,100% { opacity: 0; transform: scale(1.8); } }
+@keyframes focus-search-route-draw { 0%,8% { stroke-dashoffset: 130; opacity: .05; } 42%,75% { stroke-dashoffset: 0; opacity: .78; } 94%,100% { stroke-dashoffset: -130; opacity: .08; } }
+@keyframes focus-search-node { 0%,18% { opacity: 0; transform: scale(.5); transform-origin: center; } 30%,76% { opacity: .95; transform: scale(1); } 92%,100% { opacity: 0; transform: scale(.7); } }
+@keyframes focus-crosshair-breathe { 0%,100% { transform: translate(-50%,-50%) scale(.9); opacity: .7; } 50% { transform: translate(-50%,-50%) scale(1.08); opacity: 1; } }
+@keyframes focus-search-scan { 0%,8% { transform: translateY(0); opacity: 0; } 20% { opacity: .85; } 76% { transform: translateY(133px); opacity: .65; } 94%,100% { transform: translateY(133px); opacity: 0; } }
+@keyframes focus-tag-appear { 0%,16% { opacity: 0; transform: translateY(5px); } 30%,76% { opacity: 1; transform: none; } 91%,100% { opacity: 0; transform: translateY(-4px); } }
+@keyframes focus-candidate-dot { 0%,12% { opacity: 0; transform: scale(.45); } 25%,76% { opacity: 1; transform: scale(1); } 91%,100% { opacity: 0; transform: scale(.72); } }
+@keyframes focus-candidate-ring { 0%,25% { opacity: 0; transform: scale(.35); } 40% { opacity: .64; } 82%,100% { opacity: 0; transform: scale(1.75); } }
+@keyframes focus-candidate-card { 0%,15% { opacity: 0; transform: translateY(8px) scale(.94); } 30%,74% { opacity: 1; transform: none; } 90%,100% { opacity: 0; transform: translateY(-4px) scale(.97); } }
+@keyframes focus-agent-signal { 0%,10% { left: 0; opacity: 0; } 20% { opacity: 1; } 80% { left: 100%; opacity: .8; } 92%,100% { left: 100%; opacity: 0; } }
+@keyframes focus-agent-node { 0%,12% { opacity: 0; transform: translateY(6px); } 28%,78% { opacity: 1; transform: none; } 93%,100% { opacity: 0; transform: translateY(-4px); } }
+@keyframes focus-hub-breathe { 0%,100% { transform: translate(-50%,-50%) scale(.94); } 50% { transform: translate(-50%,-50%) scale(1.04); } }
 .planning-overlay-meter { width: 100%; height: 8px; margin-top: 5px; overflow: hidden; border-radius: 999px; background: #e6eef9; }.planning-overlay-meter i { display: block; height: 100%; min-width: 3%; border-radius: inherit; background: linear-gradient(90deg,#1eb7e8,#7656f5); transition: width .7s ease; }
 .planning-overlay-enter-active, .planning-overlay-leave-active { transition: opacity .35s ease; }.planning-overlay-enter-active .planning-wait-dialog, .planning-overlay-leave-active .planning-wait-dialog { transition: transform .45s cubic-bezier(.22,.8,.28,1), opacity .3s ease; }.planning-overlay-enter-from, .planning-overlay-leave-to { opacity: 0; }.planning-overlay-enter-from .planning-wait-dialog, .planning-overlay-leave-to .planning-wait-dialog { transform: translateY(14px) scale(.98); opacity: 0; }
 @keyframes planning-overlay-spin { to { transform: rotate(360deg); } }
@@ -904,6 +983,8 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
   .planning-map-animation .planning-map-scan,
   .planning-map-animation .planning-map-card,
   .planning-map-animation .planning-itinerary-stack > i { animation-duration: 18s !important; }
+  .planning-focus-panel :is(.focus-radar-sweep, .focus-radar-center, .focus-radar-ping, .focus-search-route path, .focus-search-route circle, .focus-search-crosshair, .focus-search-scanline, .focus-search-tag, .focus-candidate-dot, .focus-candidate-dot i, .focus-candidate-card, .focus-agent-node, .focus-agent-hub) { animation-duration: 18s !important; }
+  .planning-focus-panel .focus-radar-ping::after, .planning-focus-panel .focus-agent-link::after { animation-duration: 18s !important; }
 }
 
 .visible-defaults {
