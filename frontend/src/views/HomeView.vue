@@ -2,7 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import {
-  Bell, ChevronDown, CircleUserRound, CloudSun, Grid2X2, Paperclip,
+  Activity, Bell, ChevronDown, CircleUserRound, CloudSun, Grid2X2, Paperclip,
   History, Mic, Route, Send, Settings, SlidersHorizontal, UserRound, CarFront, Trash2,
 } from '@lucide/vue'
 import {
@@ -733,6 +733,16 @@ function activate(label: string) {
           @keydown.space.prevent="loadHomeWeather"
         ><CloudSun class="sun-icon" /> {{ weather.temperature }}°C&nbsp; {{ weather.condition }} <small>{{ weather.location }}</small></span>
         <span><CarFront class="mint-icon" /> <strong>{{ availableRange }}</strong> km <small>估算可用</small></span>
+        <button
+          class="ops-entry-button"
+          type="button"
+          aria-label="打开运行监控"
+          title="运行监控"
+          @click="router.push('/ops')"
+        >
+          <Activity :size="20" />
+          <span>运行监控</span>
+        </button>
         <button class="history-button" type="button" @click="historyOpen = !historyOpen">
           <History :size="20" />历史规划<span>{{ historyTrips.length }}</span>
         </button>

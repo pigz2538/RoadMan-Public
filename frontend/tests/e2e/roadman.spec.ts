@@ -36,6 +36,13 @@ test('首页包含核心规划入口', async ({ page }) => {
   })
 })
 
+test('首页可进入运行监控', async ({ page }) => {
+  await page.goto('/home')
+  await page.getByRole('button', { name: '打开运行监控' }).click()
+  await expect(page).toHaveURL(/\/ops$/)
+  await expect(page.getByRole('heading', { name: '运行监控' })).toBeVisible()
+})
+
 test('首页 3D 车辆保留滚轮缩放和大画布缓冲', async ({ page }) => {
   test.setTimeout(45_000)
   await page.route('https://www.gstatic.com/**', (route) => route.abort())

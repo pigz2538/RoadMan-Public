@@ -95,11 +95,11 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .top-stats svg { width: 29px; height: 29px; }
 .top-stats small { padding: 3px 7px; border-radius: 20px; background: #ebf4ff; color: var(--blue); font-size: 10px; }
 .sun-icon { color: #f7b41b; }.mint-icon { color: #24c9aa; }
-.history-button {
+.history-button, .ops-entry-button {
   display: inline-flex; align-items: center; gap: 7px; border: 1px solid #d6e3f4; border-radius: 999px;
   padding: 10px 14px; background: rgba(255,255,255,.75); color: #31547d; cursor: pointer; font-size: 14px; font-weight: 700;
 }
-.history-button:hover { color: var(--blue); border-color: #9fc4fb; background: #f1f7ff; }
+.history-button:hover, .ops-entry-button:hover { color: var(--blue); border-color: #9fc4fb; background: #f1f7ff; }
 .history-button > span { min-width: 20px; padding: 2px 6px; border-radius: 999px; color: #2b6fe7; background: #eaf3ff; font-size: 11px; text-align: center; }
 .history-popover {
   position: absolute; z-index: 35; top: 118px; right: 5vw; width: min(380px, calc(100vw - 32px));
@@ -1130,6 +1130,8 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
   .plan-grid.right-panel-collapsed { grid-template-columns: 290px minmax(440px, 1fr); }
   .agent-panel { position: fixed; z-index: 15; right: 18px; top: 92px; bottom: 20px; width: 330px; }
   .quick-grid { grid-template-columns: repeat(2, 1fr); }
+  .ops-entry-button { width: 44px; height: 44px; justify-content: center; padding: 0; }
+  .ops-entry-button span { display: none; }
 }
 @media (max-width: 820px) {
   .home-shell { padding: 12px; }.home-top { height: auto; padding: 15px; }.top-stats span:first-child { display: none; }
