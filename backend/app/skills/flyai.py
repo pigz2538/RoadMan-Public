@@ -843,7 +843,9 @@ class FlyAIHotelAdapter(SkillAdapter):
 
 class FlyAIPoiAdapter(SkillAdapter):
     name = "flyai.poi"
-    version = "1.0.0"
+    # v1.1 preserves provider entity categories so cached v1.0 cards cannot
+    # bypass the shared road/business/travel-agency integrity gate.
+    version = "1.1.0"
     category = "travel_search"
     timeout_seconds = 25
     max_retries = 0
@@ -926,6 +928,20 @@ class FlyAIPoiAdapter(SkillAdapter):
                     "location": raw_location or None,
                     "longitude": longitude,
                     "latitude": latitude,
+                    # Different FlyAI catalogue versions expose the same POI
+                    # taxonomy under different names.  Preserve all useful
+                    # variants; the planner normalizes them centrally.
+                    "categories": (
+                        item.get("categories")
+                        or item.get("categoryName")
+                        or item.get("category")
+                        or item.get("poiTypeName")
+                        or item.get("poiType")
+                        or item.get("type")
+                    ),
+                    "type": item.get("type") or item.get("poiType"),
+                    "typecode": item.get("typecode") or item.get("typeCode"),
+                    "tags": item.get("tags") or item.get("tagList"),
                 }
             )
         if not items:

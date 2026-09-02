@@ -874,24 +874,46 @@ class FakeFlightAdapter(SkillAdapter):
 class FakePoiAdapter(SkillAdapter):
     name = "amap.poi"
 
-    async def execute(self, _: dict[str, Any], __: SkillContext) -> SkillResult:
+    async def execute(self, payload: dict[str, Any], __: SkillContext) -> SkillResult:
+        scenic_items = [
+            {"id": f"poi_{index}", "name": f"景点 {index}", "location": location, "city": "九江"}
+            for index, location in enumerate(
+                [
+                    "115.970000,29.560000",
+                    "115.960000,29.570000",
+                    "115.950000,29.580000",
+                    "115.940000,29.590000",
+                ],
+                start=1,
+            )
+        ]
+        if payload.get("keywords") == "景点":
+            scenic_items.extend(
+                [
+                    {
+                        "id": "poi-road",
+                        "name": "山景大道",
+                        "location": "115.965000,29.565000",
+                        "city": "九江",
+                        "type": "地名地址信息;道路;主干道",
+                        "typecode": "190301",
+                    },
+                    {
+                        "id": "poi-agency",
+                        "name": "自然假期旅行社",
+                        "location": "115.955000,29.575000",
+                        "city": "九江",
+                        "type": "生活服务;旅行社;旅行社网点",
+                        "typecode": "070000",
+                    },
+                ]
+            )
         return SkillResult(
             success=True,
             provider="fake-amap",
             data={
-                "count": 4,
-                "items": [
-                    {"id": f"poi_{index}", "name": f"景点 {index}", "location": location, "city": "九江"}
-                    for index, location in enumerate(
-                        [
-                            "115.970000,29.560000",
-                            "115.960000,29.570000",
-                            "115.950000,29.580000",
-                            "115.940000,29.590000",
-                        ],
-                        start=1,
-                    )
-                ],
+                "count": len(scenic_items),
+                "items": scenic_items,
             },
         )
 
@@ -905,22 +927,32 @@ class FakeFlyAIPoiAdapter(SkillAdapter):
     async def execute(self, payload: dict[str, Any], _: SkillContext) -> SkillResult:
         is_meal = payload.get("keyword") == "餐厅"
         name = "FlyAI 餐厅" if is_meal else "FlyAI 景点"
+        items = [
+            {
+                "id": name,
+                "name": name,
+                "address": "九江测试地址",
+                "longitude": 115.93,
+                "latitude": 29.60,
+                "detail_url": "https://example.test/flyai",
+                "image_url": "https://example.test/flyai.jpg",
+            }
+        ]
+        if not is_meal:
+            items.append(
+                {
+                    "id": "travel-agency-card",
+                    "name": "名山旅游（旅行社名称）",
+                    "address": "九江测试地址",
+                    "longitude": 115.935,
+                    "latitude": 29.605,
+                    "categories": "生活服务;旅行社",
+                }
+            )
         return SkillResult(
             success=True,
             provider="fake-flyai",
-            data={
-                "items": [
-                    {
-                        "id": name,
-                        "name": name,
-                        "address": "九江测试地址",
-                        "longitude": 115.93,
-                        "latitude": 29.60,
-                        "detail_url": "https://example.test/flyai",
-                        "image_url": "https://example.test/flyai.jpg",
-                    }
-                ]
-            },
+            data={"items": items},
         )
 
     async def health_check(self) -> dict[str, Any]:
@@ -1153,6 +1185,22 @@ async def test_tourism_discovery_keeps_flyai_meal_and_hotel_candidates():
     candidates = result["tourism_candidates"]
     assert any(item["provider"] == "fake-flyai" for item in candidates["meals"])
     assert any(item["provider"] == "fake-flyai" for item in candidates["hotels"])
+    attraction_names = {
+        item["place"]["name"] for item in candidates["attractions"]
+    }
+    assert "山景大道" not in attraction_names
+    assert "自然假期旅行社" not in attraction_names
+    assert "名山旅游（旅行社名称）" not in attraction_names
+    excluded_names = {
+        item["name"]
+        for item in result["destination_research"].get("candidate_entity_exclusions", [])
+    }
+    assert {"山景大道", "自然假期旅行社", "名山旅游（旅行社名称）"} <= excluded_names
+    assert all(
+        activity.get("place", {}).get("name") not in excluded_names
+        for day in result["day_plans"]
+        for activity in day.get("activities", [])
+    )
     selected_hotel_names = {
         activity["place"]["name"]
         for day in result["day_plans"]

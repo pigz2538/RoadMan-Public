@@ -627,7 +627,7 @@ class AmapPoiAdapter(SkillAdapter):
     # The provider can return status=1 with an empty POI array.  Bump the
     # adapter version so any previously cached empty response is ignored after
     # deploying the non-empty-result guard.
-    version = "1.1.0"
+    version = "1.2.0"
     category = "poi"
     cache_ttl_seconds = 6 * 3600
 
@@ -694,6 +694,14 @@ class AmapPoiAdapter(SkillAdapter):
                         "name": poi.get("name"),
                         "address": _text_value(poi.get("address")),
                         "type": poi.get("type"),
+                        # Preserve the provider's machine-readable entity
+                        # classification.  The planner's shared POI
+                        # integrity gate uses both ``type`` and ``typecode``
+                        # to distinguish a scenic place from a road,
+                        # station or travel-service business with a similar
+                        # name.
+                        "typecode": poi.get("typecode"),
+                        "category": poi.get("category") or poi.get("type"),
                         "location": poi.get("location"),
                         "city": poi.get("cityname"),
                         "district": poi.get("adname"),

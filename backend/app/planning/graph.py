@@ -52,6 +52,7 @@ from .recommendations import (
     apply_agent_ranking,
     apply_agent_suitability,
     apply_candidate_type_guard,
+    classify_candidate_entity,
     plan_attraction_coverage,
     rank_tourism_candidates,
 )
@@ -168,6 +169,42 @@ def _poi_name_matches(requested: Any, candidate: Any) -> bool:
         return True
     return min(len(requested_key), len(candidate_key)) >= 2 and (
         requested_key in candidate_key or candidate_key in requested_key
+    )
+
+
+_NON_VISITABLE_ENTITY_CLASSES = {
+    "service_or_facility",
+    "road_or_transport",
+    "business_or_travel_agency",
+}
+
+
+def _is_high_confidence_non_visitable(candidate: dict[str, Any]) -> bool:
+    """Return whether provider/name evidence proves this is not a sight."""
+    classification = classify_candidate_entity(candidate)
+    return (
+        classification.get("confidence") == "high"
+        and classification.get("entity_class") in _NON_VISITABLE_ENTITY_CLASSES
+    )
+
+
+def _research_attraction_is_visitable(item: dict[str, Any]) -> bool:
+    """Reject obvious entity-type noise before spending a POI lookup on it.
+
+    Destination research is still model-driven.  This gate only checks the
+    selected name and any structured type the model/source supplied; it has
+    no city or attraction catalogue and therefore cannot overfit one case.
+    """
+    if not isinstance(item, dict) or item.get("category") != "attractions":
+        return True
+    name = str(item.get("name") or "").strip()
+    if not name:
+        return False
+    return not _is_high_confidence_non_visitable(
+        {
+            "place": {"name": name},
+            "categories": item.get("entity_type") or item.get("categories"),
+        }
     )
 
 
@@ -1194,7 +1231,34 @@ def build_planning_graph(
                         )
         except asyncio.TimeoutError:
             destination_research["agent_error"] = "LLM_DESTINATION_RESEARCH_TIMEOUT"
+        research_entity_exclusions = [
+            item
+            for item in recommendations
+            if isinstance(item, dict)
+            and item.get("category") == "attractions"
+            and not _research_attraction_is_visitable(item)
+        ]
+        recommendations = [
+            item
+            for item in recommendations
+            if not isinstance(item, dict)
+            or item.get("category") != "attractions"
+            or _research_attraction_is_visitable(item)
+        ]
         destination_research["agent_recommendations"] = recommendations[:48]
+        if research_entity_exclusions:
+            destination_research["research_entity_exclusions"] = [
+                {
+                    "name": str(item.get("name") or "")[:120],
+                    "reason": classify_candidate_entity(
+                        {
+                            "place": {"name": item.get("name")},
+                            "categories": item.get("entity_type") or item.get("categories"),
+                        }
+                    )["reason"],
+                }
+                for item in research_entity_exclusions[:20]
+            ]
         destination_research["destination_names"] = destination_names
         try:
             await emit(
@@ -1349,7 +1413,16 @@ def build_planning_graph(
                             },
                             "source_id": item.get("id") or name,
                         },
-                        "categories": item.get("categories") or item.get("kinds"),
+                        "categories": (
+                            item.get("categories")
+                            or item.get("kinds")
+                            or item.get("category")
+                            or item.get("type")
+                            or item.get("poi_type")
+                        ),
+                        "type": item.get("type"),
+                        "typecode": item.get("typecode"),
+                        "tags": item.get("tags"),
                         "detail_url": item.get("detail_url"),
                         "image_url": item.get("image_url"),
                         "rating": item.get("rating"),
@@ -1534,7 +1607,10 @@ def build_planning_graph(
                 candidates[category].append(
                     {
                         "place": place,
-                        "categories": item.get("type"),
+                        "categories": item.get("type") or item.get("category"),
+                        "type": item.get("type"),
+                        "typecode": item.get("typecode"),
+                        "category": item.get("category"),
                         "detail_url": f"https://www.amap.com/search?query={quote(item['name'])}",
                         "amap_source_id": item.get("id"),
                         "amap_facts": {
@@ -1734,7 +1810,16 @@ def build_planning_graph(
                         },
                         "detail_url": item.get("detail_url"),
                         "image_url": item.get("image_url"),
-                        "categories": item.get("categories") or item.get("kinds"),
+                        "categories": (
+                            item.get("categories")
+                            or item.get("kinds")
+                            or item.get("category")
+                            or item.get("type")
+                            or item.get("poi_type")
+                        ),
+                        "type": item.get("type"),
+                        "typecode": item.get("typecode"),
+                        "tags": item.get("tags"),
                         "ticket_name": item.get("ticket_name"),
                         "ticket_date": item.get("ticket_date"),
                         "source_records": [
@@ -1782,6 +1867,14 @@ def build_planning_graph(
             if isinstance(destination_research.get("agent_plan"), dict)
             else []
         )
+        planned_attractions = [
+            item
+            for item in planned_attractions
+            if isinstance(item, dict)
+            and _research_attraction_is_visitable(
+                {**item, "category": "attractions"}
+            )
+        ]
         known_research_names = {
             _normalize_poi_name(item.get("name")) for item in researched_attractions
         }
@@ -1878,7 +1971,10 @@ def build_planning_graph(
                                     "source_id": item.get("id") or name,
                                 },
                                 "detail_url": f"https://www.amap.com/search?query={quote(name)}",
-                                "categories": item.get("type"),
+                                "categories": item.get("type") or item.get("category"),
+                                "type": item.get("type"),
+                                "typecode": item.get("typecode"),
+                                "category": item.get("category"),
                                 "source_records": [
                                     *source_records,
                                     {
@@ -2264,6 +2360,33 @@ def build_planning_graph(
         # destination priorities. A researched university or landmark may be
         # intentionally visitable; an unresearched nearby KTV/pharmacy is not.
         candidates = apply_candidate_type_guard(candidates)
+        # High-confidence roads, agencies and service businesses must not be
+        # exposed as selectable sightseeing cards.  Keep a compact audit in
+        # destination research so the rejection remains traceable without
+        # leaking the bad entity into route construction or the UI.
+        entity_exclusions = [
+            item
+            for item in candidates.get("attractions", [])
+            if item.get("excluded_from_itinerary")
+            and not (item.get("user_required") or item.get("user_confirmed"))
+        ]
+        if entity_exclusions:
+            destination_research["candidate_entity_exclusions"] = [
+                {
+                    "name": str((item.get("place") or {}).get("name") or "")[:120],
+                    "entity_class": item.get("entity_class"),
+                    "reason": item.get("entity_reason"),
+                    "provider": item.get("provider"),
+                }
+                for item in entity_exclusions[:40]
+            ]
+            candidates["attractions"] = [
+                item
+                for item in candidates.get("attractions", [])
+                if not item.get("excluded_from_itinerary")
+                or item.get("user_required")
+                or item.get("user_confirmed")
+            ]
         await emit(
                 state,
                 "rank_tourism_candidates",

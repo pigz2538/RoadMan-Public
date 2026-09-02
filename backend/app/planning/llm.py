@@ -1037,9 +1037,13 @@ class DestinationResearchAgent:
             "select nationally or locally recognized landmarks before nearby generic POIs; "
             "return enough distinct attractions for the number of travel days (up to 12 attraction recommendations). "
             "Do not invent names, choose a restaurant/university/campus as a province or city destination, or promote "
-            "obscure nearby POIs just because they are close to a geocoder point. Do not turn an experience into a place name. "
+            "obscure nearby POIs just because they are close to a geocoder point. A road/street, travel agency, tour operator, "
+            "ticket office, company, transport facility or a search result merely containing a famous scenic name is NOT an "
+            "attraction. Verify that each attraction name identifies a place a traveller can actually enter and visit. "
+            "Do not turn an experience into a place name. "
             f"{local_anchor_instruction} {preference_instruction} "
             "Return JSON only: {\"recommendations\":[{\"name\":\"...\",\"category\":\"attractions|meals\","
+            "\"entity_type\":\"attraction|restaurant\",\"is_visitable\":true,"
             "\"importance\":0,\"area\":\"城区或地理片区\",\"suggested_minutes\":180,"
             "\"visit_scale\":\"major|compact|indoor|outdoor|unknown\","
             "\"best_time\":\"morning|afternoon|evening|any\",\"reason\":\"中文依据\","
@@ -1070,6 +1074,21 @@ class DestinationResearchAgent:
             name = str(item.get("name") or "").strip()
             if category not in {"attractions", "meals"} or not name:
                 continue
+            entity_type = str(item.get("entity_type") or "").strip().lower()
+            is_visitable = item.get("is_visitable")
+            if category == "attractions" and (
+                is_visitable is False
+                or entity_type in {
+                    "road",
+                    "street",
+                    "travel_agency",
+                    "tour_operator",
+                    "business",
+                    "service",
+                    "transport_facility",
+                }
+            ):
+                continue
             try:
                 importance = float(item.get("importance") or 0)
             except (TypeError, ValueError):
@@ -1079,6 +1098,10 @@ class DestinationResearchAgent:
                 {
                     "name": name[:120],
                     "category": category,
+                    "entity_type": entity_type or (
+                        "attraction" if category == "attractions" else "restaurant"
+                    ),
+                    "is_visitable": is_visitable is not False,
                     "importance": max(0.0, min(100.0, importance)),
                     "area": str(item.get("area") or "").strip()[:80],
                     "suggested_minutes": _coerce_positive_minutes(
@@ -1272,7 +1295,8 @@ class PoiRankerAgent:
             "but keep indoor or all-season venues when provider details support them. "
             "Return seasonal_fit and seasonal_reason in each decision. "
             "For category=attractions, do not rank a nearby KTV/nightclub, pharmacy/clinic, "
-            "school/campus, shopping mall or generic service facility as a scenic attraction "
+            "school/campus, shopping mall, road/street, travel agency/tour operator, company, "
+            "transport facility or generic service facility as a scenic attraction "
             "unless the user explicitly asks for it; nearby-search noise must receive a low score. "
             f"Destination research evidence (use it to prioritize famous source-backed places, never as a hard-coded list): {json.dumps(destination_research or {}, ensure_ascii=False)}. "
             "你是 RoadMan POI 行程策展 Agent。请根据已经由 Requirement Agent 提取的偏好、特殊体验、"
@@ -1398,7 +1422,8 @@ class PoiSuitabilityAgent:
             "is a sightseeing attraction. For category=attractions, a result "
             "whose provider category or description is clearly a KTV/nightclub, "
             "pharmacy/clinic, school/campus, shopping mall, generic service "
-            "facility or unrelated business is unsuitable unless the user "
+            "facility, road/street, travel agency/tour operator, transport stop "
+            "or unrelated business is unsuitable unless the user "
             "explicitly requested that exact place. When the extracted intent "
             "prefers nature/scenery, mark entertainment, retail, medical and "
             "other non-tourism businesses unsuitable and favor parks, lakes, "

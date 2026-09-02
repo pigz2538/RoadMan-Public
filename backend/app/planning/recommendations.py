@@ -145,6 +145,8 @@ def plan_attraction_coverage(
         for item in candidates
         if item.get("place", {}).get("name")
         and not item.get("seasonal_excluded")
+        and item.get("agent_suitability") is not False
+        and not item.get("excluded_from_itinerary")
         and _research_priority(item) > 0
     ]
     if not priority_items:
@@ -212,19 +214,15 @@ _RESEARCH_NAME_SEPARATORS = re.compile(r"[\s\u00b7•\-—–_/|（）()【】\[
 # evidence used to keep obvious search noise out of the executable attraction
 # list.  A source-backed destination highlight or an explicitly requested
 # place is allowed through because the traveller may intentionally visit it.
-_NON_ATTRACTION_CATEGORY_RE = re.compile(
-    r"(?:ktv|karaoke|nightclub|bar|club|娱乐|歌厅|酒吧|夜店|休闲娱乐|"
-    r"药店|药房|医院|诊所|卫生|pharmacy|clinic|hospital|medical|"
-    r"学校|大学|学院|校园|campus|school|education|"
-    r"商场|购物|超市|便利店|mall|shopping|supermarket|"
-    r"酒店|宾馆|住宿|hotel|汽车服务|加油站|充电站|维修|售票处|票务|"
-    r"装修|建材|门窗|service facility)",
-    re.IGNORECASE,
-)
 _HARD_NON_ATTRACTION_EVIDENCE_RE = re.compile(
     r"(?:ktv|karaoke|nightclub|bar|club|娱乐中心|歌厅|酒吧|夜店|休闲娱乐|"
     r"药店|药房|医院|诊所|pharmacy|clinic|hospital|medical|"
-    r"装修|建材|门窗|筹建|售票处|service facility)",
+    r"装修|建材|门窗|筹建|售票处|service facility|"
+    r"道路|街道|高速公路|公路|地名地址信息|交通设施|"
+    r"road|street|highway|route|transportation|"
+    r"旅行社|旅游服务|旅游公司|旅游咨询|旅行服务|票务代理|导游服务|"
+    r"公司企业|有限公司|有限责任公司|营业部|门市部|"
+    r"travel agency|tour operator|tourism service|company|corporation)",
     re.IGNORECASE,
 )
 
@@ -238,6 +236,175 @@ _NON_ATTRACTION_LOCATION_RE = re.compile(
     re.IGNORECASE,
 )
 
+# AMap's ``type`` is a semicolon-delimited hierarchy, while FlyAI/OSM use
+# several different field names for the same concept.  Keep the entity
+# vocabulary in one place and apply it to every provider instead of relying
+# on a destination-specific blacklist.  A road suffix is only a signal when
+# there is no stronger scenic name (``锦里古街`` remains eligible), and an
+# explicit provider road category always wins over a scenic-looking prefix
+# (``青城山路`` must not become a three-hour visit).
+_ROAD_CATEGORY_RE = re.compile(
+    r"(?:道路|街道|高速公路|公路|路段|地名地址信息|交通设施|"
+    r"road|street|highway|route|way|transportation|roadway)",
+    re.IGNORECASE,
+)
+_BUSINESS_CATEGORY_RE = re.compile(
+    r"(?:旅行社|旅游服务|旅游公司|旅游咨询|旅行服务|票务代理|导游服务|"
+    r"公司企业|企业|有限公司|有限责任公司|营业部|门市部|"
+    r"travel agency|tour operator|tourism service|business|company|corporation)",
+    re.IGNORECASE,
+)
+_ATTRACTIVE_CATEGORY_RE = re.compile(
+    r"(?:风景名胜|景点|景区|旅游景区|公园|博物馆|纪念馆|展览馆|文化馆|"
+    r"故居|古镇|古城|长城|城墙|寺|庙|塔|园林|植物园|动物园|湿地|"
+    r"森林公园|国家公园|湖泊|自然保护区|地质公园|大峡谷|瀑布|遗址|陵园|"
+    r"tourism|attraction|park|museum|monument|historic|natural|viewpoint|"
+    r"national park|nature reserve)",
+    re.IGNORECASE,
+)
+_ATTRACTIVE_NAME_RE = re.compile(
+    r"(?:风景区|景区|旅游区|度假区|公园|博物馆|纪念馆|展览馆|"
+    r"故居|古镇|古城|长城|城墙|古街|老街|步行街|巷子|寺|庙|塔|"
+    r"园林|植物园|动物园|湿地|森林公园|国家公园|湖|岛|山|"
+    r"大峡谷|瀑布|遗址|陵园|宫|殿|祠|坊)$",
+    re.IGNORECASE,
+)
+_BUSINESS_NAME_RE = re.compile(
+    r"(?:旅行社|旅游服务|旅游公司|旅游咨询|旅行服务|票务代理|导游服务|"
+    r"旅游门市|旅游营业部|有限公司|有限责任公司|营业部|门市部|"
+    r"咨询中心|服务中心|服务部|工作室|俱乐部|代理|"
+    r"travel agency|tour operator|tourism service|company|corporation)$",
+    re.IGNORECASE,
+)
+_STANDALONE_TRAVEL_NAME_RE = re.compile(
+    r"(?:旅游|旅行|旅游攻略|景点推荐)$",
+    re.IGNORECASE,
+)
+_ROAD_NAME_RE = re.compile(
+    r"(?:路|道路|街道|大道|大街|公路|高速|高速公路|环路|路段|路口|"
+    r"立交|隧道|桥|桥梁|铁路|地铁线|公交线|匝道|出口)$",
+    re.IGNORECASE,
+)
+
+
+def _flatten_entity_text(value: Any) -> str:
+    """Flatten provider category values without stringifying whole records."""
+    if value in (None, "", [], {}):
+        return ""
+    if isinstance(value, dict):
+        # Provider payloads frequently wrap a label as {name/type/value}.
+        return " ".join(
+            _flatten_entity_text(value.get(key))
+            for key in ("name", "type", "label", "value", "text", "category", "kind")
+            if value.get(key) not in (None, "", [], {})
+        )
+    if isinstance(value, (list, tuple, set)):
+        return " ".join(_flatten_entity_text(item) for item in value)
+    return str(value)
+
+
+def _candidate_entity_evidence(candidate: dict[str, Any]) -> tuple[str, str]:
+    """Return name and provider classification evidence for one candidate."""
+    place = candidate.get("place") or {}
+    name = str(place.get("name") or "").strip()
+    fields = (
+        "categories",
+        "kinds",
+        "type",
+        "typecode",
+        "type_code",
+        "category",
+        "category_name",
+        "poi_type",
+        "industry",
+        "tags",
+        "raw_type",
+    )
+    evidence = " ".join(
+        _flatten_entity_text(candidate.get(field))
+        for field in fields
+        if candidate.get(field) not in (None, "", [], {})
+    )
+    # A few adapters keep the original provider response under one of these
+    # keys. Read only classification fields, never arbitrary descriptions or
+    # user text, so a review note cannot accidentally classify a POI.
+    for container_key in ("provider_payload", "raw", "raw_item"):
+        container = candidate.get(container_key)
+        if isinstance(container, dict):
+            evidence = " ".join(
+                part
+                for part in (
+                    evidence,
+                    *(
+                        _flatten_entity_text(container.get(field))
+                        for field in fields
+                        if container.get(field) not in (None, "", [], {})
+                    ),
+                )
+                if part
+            )
+    return name, evidence
+
+
+def classify_candidate_entity(candidate: dict[str, Any]) -> dict[str, str]:
+    """Classify a provider candidate without interpreting traveller intent.
+
+    The planner receives heterogeneous POI records.  This classifier is a
+    conservative integrity gate: it rejects only high-confidence roads,
+    travel agencies and business/service records, while leaving ambiguous
+    names for the ranking and suitability Agents.  It intentionally has no
+    destination or landmark catalogue, so the same logic works for every
+    city, language and provider.
+    """
+    name, evidence = _candidate_entity_evidence(candidate)
+    combined = f"{evidence} {name}".strip()
+    has_attraction_category = bool(_ATTRACTIVE_CATEGORY_RE.search(evidence))
+    has_road_category = bool(_ROAD_CATEGORY_RE.search(evidence))
+    has_business_category = bool(_BUSINESS_CATEGORY_RE.search(evidence))
+    # Apply the hard service test to the returned name as well.  Some travel
+    # search adapters omit categories and append annotations such as
+    # ``（旅行社名称）`` to the title; that annotation is provider evidence,
+    # not a user requirement.
+    has_hard_service = bool(_HARD_NON_ATTRACTION_EVIDENCE_RE.search(combined))
+    has_location_service = bool(_NON_ATTRACTION_LOCATION_RE.search(combined))
+    has_business_name = bool(_BUSINESS_NAME_RE.search(name))
+    has_standalone_travel_name = bool(_STANDALONE_TRAVEL_NAME_RE.search(name))
+    has_road_name = bool(_ROAD_NAME_RE.search(name))
+    has_attractive_name = bool(_ATTRACTIVE_NAME_RE.search(name))
+
+    if has_hard_service or has_location_service:
+        return {
+            "entity_class": "service_or_facility",
+            "confidence": "high",
+            "reason": "来源类别或地点名称明确指向服务设施，而非可游览景点",
+        }
+    if has_road_category or (has_road_name and not has_attractive_name):
+        return {
+            "entity_class": "road_or_transport",
+            "confidence": "high",
+            "reason": "来源类别或地点名称明确指向道路、路段或交通设施",
+        }
+    if has_business_category or has_business_name or has_standalone_travel_name:
+        # A company can manage a scenic area, but the company itself is not a
+        # visitable POI. ``旅游区/旅游景区`` is intentionally not matched by
+        # the standalone/business suffix checks, so genuine scenic areas pass.
+        return {
+            "entity_class": "business_or_travel_agency",
+            "confidence": "high",
+            "reason": "来源类别或地点名称明确指向旅行社、企业或商业服务",
+        }
+    if has_attraction_category or has_attractive_name:
+        return {
+            "entity_class": "attraction",
+            "confidence": "medium" if has_attractive_name and not has_attraction_category else "high",
+            "reason": "来源类别或地点名称包含可游览景点证据",
+        }
+    return {
+        "entity_class": "unknown",
+        "confidence": "low",
+        "reason": "暂未获得足够实体类别证据，交由排序与适配智能体复核",
+    }
+
 
 def apply_candidate_type_guard(
     candidates: dict[str, list[dict[str, Any]]],
@@ -245,46 +412,37 @@ def apply_candidate_type_guard(
     """Mark obvious non-attraction provider hits as unsuitable.
 
     This is a data-quality check after model review, not an intent parser. It
-    only uses explicit provider category metadata and keeps the record visible
-    as a backup with an explainable reason. Research-backed highlights and
-    user-selected places are preserved even when their category is a school,
-    hotel or another non-scenic type (for example a university campus).
+    uses provider category metadata plus unmistakable returned-name suffixes.
+    Research-backed ambiguous landmarks and user-selected places are
+    preserved; high-confidence roads, agencies and service facilities are
+    marked for quarantine with an explainable reason.
     """
     for item in candidates.get("attractions", []):
+        if not isinstance(item, dict):
+            continue
+        classification = classify_candidate_entity(item)
+        item["entity_class"] = classification["entity_class"]
+        item["entity_confidence"] = classification["confidence"]
+        item["entity_reason"] = classification["reason"]
+        # Explicit user choices are retained for a later human confirmation
+        # step, but still carry the classification so the UI can explain why
+        # a provider called a requested item a road or a business.
         if item.get("user_required") or item.get("user_confirmed"):
+            item["entity_user_override"] = True
             continue
-        place_name = str((item.get("place") or {}).get("name") or "")
-        evidence_text = str(item.get("categories") or place_name)
-        # A destination model can occasionally echo a noisy map result as a
-        # “recommended” name. Unmistakable service evidence (KTV, pharmacy,
-        # ticket office, construction office, …) must still be rejected;
-        # softer types such as a university campus remain eligible when the
-        # destination research agent intentionally selected them.
-        hard_non_attraction = bool(
-            _HARD_NON_ATTRACTION_EVIDENCE_RE.search(evidence_text)
-            or _NON_ATTRACTION_LOCATION_RE.search(evidence_text)
-        )
-        if (_research_priority(item) > 0 or item.get("must_see")) and not hard_non_attraction:
-            continue
-        categories = item.get("categories")
-        if not categories and not place_name:
-            continue
-        # Some provider responses omit ``type``. For a missing category, use
-        # only an unmistakable service suffix in the returned place name;
-        # this still classifies provider evidence rather than interpreting the
-        # traveller's intent from free text.
-        category_text = str(categories or place_name)
-        if not (
-            _NON_ATTRACTION_CATEGORY_RE.search(category_text)
-            or _NON_ATTRACTION_LOCATION_RE.search(category_text)
-        ):
+        if classification["entity_class"] not in {
+            "service_or_facility",
+            "road_or_transport",
+            "business_or_travel_agency",
+        }:
             continue
         item["agent_suitability"] = False
         item["suitability_confidence"] = "high"
         item["suitability_reason"] = (
-            "在线地点资料显示为非景点类服务，已保留为备选而不纳入景点排程"
+            f"{classification['reason']}，已保留为备选而不纳入景点排程"
         )
         item["category_guarded"] = True
+        item["excluded_from_itinerary"] = True
     return candidates
 
 

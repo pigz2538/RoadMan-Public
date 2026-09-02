@@ -6,6 +6,7 @@ import pytest
 from app.domain.models import SkillResult, SourceRecord
 from app.planning.recommendations import (
     apply_candidate_type_guard,
+    classify_candidate_entity,
     plan_attraction_coverage,
     rank_tourism_candidates,
 )
@@ -351,6 +352,103 @@ def test_category_guard_rejects_road_facility_without_category_metadata():
     assert candidates["attractions"][0]["agent_suitability"] is False
     assert candidates["attractions"][0]["category_guarded"] is True
     assert candidates["attractions"][1].get("agent_suitability") is not False
+
+
+@pytest.mark.parametrize(
+    ("candidate", "expected_class"),
+    [
+        (
+            {"place": {"name": "九寨沟路"}},
+            "road_or_transport",
+        ),
+        (
+            {
+                "place": {"name": "青城山路"},
+                "categories": "地名地址信息;道路;主干道",
+            },
+            "service_or_facility",
+        ),
+        (
+            {"place": {"name": "九寨沟旅游（旅行社名称）"}},
+            "service_or_facility",
+        ),
+        (
+            {
+                "place": {"name": "雪山假期旅行社"},
+                "categories": "生活服务;旅行社;旅行社网点",
+            },
+            "service_or_facility",
+        ),
+        (
+            {"place": {"name": "锦里古街"}},
+            "attraction",
+        ),
+        (
+            {"place": {"name": "宽窄巷子"}},
+            "attraction",
+        ),
+        (
+            {
+                "place": {"name": "九寨沟风景名胜区"},
+                "categories": "风景名胜;旅游景点",
+            },
+            "attraction",
+        ),
+        (
+            {
+                "place": {"name": "City Tour Travel Agency"},
+                "type": "travel agency",
+            },
+            "service_or_facility",
+        ),
+    ],
+)
+def test_candidate_entity_classifier_is_provider_and_destination_agnostic(
+    candidate,
+    expected_class,
+):
+    assert classify_candidate_entity(candidate)["entity_class"] == expected_class
+
+
+def test_category_guard_quarantines_non_visitable_entities_but_preserves_real_sights():
+    candidates = {
+        "attractions": [
+            {"place": {"name": "人民路"}},
+            {"place": {"name": "山水旅行社"}},
+            {"place": {"name": "杭州西湖"}, "categories": "风景名胜;湖泊"},
+            {"place": {"name": "西安城墙"}, "kinds": "historic,fortifications"},
+        ],
+        "meals": [],
+        "hotels": [],
+    }
+
+    apply_candidate_type_guard(candidates)
+
+    by_name = {item["place"]["name"]: item for item in candidates["attractions"]}
+    assert by_name["人民路"]["excluded_from_itinerary"] is True
+    assert by_name["山水旅行社"]["excluded_from_itinerary"] is True
+    assert by_name["杭州西湖"].get("excluded_from_itinerary") is not True
+    assert by_name["西安城墙"].get("excluded_from_itinerary") is not True
+
+
+def test_explicit_user_place_is_classified_but_not_silently_removed():
+    candidates = {
+        "attractions": [
+            {
+                "place": {"name": "用户指定的道路入口"},
+                "categories": "地名地址信息;道路",
+                "user_required": True,
+            }
+        ],
+        "meals": [],
+        "hotels": [],
+    }
+
+    apply_candidate_type_guard(candidates)
+
+    candidate = candidates["attractions"][0]
+    assert candidate["entity_user_override"] is True
+    assert candidate.get("excluded_from_itinerary") is not True
 
 
 def test_scheduler_does_not_execute_negative_suitability_candidate():
@@ -1317,6 +1415,50 @@ async def test_flyai_poi_adapter_degrades_when_cli_is_missing(monkeypatch):
     )
     assert result.success is False
     assert result.error_code == "SKILL_NOT_CONFIGURED"
+
+
+@pytest.mark.asyncio
+async def test_flyai_poi_adapter_preserves_entity_type_metadata(monkeypatch):
+    class FakeProcess:
+        async def communicate(self):
+            return (
+                json.dumps(
+                    {
+                        "data": {
+                            "itemList": [
+                                {
+                                    "id": "agency-1",
+                                    "name": "山水假期旅行社",
+                                    "address": "测试市中心",
+                                    "longitude": 104.06,
+                                    "latitude": 30.67,
+                                    "categoryName": "生活服务;旅行社",
+                                    "typeCode": "070000",
+                                    "tags": ["旅游服务"],
+                                }
+                            ]
+                        }
+                    },
+                    ensure_ascii=False,
+                ).encode("utf-8"),
+                b"",
+            )
+
+    monkeypatch.setattr("app.skills.flyai.shutil.which", lambda _: "flyai")
+
+    async def fake_create(*args, **kwargs):
+        return FakeProcess()
+
+    monkeypatch.setattr("app.skills.flyai.asyncio.create_subprocess_exec", fake_create)
+    result = await FlyAIPoiAdapter().execute(
+        {"city_name": "测试市", "keyword": "著名旅游景点"},
+        SkillContext(),
+    )
+
+    assert result.success is True
+    assert result.data["items"][0]["categories"] == "生活服务;旅行社"
+    assert result.data["items"][0]["typecode"] == "070000"
+    assert result.data["items"][0]["tags"] == ["旅游服务"]
 
 
 @pytest.mark.asyncio
