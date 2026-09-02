@@ -73,14 +73,14 @@
     <div class="eyebrow">ROADMAN SYSTEM ARCHITECTURE</div><h1>从自然语言到可交付行程的分层系统</h1><div class="subtitle">交互、编排、外部能力与持久化分层解耦；长任务异步执行，结果渐进可见。</div>
     <div class="layer"><div class="layer-title"><b>产品体验层</b><span>Web 工作台 / 人工确认</span></div><div class="layer-items"><div class="item"><b>需求核对</b><span>多轮澄清、最终确认</span></div><div class="item"><b>渐进详情</b><span>地图、阶段、活动、进度</span></div><div class="item"><b>行程编辑</b><span>聊天、选点、补丁预览</span></div><div class="item"><b>统一交付</b><span>HTML / PDF / PPTX / 长图</span></div></div></div>
     <div class="connector"></div>
-    <div class="layer"><div class="layer-title" style="background:linear-gradient(135deg,#4338ca,#7c55ef)"><b>智能编排层</b><span>LangGraph + 规则校验</span></div><div class="layer-items"><div class="item"><b>语义智能体</b><span>理解、研究、策展、编辑</span></div><div class="item"><b>规划智能体</b><span>路线、日程、车辆、服务</span></div><div class="item"><b>复核智能体</b><span>逐日完整性与适配判断</span></div><div class="item"><b>修复闭环</b><span>请求 → 修复 → 重审 → 验证</span></div></div></div>
+    <div class="layer"><div class="layer-title" style="background:linear-gradient(135deg,#4338ca,#7c55ef)"><b>智能编排层</b><span>LangGraph + 规则校验</span></div><div class="layer-items"><div class="item"><b>语义智能体</b><span>理解、研究、策展、编辑</span></div><div class="item"><b>规划智能体</b><span>路线、日程、车辆、服务</span></div><div class="item"><b>复核智能体</b><span>逐日完整性与适配判断</span></div><div class="item"><b>修复与重审</b><span>请求 → 修复 → 重审 → 验证</span></div></div></div>
     <div class="connector"></div>
     <div class="layer"><div class="layer-title" style="background:linear-gradient(135deg,#078a70,#20b7a4)"><b>能力与数据层</b><span>真实工具 / 可追溯状态</span></div><div class="layer-items"><div class="item"><b>地图与路线</b><span>地理编码、POI、多方式轨迹</span></div><div class="item"><b>旅行与天气</b><span>景点、餐饮、住宿、预报</span></div><div class="item"><b>任务基础设施</b><span>FastAPI、Redis、ARQ、SSE</span></div><div class="item"><b>持久与审计</b><span>PostgreSQL、版本、调用记录</span></div></div></div>
     <div class="footer-note"><span>图 1｜RoadMan 总体架构</span><span>智能判断与确定性校验协同</span></div>
   </section>
 
   <section id="agents" class="diagram">
-    <div class="eyebrow">COLLABORATIVE AGENTS</div><h1>多智能体不是流水线，而是可回退的协作回路</h1><div class="subtitle">每个角色共享结构化状态；复核发现的问题会退回责任智能体，修复后必须重新审阅。</div>
+    <div class="eyebrow">COLLABORATIVE AGENTS</div><h1>多智能体共享状态，复核问题可退回处理</h1><div class="subtitle">每个角色读取同一份结构化状态。复核发现问题后，责任智能体修复并重新提交。</div>
     <div class="agents"><div class="ring"></div><div class="hub">统一行程状态<br/>RoadManState</div>
       <div class="agent a1"><b>需求理解智能体</b><span>目标、时间、同行人、偏好、交通与特殊事件</span></div>
       <div class="agent a2"><b>目的地研究智能体</b><span>代表性地点、片区、必吃与旅行节奏</span></div>
@@ -94,18 +94,18 @@
   </section>
 
   <section id="journey" class="diagram">
-    <div class="eyebrow">END-TO-END TASK LOOP</div><h1>一条可演示、可修改、可追溯的完整任务闭环</h1><div class="subtitle">从一句话出行需求开始，到真实工具调用、自动复核、用户修改和多格式交付结束。</div>
+    <div class="eyebrow">END-TO-END TASK FLOW</div><h1>从旅行需求到经过校验的多格式行程</h1><div class="subtitle">流程包括需求确认、工具调用、逐日安排、自动复核、用户修改和导出。</div>
     <div class="steps">
       <div class="step"><div class="num">1</div><h3>自然语言输入</h3><p>地点、日期、同行人、偏好与交通方式；支持附件上下文。</p></div>
       <div class="step"><div class="num">2</div><h3>预检与确认</h3><p>抽取结构化约束，只追问真正影响执行的信息。</p></div>
       <div class="step"><div class="num">3</div><h3>检索与研究</h3><p>地图、路线、天气、景点、餐饮、住宿和特殊事件。</p></div>
       <div class="step"><div class="num">4</div><h3>生成行程</h3><p>拆分跨城与本地阶段，安排三餐、住宿、补能和休息。</p></div>
-      <div class="step"><div class="num">5</div><h3>复核与修复</h3><p>逐日审核、闭环校验；可修复问题自动回退重排。</p></div>
+      <div class="step"><div class="num">5</div><h3>复核与修复</h3><p>逐日检查时间、返程和住宿；可修复问题自动重排。</p></div>
       <div class="step"><div class="num">6</div><h3>人工编辑</h3><p>聊天或地图选点，预览补丁，确认后统一重算。</p></div>
       <div class="step"><div class="num">7</div><h3>冻结与交付</h3><p>校验通过后生成地图、报告、演示和运行证据。</p></div>
     </div>
-    <div class="loop"></div><div class="loop-label">编辑后的新版本重新进入路线、日程和复核闭环</div>
-    <div class="footer-note"><span>图 3｜任务闭环</span><span>失败不写入正式行程；导出只读取通过校验的冻结快照</span></div>
+    <div class="loop"></div><div class="loop-label">编辑后的新版本重新计算路线和日程，并再次复核</div>
+    <div class="footer-note"><span>图 3｜任务流程</span><span>失败不写入正式行程；导出只读取通过校验的冻结快照</span></div>
   </section>
 
   <section id="state" class="diagram">
@@ -124,21 +124,21 @@
     <div class="trace">
       <div class="card"><h2>1. 外部来源</h2><span class="tag">在线地图</span><span class="tag">旅行搜索</span><span class="tag">开放地点</span><span class="tag">天气</span><span class="tag">车型目录</span><ul><li>凭据通过环境变量注入</li><li>记录服务、时间与调用结果</li><li>失败不伪造实时数据</li></ul></div>
       <div class="card"><h2>2. 能力适配器</h2><span class="tag violet">Skill Registry</span><span class="tag violet">统一错误</span><span class="tag violet">超时/重试</span><ul><li>归一化坐标、路线和地点字段</li><li>保留原始来源链接与降级状态</li><li>调用健康、延迟和失败可审计</li></ul></div>
-      <div class="card"><h2>3. 智能策展</h2><span class="tag green">语义去重</span><span class="tag green">中文展示</span><span class="tag green">个性适配</span><ul><li>同点合并，多源证据相互补充</li><li>结合季节、天气、海拔和偏好</li><li>研究“必去/必吃”而非只看酒店周边</li></ul></div>
-      <div class="card"><h2>4. 可验证入库</h2><span class="tag amber">SourceRecord</span><span class="tag amber">SkillCall</span><span class="tag amber">Verification</span><ul><li>路线、时间、闭环由确定性规则校验</li><li>不确定结果标注提示和人工确认边界</li><li>导出引用冻结快照与来源说明</li></ul></div>
+      <div class="card"><h2>3. 候选筛选</h2><span class="tag green">语义去重</span><span class="tag green">中文名称</span><span class="tag green">个性适配</span><ul><li>合并同一地点并保留多源证据</li><li>结合季节、天气、海拔和偏好</li><li>先研究代表性地点，再核对酒店距离</li></ul></div>
+      <div class="card"><h2>4. 校验与保存</h2><span class="tag amber">SourceRecord</span><span class="tag amber">SkillCall</span><span class="tag amber">Verification</span><ul><li>程序检查路线、时间和返程</li><li>不确定结果标注提示和人工确认边界</li><li>导出引用冻结快照与来源说明</li></ul></div>
     </div>
-    <div class="footer-note"><span>图 5｜工具调用与来源追溯</span><span>商业接口可替换，领域 Schema 与任务闭环可复用</span></div>
+    <div class="footer-note"><span>图 5｜工具调用与来源追溯</span><span>服务商可替换，领域 Schema 与任务流程保持不变</span></div>
   </section>
 
   <section id="safety" class="diagram">
-    <div class="eyebrow">SAFETY BY DESIGN</div><h1>模型负责理解与取舍，安全结论由可验证规则兜底</h1><div class="subtitle">RoadMan 是出行规划辅助系统，不接入车辆控制、不替代实时导航和驾驶员判断。</div>
+    <div class="eyebrow">SAFETY RULES</div><h1>模型处理语义，程序检查路线、时间和能耗</h1><div class="subtitle">RoadMan 是出行规划辅助系统，不接入车辆控制，也不替代实时导航和驾驶员判断。</div>
     <div class="safety">
       <div class="card"><h2>智能体擅长</h2><div class="rule">理解模糊目标、上下文和自然语言修改</div><div class="rule">研究目的地、特殊事件和候选地点</div><div class="rule">在多目标之间取舍并解释规划依据</div><div class="rule">发现内容缺口并向责任智能体提出修订请求</div></div>
       <div class="shield">✓</div>
-      <div class="card"><h2>确定性层强制</h2><div class="rule">坐标、真实道路点列、耗时与能耗计算</div><div class="rule">阶段连续、往返闭环、时间冲突与超长移动</div><div class="rule">连续驾驶、补能、三餐、住宿和返程窗口</div><div class="rule">失败不落库、编辑确认、版本回滚与导出门禁</div></div>
+      <div class="card"><h2>程序强制检查</h2><div class="rule">坐标、真实道路点列、耗时与能耗计算</div><div class="rule">阶段连续、往返路线、时间冲突与超长移动</div><div class="rule">连续驾驶、补能、三餐、住宿和返程窗口</div><div class="rule">失败不落库、编辑确认、版本回滚与导出门禁</div></div>
     </div>
     <div class="row" style="margin-top:22px"><div class="card" style="flex:1"><h3>人工确认节点</h3><p>需求最终确认、行程修改预览、地图选点、外部信息不确定和出发前复核。</p></div><div class="card" style="flex:1"><h3>明确使用边界</h3><p>路线、天气、开放时间、票务、班次、路况与价格随时变化，必须以运营方和实时导航为准。</p></div></div>
-    <div class="footer-note"><span>图 6｜安全边界</span><span>不让模型覆盖硬约束，也不把可自动修复的问题推给用户</span></div>
+    <div class="footer-note"><span>图 6｜安全边界</span><span>模型不能覆盖硬约束；可修复问题由系统重新处理</span></div>
   </section>
 
   <section id="deployment" class="diagram">

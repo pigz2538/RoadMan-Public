@@ -143,6 +143,55 @@
     .evidence-list { display: grid; grid-template-columns: repeat(2, 1fr); gap: 2mm 4mm; }
     .evidence { display: grid; grid-template-columns: 13mm 1fr; align-items: start; gap: 2mm; color: var(--muted); font-size: 7.1pt; }
     .evidence b { padding: .8mm 1mm; text-align: center; background: var(--green-soft); color: var(--green); font-size: 6pt; }
+    .front-intro { display: flex; align-items: center; justify-content: space-between; gap: 8mm; margin-bottom: 3mm; }
+    .front-intro p { max-width: 210mm; margin: 0; font-size: 8.2pt; line-height: 1.5; }
+    .baseline { flex: none; padding: 1.6mm 2.4mm; border: .3mm solid #bfd0ee; background: var(--blue-soft); color: var(--blue); font-size: 6.5pt; font-weight: 900; }
+    .priority-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 3.2mm; }
+    .priority-card { padding: 3.2mm 3.7mm 3mm; border: .3mm solid var(--line); border-top: 1.1mm solid var(--blue); background: var(--white); }
+    .priority-card:nth-child(2) { border-top-color: var(--green); }
+    .priority-card:nth-child(3) { border-top-color: var(--orange); }
+    .priority-card:nth-child(4) { border-top-color: var(--red); }
+    .priority-head { display: grid; grid-template-columns: 10mm 1fr auto; gap: 2.2mm; align-items: center; }
+    .priority-head > b { display: grid; place-items: center; width: 9mm; height: 9mm; background: var(--blue); color: white; font-size: 10pt; }
+    .priority-card:nth-child(2) .priority-head > b { background: var(--green); }
+    .priority-card:nth-child(3) .priority-head > b { background: var(--orange); }
+    .priority-card:nth-child(4) .priority-head > b { background: var(--red); }
+    .priority-head h3 { margin: 0; font-size: 10.5pt; }
+    .priority-head em { color: var(--green); font-size: 6.4pt; font-style: normal; font-weight: 900; }
+    .direct-answer { margin: 2mm 0 1.6mm; color: #33445f; font-size: 7.4pt; line-height: 1.45; }
+    .direct-answer b { color: var(--ink); }
+    .answer-detail { margin: 0; }
+    .answer-detail div { display: grid; grid-template-columns: 18mm 1fr; gap: 2mm; padding: 1.15mm 0; border-top: .25mm solid #e5eaf1; }
+    .answer-detail dt { color: #6b7890; font-size: 6.2pt; font-weight: 900; }
+    .answer-detail dd { margin: 0; color: #3f4f67; font-size: 6.55pt; line-height: 1.38; }
+    .verdict-strip { display: grid; grid-template-columns: repeat(5, 1fr); gap: 2.2mm; margin-top: 3.2mm; }
+    .verdict-strip div { padding: 2.2mm 2.5mm; border-left: .8mm solid var(--blue); background: #eaf1fb; }
+    .verdict-strip strong { display: block; color: var(--blue); font-size: 12.5pt; line-height: 1; }
+    .verdict-strip span { display: block; margin-top: 1mm; color: #596579; font-size: 6pt; }
+    .proof-ribbon { display: grid; grid-template-columns: repeat(4, 1fr); margin-top: 2.8mm; border-top: .3mm solid #cbd6e5; border-bottom: .3mm solid #cbd6e5; }
+    .proof-ribbon div { padding: 2.3mm 3mm; border-left: .3mm solid #d8e0eb; }
+    .proof-ribbon div:first-child { border-left: 0; }
+    .proof-ribbon b { display: block; margin-bottom: .7mm; color: var(--blue); font-size: 6.4pt; }
+    .proof-ribbon span { display: block; color: var(--muted); font-size: 6pt; line-height: 1.35; }
+    .snapshot-metrics { display: grid; grid-template-columns: repeat(6, 1fr); gap: 2.2mm; margin-bottom: 3.2mm; }
+    .snapshot-metrics div { padding: 2.4mm 2.6mm; border-top: .8mm solid var(--blue); background: var(--white); }
+    .snapshot-metrics strong { display: block; color: var(--blue); font-size: 14pt; line-height: 1; }
+    .snapshot-metrics span { display: block; margin-top: 1mm; color: var(--muted); font-size: 6.2pt; }
+    .update-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3mm; }
+    .update-card { min-height: 45mm; padding: 3mm 3.4mm; border: .3mm solid var(--line); background: var(--white); }
+    .update-card header { display: flex; align-items: center; justify-content: space-between; gap: 3mm; margin-bottom: 1.4mm; }
+    .update-card h3 { margin: 0; color: #263852; font-size: 9.2pt; }
+    .update-card header span { color: var(--blue); font-size: 5.9pt; font-weight: 900; }
+    .update-card ul { padding-left: 3.8mm; font-size: 6.6pt; line-height: 1.4; }
+    .update-card li + li { margin-top: .8mm; }
+    .commit-timeline { display: grid; grid-template-columns: repeat(6, 1fr); gap: 0; margin-top: 3.3mm; border-top: .3mm solid #c8d3e3; border-bottom: .3mm solid #c8d3e3; }
+    .commit-timeline div { min-height: 22mm; padding: 2.5mm 2.7mm; border-left: .3mm solid #d8e0eb; }
+    .commit-timeline div:first-child { border-left: 0; }
+    .commit-timeline time { color: var(--blue); font-size: 6.5pt; font-weight: 900; }
+    .commit-timeline b { display: block; margin: .8mm 0 .5mm; font-size: 7pt; }
+    .commit-timeline span { display: block; color: var(--muted); font-size: 5.9pt; line-height: 1.35; }
+    .fit-page { padding-top: 12mm; }
+    .fit-page h2 { margin-bottom: 2mm; font-size: 20pt; }
 
     /* The report uses one continuous paper tone across cover and content. */
     .page, .page.soft, .page.dark, .page.cover { color: var(--ink); background: var(--paper); }
@@ -172,14 +221,109 @@
   </style>
 </head>
 <body>
+  <section class="page soft">
+    <div class="head"><span class="brand">RoadMan / Semifinal Direct Answers</span><span class="section">复赛四项意见 · 直接回复</span></div>
+    <h2>四项意见的修改结果、数据和限制</h2>
+    <div class="front-intro">
+      <p>截至提交 <code>240795b</code>，下列修改均已进入仓库，可在公网 Demo、本地容器或评测文件中核对。后续页面给出计算方法、系统结构、产品比较和安全记录。</p>
+      <span class="baseline">统计冻结：2026-09-02 · 初赛后 49 次提交</span>
+    </div>
+    <div class="priority-grid">
+      <article class="priority-card">
+        <div class="priority-head"><b>1</b><h3>续航能力真实化与可量化</h3><em>计算已修正</em></div>
+        <p class="direct-answer"><b>处理结果：</b>已删除“补能后固定回到 80%”的逻辑。SOC 沿路线阶段连续传递；实际补能量优先，缺失时按桩功率、车辆受电上限、停留时长和 90% 效率估算。</p>
+        <dl class="answer-detail">
+          <div><dt>计算方法</dt><dd>起点 SOC - 行驶能耗 + min(桩功率, 车辆上限) x 时长 x 效率 - 后续能耗；结果按电池剩余空间封顶并传递到下一阶段。</dd></div>
+          <div><dt>量化证据</dt><dd>12 条模拟传感器回放：能耗 MAPE 8.442%，等效续航 MAPE 9.302%，到达 SOC MAE 2.799pp，均低于 12% / 12% / 5pp 阈值。</dd></div>
+          <div><dt>当前限制</dt><dd>数据类型是模拟回放。低温尾部误差保留在报告中，下一步采集至少 30 个脱敏实车有效路段校准。</dd></div>
+        </dl>
+      </article>
+      <article class="priority-card">
+        <div class="priority-head"><b>2</b><h3>可复现 Demo 与技术细节</h3><em>公网 Demo 已开放</em></div>
+        <p class="direct-answer"><b>处理结果：</b>公网 Demo 可直接操作，仓库也提供 Docker Compose 版本。前端、API、worker、PostgreSQL 和 Redis 可一并启动，不需要依赖录屏判断功能。</p>
+        <dl class="answer-detail">
+          <div><dt>Agent 协作</dt><dd>LangGraph 串联需求理解、研究、策展、路线、日程、复核、修复与编辑；Redis + ARQ 执行长任务，SSE 推送真实节点进度。</dd></div>
+          <div><dt>程序校验</dt><dd>路线连续、时间冲突、三餐住宿、驾驶休息、SOC 与返程由代码检查；最多自动修复 3 轮，仍未通过时停止交付并说明原因。</dd></div>
+          <div><dt>运行记录</dt><dd>首页“运行监控”入口可查看请求量、延迟、Skill 调用、缓存、错误码、外部服务健康和模型用量。</dd></div>
+        </dl>
+      </article>
+      <article class="priority-card">
+        <div class="priority-head"><b>3</b><h3>差异化与商业化价值</h3><em>用户与路径已明确</em></div>
+        <p class="direct-answer"><b>处理结果：</b>高德提供实时地图和路线，马蜂窝提供目的地内容与旅行产品。RoadMan 使用这些类型的数据，负责多日排程、补能余量、修改重算和最终校验。</p>
+        <dl class="answer-detail">
+          <div><dt>独特价值</dt><dd>补能余量连续传播；路线、酒店、三餐、天气、休息和返程统一校验；自然语言/地图修改后执行影响预览、全局重算和版本回滚。</dd></div>
+          <div><dt>目标用户</dt><dd>2-7 天新能源自驾情侣/家庭、跨城交通衔接本地游、频繁删点换店且需要全局重排的深度规划者。</dd></div>
+          <div><dt>商业路径</dt><dd>B2C 基础免费加进阶订阅；向车企、租车和营地提供“车型参数 + 多日路书 + 补能余量”接口。当前没有收入数据。</dd></div>
+        </dl>
+      </article>
+      <article class="priority-card">
+        <div class="priority-head"><b>4</b><h3>安全边界与诚实降级</h3><em>12 / 12 场景通过</em></div>
+        <p class="direct-answer"><b>处理结果：</b>天气、补能、地图、班次或语义模型中断时，系统保留可用部分并显示降级原因。估算值会单独标记。系统只做规划，不接入车辆控制接口。</p>
+        <dl class="answer-detail">
+          <div><dt>天气来源</dt><dd>首页并发查询 Open-Meteo、wttr.in、MET Norway 和 7Timer，保留各源状态；高德把坐标转成地点名。行程逐时天气使用 Open-Meteo，并结合路线时刻和景点适配检查。</dd></div>
+          <div><dt>控制边界</dt><dd>不接 CAN、车机、自动驾驶或驾驶辅助执行接口；不控制方向、制动、动力、充电、车门或导航下发，驾驶员与官方信息始终优先。</dd></div>
+          <div><dt>数据策略</dt><dd>最小化收集主动输入、车辆规划参数、对话、版本与附件；密钥不入库。删除行程时级联清理消息、状态、版本、任务、附件与关联调用记录。</dd></div>
+        </dl>
+      </article>
+    </div>
+    <div class="verdict-strip">
+      <div><strong>8.442%</strong><span>能耗 MAPE / 模拟回放</span></div>
+      <div><strong>9.302%</strong><span>等效续航 MAPE</span></div>
+      <div><strong>2.799pp</strong><span>到达 SOC MAE</span></div>
+      <div><strong>12 / 12</strong><span>异常降级符合预期</span></div>
+      <div><strong>5 服务</strong><span>Compose 完整运行链路</span></div>
+    </div>
+    <div class="proof-ribbon">
+      <div><b>核对续航</b><span>打开新能源长途阶段，查看补能前 SOC、功率、时长、补入量与到达 SOC。</span></div>
+      <div><b>核对复现</b><span>从公网 Demo 新建行程，再进入运行监控核对 Skill 与服务状态。</span></div>
+      <div><b>核对修改</b><span>删除景点或更换酒店，确认路线、时间、住宿与 SOC 是否一起重算。</span></div>
+      <div><b>核对降级</b><span>模拟天气或补能源中断，检查降级标记和待确认动作；再删除测试行程。</span></div>
+    </div>
+    <div class="footer"><span>回答口径：已实现能力优先；模拟、估算和生产化缺口均明确标注</span><span>01 / 10</span></div>
+  </section>
+
+  <section class="page soft">
+    <div class="head"><span class="brand">RoadMan / Improvements Since 2026-08-16</span><span class="section">初赛后更新 · 全景摘要</span></div>
+    <h2>2026 年 8 月 16 日之后完成的主要修改</h2>
+    <div class="front-intro">
+      <p>初赛提交时间为 2026-08-16。此页按 Git 基线 <code>240795b</code> 汇总 08.17-09.02 的 49 次提交，并按用户可见结果归类。</p>
+      <span class="baseline">49 commits · 6 组修改</span>
+    </div>
+    <div class="snapshot-metrics">
+      <div><strong>49</strong><span>初赛后提交</span></div>
+      <div><strong>146 + 1</strong><span>后端基线 passed + skipped</span></div>
+      <div><strong>10 / 10</strong><span>复杂口语预检</span></div>
+      <div><strong>7 / 7</strong><span>完整规划与导出</span></div>
+      <div><strong>E01-E10</strong><span>编辑重排验收</span></div>
+      <div><strong>5</strong><span>一致导出格式</span></div>
+    </div>
+    <div class="update-grid">
+      <article class="update-card"><header><h3>01 · 需求理解与目的地语义</h3><span>08.18-09.01</span></header><ul><li>稳定“下周三玩三天”“周日晚八点前回来”等相对日期与返程窗口。</li><li>解析显式自驾/飞机/火车语句；信息不足或冲突时先澄清，不用关键词猜答案。</li><li>行政区、城市、多目的地与同名 POI 分层裁决；重规划时同步刷新语义锚点和坐标。</li><li>首页快捷需求改为情侣周边、新能源补能、沿途慢游和雨天改排等真实任务。</li></ul></article>
+      <article class="update-card"><header><h3>02 · 路线、跨日与完整日程</h3><span>08.18-09.01</span></header><ul><li>住宿改为代表景点附近的中心基点，跨日复用并保证每天回到住宿点。</li><li>超长自驾按每日安全上限拆段，自动插入服务区休息、补能和过夜。</li><li>移动日补齐午餐/晚餐；跨日抵达后重新连接酒店，下一日从真实住宿点出发。</li><li>合并入口/停车场等同景区变体，活动只采用当日路线实际经过的候选；抑制零距离返程卡。</li></ul></article>
+      <article class="update-card"><header><h3>03 · 续航、天气与安全降级</h3><span>08.20-09.02</span></header><ul><li>SOC 从固定重置改为按实测补能量或“桩功率 x 时间 x 效率”连续计算。</li><li>建立 12 条模拟回放误差基线和 12 个异常场景矩阵，坏值封顶、忽略或显式降级。</li><li>首页并发查询 Open-Meteo、wttr.in、MET Norway 和 7Timer；高德只负责把坐标转成地点名。</li><li>行程逐时天气使用 Open-Meteo，并结合路线时刻与景点适配；来源全部失败时不生成天气数据。</li></ul></article>
+      <article class="update-card"><header><h3>04 · 地图、编辑与交互体验</h3><span>08.19-09.02</span></header><ul><li>地图标记按近邻和类别去重，一个地点只保留一份标签与类别徽标。</li><li>左侧日程、右侧 Agent、底部阶段详情可独立折叠；规划等待画面改为单焦点叙事。</li><li>自然语言/地图加点、删点、替换先给影响预览；确认后全局重排，失败可回滚。</li><li>首页新增运行监控入口；天气卡使用浏览器授权位置，失败仅回退本机上次坐标。</li></ul></article>
+      <article class="update-card"><header><h3>05 · 多源数据与模型可配置</h3><span>08.29-09.02</span></header><ul><li>车型主目录缺少具体版本时并行补查多类公开数据源，保留来源、缺失和估算标记。</li><li>新能源、混动、燃油车型统一承载续航、能耗、电池、充电、座位和尺寸字段。</li><li>语义 Agent 迁移并支持可配置模型提供方、模型名、推理强度、思考开关、Token 和超时。</li><li>交通、POI、酒店、天气、油价、车型等 Skill 统一记录来源、延迟、缓存和降级状态。</li></ul></article>
+      <article class="update-card"><header><h3>06 · 工程复现、观测与交付</h3><span>08.17-09.02</span></header><ul><li>Docker Compose 运行五个服务；后台任务、SSE 进度、数据库状态和工具审计可互相核对。</li><li>补齐复杂输入、完整旅程、连续 SOC、异常降级、附件清理与 E01-E10 编辑回归。</li><li>Markdown / HTML / PDF / PPTX / 长图共享冻结快照；修改未完成时禁止导出旧结果。</li><li>中英 README、四份复赛专项文档、数据合规说明、高清截图和指标看板已归档。</li></ul></article>
+    </div>
+    <div class="commit-timeline">
+      <div><time>08.17</time><b>稳定基线</b><span>发布审计、运行核验与问题清单。</span></div>
+      <div><time>08.18-19</time><b>预检 / 住宿 / 地图</b><span>相对日期、交通语句、中心酒店、终点锚定、标记去重。</span></div>
+      <div><time>08.20-22</time><b>长途跨日</b><span>拆段、休息、补能降级、移动日三餐和酒店续接。</span></div>
+      <div><time>08.28-31</time><b>评测与回归</b><span>连续 SOC、误差基线、安全矩阵、运行观测、端到端验收与双语材料。</span></div>
+      <div><time>09.01</time><b>路线质量</b><span>动态车型、真实快捷入口、位置天气、路线感知候选与返程检查。</span></div>
+      <div><time>09.02</time><b>入口与配置</b><span>监控入口、模型提供方参数和首页四源天气。</span></div>
+    </div>
+    <div class="footer"><span>统计口径：2026-08-17 至基线 240795b；未提交文件不计入</span><span>02 / 10</span></div>
+  </section>
+
   <section class="page cover">
     <div class="head" style="border-color:#425069"><span class="brand">RoadMan / GOAI Boundless Agents / 复赛报告</span><span class="section">2026-09-02</span></div>
     <div class="cover-layout">
       <div>
         <p class="eyebrow">多智能体自驾与中短途旅行规划工作台</p>
-        <h1>RoadMan<br>复赛优化<br>集中回答</h1>
+        <h1>RoadMan<br>复赛修改<br>说明</h1>
         <p class="lead">围绕评委提出的四个问题：续航真实化、可复现 Demo、差异化与商业化、安全边界与诚实降级。后半部分集中汇报 8 月 16 日以来的其他功能提升。</p>
-        <div class="note" style="margin-top:7mm"><strong>统一定位：</strong>RoadMan 不替代地图导航或攻略社区，而是把目的地证据、交通、每日路书、车辆续航和用户修改编排成可验证闭环。</div>
+        <div class="note" style="margin-top:7mm"><strong>产品位置：</strong>RoadMan 使用地图和目的地资料，负责多日排程、车辆续航、用户修改与最终校验。</div>
       </div>
       <div>
         <img class="cover-shot" src="assets/02-planning-workspace-2560x1440.png" alt="RoadMan 完整规划工作台">
@@ -187,13 +331,13 @@
       </div>
     </div>
     <div class="cover-metrics">
-      <div class="cover-metric"><strong>46</strong><span>2026-08-16 后 Git 提交</span></div>
+      <div class="cover-metric"><strong>49</strong><span>2026-08-16 后 Git 提交 / 基线 240795b</span></div>
       <div class="cover-metric"><strong>8.442%</strong><span>能耗 MAPE，模拟回放</span></div>
       <div class="cover-metric"><strong>2.799pp</strong><span>到达 SOC MAE</span></div>
       <div class="cover-metric"><strong>12 / 12</strong><span>异常与降级场景通过</span></div>
       <div class="cover-metric"><strong>146</strong><span>容器测试通过，1 skipped</span></div>
     </div>
-    <div class="footer"><span>RoadMan 复赛项目介绍与优化报告</span><span>01 / 08</span></div>
+    <div class="footer"><span>RoadMan 复赛项目介绍与优化报告</span><span>03 / 10</span></div>
   </section>
 
   <section class="page soft">
@@ -201,7 +345,7 @@
     <h2>补能后不再固定重置 SOC；按实际补能量或充电能力连续计算，并用误差数据证明</h2>
     <div class="grid-2" style="grid-template-columns:1.08fr .92fr">
       <div>
-        <div class="answer-box"><strong>评委关切</strong><span>补能后 SOC 不能固定恢复到某个百分比；续航能力不能只展示动画，必须给出“预测值 vs. 观测值”评测。</span></div>
+        <div class="answer-box"><strong>评委意见</strong><span>补能后 SOC 不能固定恢复到某个百分比；续航能力需要提供“预测值 vs. 观测值”评测。</span></div>
         <h3 style="margin-top:4mm">1. 连续能量账本</h3>
         <div class="process">
           <div class="step"><strong>阶段起点</strong><span>承接上一阶段到达电量，先限制在 0-100%</span></div>
@@ -236,16 +380,16 @@
           <div class="bar-row"><span>SOC MAE / 5pp</span><div class="bar"><span style="width:55.98%"></span></div><b>2.799</b></div>
         </div>
         <img class="shot" src="assets/05-evaluation-dashboard-2560x1440.png" alt="续航量化与异常降级评测看板">
-        <p class="caption">评测图完整展示：左侧为 12 条回放的续航误差，右侧为 12 个异常与降级场景。数据直接读取评测 JSON，不手工填写。</p>
-        <div class="note"><strong>诚实边界：</strong>当前数据是模拟传感器回放，不是实车道路遥测。低温样本能耗误差 20%、等效续航误差 25%，说明下一步必须采集脱敏实车路段校准，而不是隐藏尾部误差。</div>
+        <p class="caption">左侧是 12 条回放的续航误差，右侧是 12 个异常场景。图表直接读取评测 JSON。</p>
+        <div class="note"><strong>数据范围：</strong>当前数据是模拟传感器回放，不能当作实车道路遥测。低温样本能耗误差为 20%，等效续航误差为 25%，下一步需要用脱敏实车路段校准。</div>
       </div>
     </div>
-    <div class="footer"><span>证据：续航专项文档；误差基线 JSON；22 项连续 SOC 与边界回归</span><span>02 / 08</span></div>
+    <div class="footer"><span>证据：续航专项文档；误差基线 JSON；22 项连续 SOC 与边界回归</span><span>04 / 10</span></div>
   </section>
 
-  <section class="page dark">
+  <section class="page dark fit-page">
     <div class="head"><span class="brand">Direction 02 / 可复现 Demo 与技术细节</span><span class="section">评委问题 2</span></div>
-    <h2>不依赖视频：五服务一键启动、多智能体分工、确定性复核、三档验收形成闭环</h2>
+    <h2>公网 Demo、本地五服务版本和固定验收命令</h2>
     <div class="grid-2" style="grid-template-columns:.96fr 1.04fr">
       <div>
         <div class="answer-box"><strong>评委关切</strong><span>提供可快速运行版本，说明多智能体协作、续航计算和降级机制，避免只靠录屏。</span></div>
@@ -262,13 +406,13 @@
             <tr><td>需求理解</td><td>口语日期、同行关系、偏好、必达点和必要追问</td><td>信息不足时必须澄清，不能猜地点或人数</td></tr>
             <tr><td>目的地研究/策展</td><td>多源候选、代表性地点、旅行节奏和适配理由</td><td>不能凭空创造候选，采用项必须留来源</td></tr>
             <tr><td>行程编排/编辑</td><td>跨城、本地活动、酒店、餐饮与用户修改意图</td><td>修改先预览再确认；失败不覆盖正式行程</td></tr>
-            <tr><td>确定性校验</td><td>路线连续、时间冲突、三餐住宿、驾驶休息、SOC 和返程闭环</td><td>硬安全结论优先于模型文本</td></tr>
+            <tr><td>确定性校验</td><td>路线连续、时间冲突、三餐住宿、驾驶休息、SOC 和返程</td><td>硬安全结论优先于模型文本</td></tr>
           </tbody>
         </table>
       </div>
       <div>
         <img class="shot" src="assets/02-planning-workspace-2560x1440.png" alt="RoadMan 完整规划工作台">
-        <p class="caption">产品截图完整显示。地图、日程、阶段和协作消息由同一 Trip 快照驱动，不是拼接示意图。</p>
+        <p class="caption">地图、日程、阶段和协作消息读取同一份 Trip 快照。</p>
         <div class="grid-3" style="margin-top:3mm">
           <div class="panel"><span class="pill">最短启动</span><h3 style="margin-top:2mm">统一 Web 入口</h3><p>Compose 启动五个服务；健康检查确认 API、队列和前端状态。</p></div>
           <div class="panel"><span class="pill green">离线复核</span><h3 style="margin-top:2mm">一键检查</h3><p>后端测试、续航误差、安全矩阵、前端单测与生产构建。</p></div>
@@ -283,20 +427,20 @@
         <div class="note" style="margin-top:3mm"><strong>证据链：</strong>每次复核保存 Git SHA、运行环境、JSON 结果和人类可读摘要；高清截图记录尺寸、来源 URL 与生成时间。截图只辅助阅读，不替代测试结果。</div>
       </div>
     </div>
-    <div class="footer"><span>证据：复现专项文档；真实回归记录；一键检查脚本；截图清单</span><span>03 / 08</span></div>
+    <div class="footer"><span>证据：复现专项文档；真实回归记录；一键检查脚本；截图清单</span><span>05 / 10</span></div>
   </section>
 
   <section class="page">
     <div class="head"><span class="brand">Direction 03 / 差异化与商业化价值</span><span class="section">评委问题 3</span></div>
-    <h2>不与高德争实时导航、不与马蜂窝争内容社区：RoadMan 负责复杂旅程的执行编排</h2>
-    <div class="answer-box" style="margin-bottom:3mm"><strong>调研结论</strong><span>高德官方重点是实时地图、路线和位置服务；马蜂窝官方重点是目的地内容、攻略和旅行产品。RoadMan 的价值位于两者之间：把多源信息转成跨日、可修改、可校验的统一路书。比较只依据公开定位，不声称竞品不存在未公开能力。</span></div>
+    <h2>RoadMan 负责多日排程和修改校验，实时导航仍交给地图</h2>
+    <div class="answer-box" style="margin-bottom:3mm"><strong>公开资料比较</strong><span>高德官方重点是实时地图、路线和位置服务；马蜂窝官方重点是目的地内容、攻略和旅行产品。RoadMan 使用这些类型的数据，整理跨日安排、补能余量和修改影响。比较仅依据公开页面。</span></div>
     <table>
       <thead><tr><th style="width:24mm">维度</th><th>高德公开重点</th><th>马蜂窝公开重点</th><th style="width:83mm">RoadMan 当前差异化</th><th style="width:50mm">用户获得的直接价值</th></tr></thead>
       <tbody>
         <tr><td>核心任务</td><td>实时交通、路线、导航、停车与充电信息</td><td>攻略、游记、灵感、当地玩乐和旅行产品</td><td>把需求、路线、酒店、三餐、补能、天气和返程合并为一条跨日状态链</td><td>减少地图、攻略、备忘录之间的人工拼接</td></tr>
-        <tr><td>新能源余量</td><td>提供充电设施与路线相关能力</td><td>非核心公开定位</td><td>补能前后 SOC、实测/估算依据、车辆受电上限和安全余量连续传播</td><td>不仅“附近有桩”，还能判断阶段是否留有余量</td></tr>
-        <tr><td>路书完整性</td><td>路线点与路书分享</td><td>目的地内容与行程灵感</td><td>三餐、住宿、连续驾驶休息、跨天拆段和返程闭环统一校验</td><td>减少漏餐、漏住、超长驾驶和返程断链</td></tr>
-        <tr><td>修改闭环</td><td>路线点编辑</td><td>内容与商品选择</td><td>自然语言/地图编辑 -> 影响预览 -> 用户确认 -> 路线、时间、酒店和 SOC 全局重算</td><td>局部改动不会留下旧路线或时间冲突</td></tr>
+        <tr><td>新能源余量</td><td>提供充电设施与路线相关能力</td><td>公开页面未列为主要方向</td><td>补能前后 SOC、实测/估算依据、车辆受电上限和安全余量连续传递</td><td>判断每个阶段是否留有可用余量</td></tr>
+        <tr><td>路书完整性</td><td>路线点与路书分享</td><td>目的地内容与行程灵感</td><td>统一检查三餐、住宿、驾驶休息、跨天拆段和返程</td><td>减少漏餐、漏住、超长驾驶和返程断点</td></tr>
+        <tr><td>修改重算</td><td>路线点编辑</td><td>内容与商品选择</td><td>自然语言/地图编辑 -> 影响预览 -> 用户确认 -> 路线、时间、酒店和 SOC 重算</td><td>局部改动不会留下旧路线或时间冲突</td></tr>
         <tr><td>来源与降级</td><td>以实时地图服务为核心</td><td>以内容与交易服务为核心</td><td>采用候选、工具调用、错误码和估算状态可追溯；缺失时不虚构</td><td>知道哪些是事实、估算和待确认项</td></tr>
       </tbody>
     </table>
@@ -316,21 +460,22 @@
           </tbody>
         </table>
       </div>
-      <div class="note"><strong>复赛阶段不虚构收入：</strong>建议邀请 8-12 名目标用户，用“地图 + 攻略 + 备忘录”和 RoadMan 完成同一任务，比较规划耗时、遗漏项、修改次数和主观信心；小样本只报告描述性统计。</div>
+      <div class="note"><strong>当前没有收入数据：</strong>下一步邀请 8 到 12 名目标用户，用“地图 + 攻略 + 备忘录”和 RoadMan 完成同一任务，比较规划耗时、遗漏项、修改次数和主观信心；小样本只报告描述性统计。</div>
     </div>
-    <div class="footer"><span>调研依据：高德地图产品/路线规划官方页面；马蜂窝目的地/当地玩乐官方页面；差异化专项文档</span><span>04 / 08</span></div>
+    <div class="footer"><span>调研依据：高德地图产品/路线规划官方页面；马蜂窝目的地/当地玩乐官方页面；差异化专项文档</span><span>06 / 10</span></div>
   </section>
 
   <section class="page soft">
     <div class="head"><span class="brand">Direction 04 / 安全边界与诚实降级</span><span class="section">评委问题 4</span></div>
-    <h2>天气、补能、地图或班次中断时，不让错误静默通过，也不把估算包装成事实</h2>
+    <h2>天气、补能、地图或班次中断时的处理规则</h2>
     <div class="grid-2" style="grid-template-columns:1.15fr .85fr">
       <div>
-        <div class="answer-box"><strong>评委关切</strong><span>展示异常情况下的降级与兜底；明确不接入车辆控制；说明用户数据如何收集、存储和删除。</span></div>
+        <div class="answer-box"><strong>评委意见</strong><span>说明异常情况下的降级处理、车辆控制边界，以及用户数据的收集、存储和删除方式。</span></div>
         <table style="margin-top:3mm">
-          <thead><tr><th style="width:35mm">异常</th><th style="width:63mm">系统处理</th><th>用户看到的诚实边界</th></tr></thead>
+          <thead><tr><th style="width:35mm">异常</th><th style="width:63mm">系统处理</th><th>页面说明</th></tr></thead>
           <tbody>
-            <tr><td>天气服务不可用</td><td>保留基础风险模型继续规划</td><td>显示天气数据降级，不生成逐时温度或降水概率</td></tr>
+            <tr><td>首页天气部分/全部不可用</td><td>并发查询 Open-Meteo、wttr.in、MET Norway 和 7Timer；高德把坐标转成地点名；保留各来源状态</td><td>单源失败切换其他来源；全部失败时天气卡显示不可用，不沿用旧值生成当前天气</td></tr>
+            <tr><td>行程逐时天气不可用</td><td>Open-Meteo 失败后保留基础风险提示</td><td>不生成逐时温度、风速和降水概率</td></tr>
             <tr><td>天气部分字段畸形</td><td>忽略坏字段，保留可解析字段</td><td>明确“部分可用”，仍可识别有效强降水信息</td></tr>
             <tr><td>补能服务中断</td><td>按路线插入估算检查位置</td><td>路线可阅读但不可直接执行，出发前必须确认真实服务</td></tr>
             <tr><td>充电功率缺失</td><td>车辆上限与 60 kW 保守值取小</td><td>显示估算功率、时长和计算依据</td></tr>
@@ -346,26 +491,26 @@
           <div class="metric"><strong>100%</strong><span>降级处理成功</span></div>
           <div class="metric"><strong>91.67%</strong><span>路线直接可执行</span></div>
         </div>
-        <p class="caption">直接可执行率不是 100%：补能服务中断时只有估算位置，系统主动降为“需确认”。这是安全设计，不是测试失败。</p>
+        <p class="caption">补能服务中断时只剩估算位置，因此有 1 个场景需要人工确认，路线直接可执行率为 91.67%。</p>
       </div>
       <div>
         <div class="panel" style="border-top:1mm solid var(--red)"><span class="pill red">责任边界</span><h3 style="margin-top:2mm">明确不接车辆控制</h3><ul><li>不接 CAN、车机、自动驾驶或驾驶辅助执行接口</li><li>不控制方向、制动、动力、充电、车门或导航下发</li><li>驾驶员、车辆仪表、实时导航和官方公告始终优先</li></ul></div>
         <div class="panel" style="margin-top:3mm;border-top:1mm solid var(--blue)"><span class="pill">数据最小化</span><h3 style="margin-top:2mm">收集与存储</h3><ul><li>只收集用户主动输入的需求、车辆规划参数、对话、版本和附件</li><li>默认不需要身份证、支付、车牌、VIN、精确家庭地址或持续轨迹</li><li>行程/消息/版本保存到数据库；附件保存在受控目录；任务临时状态进入队列</li><li>密钥只通过环境变量注入，不进入日志、导出或截图</li></ul></div>
         <div class="panel" style="margin-top:3mm;border-top:1mm solid var(--green)"><span class="pill green">删除策略</span><h3 style="margin-top:2mm">行程级联硬删除</h3><ul><li>删除行程时同步清理消息、规划状态、版本、后台任务、附件实体和关联调用记录</li><li>附件默认保留 30 天，可配置</li><li>当前删除不可恢复，前端执行前二次确认</li></ul></div>
-        <div class="note" style="margin-top:3mm"><strong>受控公网 Demo 升级为生产服务仍需补齐：</strong>账号鉴权、资源授权、租户隔离、隐私告知、授权撤回、数据导出、密钥托管、限流、WAF、备份和恢复演练。</div>
+        <div class="note" style="margin-top:3mm"><strong>正式多人服务仍缺：</strong>账号鉴权、资源授权、租户隔离、隐私告知、授权撤回、数据导出、密钥托管、限流、WAF、备份和恢复演练。</div>
       </div>
     </div>
-    <div class="footer"><span>证据：12 场景安全基线；安全与数据边界文档；行程删除级联测试</span><span>05 / 08</span></div>
+    <div class="footer"><span>证据：12 场景安全基线；安全与数据边界文档；行程删除级联测试</span><span>07 / 10</span></div>
   </section>
 
-  <section class="page">
+  <section class="page fit-page">
     <div class="head"><span class="brand">Other Improvements Since 2026-08-16</span><span class="section">其他功能更新 1 / 2</span></div>
-    <h2>规划质量：从“能生成”推进到“跨日连续、语义准确、修改后仍然闭环”</h2>
+    <h2>规划质量：跨日路线、住宿、餐饮和修改结果保持一致</h2>
     <div class="grid-3">
       <div class="feature"><h3>相对日期与口语预检</h3><p>稳定“下周三玩三天”“周日晚八点前回来”等相对时间；解析显式飞机/火车/自驾语句，信息不足时进入澄清。</p></div>
       <div class="feature"><h3>目的地锚点先校准再路由</h3><p>行政区父级与明确子城市先裁决真实目的地；重规划时语义锚点变化同步清除旧坐标，再研究代表性候选和住宿基点，避免标题与地图错位。</p></div>
       <div class="feature"><h3>长途自驾跨天拆段</h3><p>超长驾驶按每日安全上限拆分，自动加入休息、过夜和补能；拆分后保持能耗、时间和路线连续。</p></div>
-      <div class="feature"><h3>移动日三餐与住宿闭环</h3><p>长途移动不再丢失午餐/晚餐；跨日抵达后重新连接酒店，下一天从真实住宿锚点出发。</p></div>
+      <div class="feature"><h3>移动日三餐与住宿</h3><p>长途移动补齐午餐和晚餐；跨日抵达后重新连接酒店，下一天从真实住宿点出发。</p></div>
       <div class="feature"><h3>真实交通优先与不伪造</h3><p>用户明确飞机/火车时查询真实班次并验证编号、站场和时刻；全部来源失败时返回不可用，不生成占位班次。</p></div>
       <div class="feature"><h3>默认交通不擅自改写</h3><p>用户没有指定交通方式时保持自驾；不会因为时间紧张自动切成飞机或火车，约束冲突时直接说明。</p></div>
       <div class="feature"><h3>路线感知的景点与酒店</h3><p>合并景区入口/停车场等同地变体，综合研究证据、适配性和相邻转场距离；活动只采用当日路线经过的候选，住宿按代表景点选基点并跨日复用。</p></div>
@@ -376,16 +521,16 @@
       <div class="timeline">
         <time>08.17</time><div><h3>发布审计</h3><p>建立初赛后稳定基线。</p></div>
         <time>08.18-19</time><div><h3>预检、酒店、地图</h3><p>修复相对日期、中心住宿、交通终点和标记去重。</p></div>
-        <time>08.20-22</time><div><h3>长途与跨日</h3><p>跨天拆段、休息、补能降级、移动日三餐和酒店闭环。</p></div>
-        <time>08.28-31</time><div><h3>复赛四方向</h3><p>连续 SOC、误差评测、安全矩阵、可观测性、证据和 E2E。</p></div>
-        <time>09.01</time><div><h3>入口体验与旅程稳定</h3><p>真实快捷需求、浏览器位置天气、聚焦式规划动画、目的地锚点校准、路线感知景点、零距离接驳抑制与动态公开车型补充。</p></div>
+        <time>08.20-22</time><div><h3>长途与跨日</h3><p>跨天拆段、休息、补能降级、移动日三餐和酒店续接。</p></div>
+        <time>08.28-31</time><div><h3>续航、安全与验收</h3><p>连续 SOC、误差评测、安全矩阵、运行观测和端到端验收。</p></div>
+        <time>09.01-02</time><div><h3>入口与路线质量</h3><p>真实快捷需求、四源首页天气、目的地锚点校准、路线感知景点、零距离接驳抑制、动态车型补充、运行监控入口与模型提供方配置。</p></div>
       </div>
       <div>
         <img class="shot" src="assets/03-map-focus-2560x1440.png" alt="RoadMan 地图聚焦态">
         <p class="caption">地图聚焦态完整画面：左右栏与底部详情可折叠，只保留两侧展开入口和阶段切换；真实路线与地点保持可见。</p>
       </div>
     </div>
-    <div class="footer"><span>统计口径：2026-08-17 至本次材料提交，共 46 次提交；其他未提交改动不计入</span><span>06 / 08</span></div>
+    <div class="footer"><span>统计口径：2026-08-17 至基线 240795b，共 49 次提交；未提交改动不计入</span><span>08 / 10</span></div>
   </section>
 
   <section class="page soft">
@@ -395,7 +540,7 @@
       <div>
         <div class="grid-2">
           <div class="feature"><h3>地图与日程保持一致</h3><p>同地景点变体合并并保留来源；活动卡只显示路线真正经过的候选，同一酒店/返程锚点不再出现零距离移动卡。</p></div>
-          <div class="feature"><h3>聚焦式规划与三侧折叠</h3><p>等待层每幕只突出需求、搜索、候选或 Agent 协作；进入工作台后左、右、底栏均可收起，评审可聚焦地图与路线。</p></div>
+          <div class="feature"><h3>规划过程与三侧折叠</h3><p>等待画面依次显示需求、搜索、候选和 Agent 协作；进入工作台后，左、右、底栏均可收起。</p></div>
           <div class="feature"><h3>语义编辑与回滚</h3><p>地图选点、添加、删除、替换先显示影响预览；确认后统一重排，失败不污染正式版本。</p></div>
           <div class="feature"><h3>五种一致导出</h3><p>Markdown、HTML、PDF、PPTX 与长图共享同一冻结快照，修改未完成时阻止导出旧结果。</p></div>
           <div class="feature"><h3>运行观测与成本</h3><p>汇总请求、Skill 调用、延迟、缓存、错误码和 Agent Token；不记录密钥或模型私有思维链。</p></div>
@@ -407,14 +552,14 @@
           <div class="metric"><strong>5</strong><span>一致导出格式</span></div>
           <div class="metric"><strong>5</strong><span>核心运行服务</span></div>
           <div class="metric"><strong>10 / 10</strong><span>编辑重排验收</span></div>
-          <div class="metric"><strong>46</strong><span>初赛后提交</span></div>
+          <div class="metric"><strong>49</strong><span>初赛后提交 / 基线 240795b</span></div>
         </div>
       </div>
       <div>
         <img class="shot" src="assets/04-operations-2560x1440.png" alt="RoadMan 运行观测页面">
-        <p class="caption">运行观测完整画面：请求总量、平均延迟、Skill 调用、缓存和服务状态集中展示。</p>
+        <p class="caption">运行观测页显示请求总量、平均延迟、Skill 调用、缓存和服务状态。</p>
         <div class="panel" style="margin-top:3mm">
-          <h3>初赛以来更新的结果，不只看提交数量</h3>
+          <h3>初赛以来的回归结果</h3>
           <div class="evidence-list">
             <div class="evidence"><b>PASS</b><span>容器后端测试 146 passed、1 skipped、0 failed</span></div>
             <div class="evidence"><b>PASS</b><span>复杂口语预检 10/10；7 条进入完整规划并完成 HTML 导出</span></div>
@@ -427,20 +572,20 @@
       </div>
     </div>
     <div class="grid-4" style="margin-top:4mm">
-      <div class="panel"><h3>统一提示词资产</h3><p>主 Demo、奇怪输入、异常分支和编辑 E01-E10 集中维护，成功标准与截图位置统一。</p></div>
-      <div class="panel"><h3>高清证据自动生成</h3><p>产品页与评测页按 2560 x 1440 输出；清单记录来源、尺寸和生成时间，避免手工拼数。</p></div>
-      <div class="panel"><h3>确定性端到端验收</h3><p>真正等待规划完成，再执行编辑、重排、回滚和五格式导出，结果保存为机器可读证据。</p></div>
-      <div class="panel"><h3>参赛材料工程化</h3><p>中文 README 为默认入口，补英文版本、四份复赛专项文档、数据合规和仓库说明。</p></div>
+      <div class="panel"><h3>提示词与截图目录</h3><p>主 Demo、奇怪输入、异常分支和编辑 E01-E10 集中维护，记录通过标准与截图位置。</p></div>
+      <div class="panel"><h3>截图与指标图生成</h3><p>产品页与评测页按 2560 x 1440 输出；清单记录来源、尺寸和生成时间，数值读取评测结果。</p></div>
+      <div class="panel"><h3>端到端验收</h3><p>等待规划完成后执行编辑、重排、回滚和五格式导出，结果保存为机器可读文件。</p></div>
+      <div class="panel"><h3>参赛文档</h3><p>中文 README 为默认入口，另有英文版本、四份复赛专项文档、数据合规和仓库说明。</p></div>
     </div>
-    <div class="footer"><span>证据：真实回归验收记录；运行观测截图；Git 提交；前后端测试</span><span>07 / 08</span></div>
+    <div class="footer"><span>证据：真实回归验收记录；运行观测截图；Git 提交；前后端测试</span><span>09 / 10</span></div>
   </section>
 
   <section class="page dark">
-    <div class="head"><span class="brand">Conclusion / Evidence Index</span><span class="section">结论与答辩抓手</span></div>
-    <h2>复赛回答从“功能描述”升级为“问题、实现、数据、边界、证据”五件套</h2>
+    <div class="head"><span class="brand">Conclusion / Evidence Index</span><span class="section">结论与证据索引</span></div>
+    <h2>答辩时可直接核对的四组结果</h2>
     <div class="grid-4" style="margin-bottom:5mm">
       <div class="panel"><span class="pill">续航</span><h3 style="margin-top:2mm">连续计算</h3><p>实际补能优先，功率估算次之，缺失时保守降级；12 条回放量化误差并明确非实车。</p></div>
-      <div class="panel"><span class="pill green">复现</span><h3 style="margin-top:2mm">可运行闭环</h3><p>五服务启动、多智能体与校验分工、一键检查、完整旅程和编辑回归。</p></div>
+      <div class="panel"><span class="pill green">复现</span><h3 style="margin-top:2mm">可运行版本</h3><p>五服务启动、多智能体与校验分工、一键检查、完整旅程和编辑回归。</p></div>
       <div class="panel"><span class="pill orange">价值</span><h3 style="margin-top:2mm">编排层定位</h3><p>连接内容与导航，聚焦高约束多日旅程；B2C 订阅与车企/租车白标并行。</p></div>
       <div class="panel"><span class="pill red">安全</span><h3 style="margin-top:2mm">不伪造事实</h3><p>外部服务失败时公开降级；不接车辆控制；数据最小化并支持行程级联硬删除。</p></div>
     </div>
@@ -450,9 +595,9 @@
         <table>
           <thead><tr><th style="width:21mm">时间</th><th style="width:36mm">画面</th><th>要讲清楚的结论</th></tr></thead>
           <tbody>
-            <tr><td>0:00-0:35</td><td>首页需求输入</td><td>目标用户是高约束旅行者；系统先澄清再规划，不是一轮 Prompt。</td></tr>
+            <tr><td>0:00-0:35</td><td>首页需求输入</td><td>目标用户是高约束旅行者；系统先澄清，再启动后台规划。</td></tr>
             <tr><td>0:35-1:20</td><td>规划工作台</td><td>地图、日程、住宿、餐饮、补能和协作消息来自同一状态，后台渐进生成。</td></tr>
-            <tr><td>1:20-2:05</td><td>续航阶段与评测</td><td>SOC 连续传播；实际补能优先；指标来自 12 条模拟回放，明确不是实车承诺。</td></tr>
+            <tr><td>1:20-2:05</td><td>续航阶段与评测</td><td>SOC 连续传递，实际补能优先。指标来自 12 条模拟回放，不能当作实车承诺。</td></tr>
             <tr><td>2:05-2:45</td><td>编辑预览与重排</td><td>修改先预览再确认；路线、时间、酒店和 SOC 全局重算；失败不污染原版本。</td></tr>
             <tr><td>2:45-3:25</td><td>异常降级</td><td>补能服务中断时路线降为需确认；天气和班次缺失不伪造实时事实。</td></tr>
             <tr><td>3:25-4:00</td><td>指标与商业价值</td><td>与地图/攻略的差异是“执行编排层”；说明目标用户、订阅/白标路径和安全边界。</td></tr>
@@ -476,7 +621,7 @@
         </div>
       </div>
     </div>
-    <div class="footer"><span>RoadMan：可执行、可修改、可验证的多智能体旅行规划工作台</span><span>08 / 08</span></div>
+    <div class="footer"><span>RoadMan：可执行、可修改、可验证的多智能体旅行规划工作台</span><span>10 / 10</span></div>
   </section>
 </body>
 </html>
