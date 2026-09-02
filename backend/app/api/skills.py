@@ -96,7 +96,15 @@ async def weather_forecast(
     context: SkillContext = Depends(context_from_request),
     registry: SkillRegistry = Depends(get_registry),
 ):
-    return await registry.execute("open_meteo.forecast", payload, context)
+    # The home card fans out to several independent public sources.  Keep the
+    # Open-Meteo name as a compatibility fallback for small test registries
+    # and older integrations that do not register the composite adapter.
+    adapter_name = (
+        "weather.multi_source"
+        if "weather.multi_source" in registry.names()
+        else "open_meteo.forecast"
+    )
+    return await registry.execute(adapter_name, payload, context)
 
 
 @router.post("/carinfo/search")

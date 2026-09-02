@@ -40,6 +40,7 @@ type WeatherState = {
   temperature: string
   condition: string
   location: string
+  source: string
   status: 'locating' | 'loading' | 'ready' | 'unavailable'
 }
 
@@ -55,6 +56,7 @@ const weather = ref<WeatherState>({
   temperature: '--',
   condition: '正在定位',
   location: '正在获取位置',
+  source: '多源预报',
   status: 'locating',
 })
 let weatherRequestId = 0
@@ -438,7 +440,7 @@ async function clearAllHistory() {
 }
 
 function weatherCondition(code: number | null | undefined) {
-  if (code === undefined || code === null) return '晴'
+  if (code === undefined || code === null) return '天气待更新'
   if ([1, 2, 3].includes(code)) return '多云'
   if ([45, 48].includes(code)) return '雾'
   if (code >= 51 && code <= 67) return '小雨'
@@ -528,6 +530,7 @@ async function loadHomeWeather() {
     temperature: '--',
     condition: '正在定位',
     location: '正在获取位置',
+    source: '多源预报',
     status: 'locating',
   }
   const coordinates = await browserCoordinates()
@@ -537,6 +540,7 @@ async function loadHomeWeather() {
       temperature: '--',
       condition: '天气待更新',
       location: '位置未获取',
+      source: '多源预报',
       status: 'unavailable',
     }
     return
@@ -546,34 +550,53 @@ async function loadHomeWeather() {
     temperature: '--',
     condition: '天气加载中',
     location: coordinates.location,
+    source: '多源预报',
     status: 'loading',
   }
   try {
-    const weatherPromise = fetchWeatherForecast(coordinates.latitude, coordinates.longitude)
     const labelPromise = coordinates.source === 'browser'
       ? reverseGeocodeLocation(coordinates.latitude, coordinates.longitude).catch(() => null)
       : Promise.resolve(null)
-    const [result, labelResult] = await Promise.all([weatherPromise, labelPromise])
-    const location = labelResult?.success
-      ? String(labelResult.data?.label || labelResult.data?.city || labelResult.data?.district || coordinates.location)
-      : coordinates.location
+    // Do not wait for reverse geocoding before painting the weather value. A
+    // slow map service should not make a healthy weather response look stuck.
+    const result = await fetchWeatherForecast(coordinates.latitude, coordinates.longitude)
     const current = result.data?.current
     if (!result.success || !current) throw new Error('weather response is incomplete')
     const temperature = current.temperature_2m
     const code = current.weather_code
+    const condition = typeof code === 'number'
+      ? weatherCondition(code)
+      : String(current.weather_description || '天气待更新')
+    const sourceCount = Number(result.data?.source_count || 0)
     if (requestId !== weatherRequestId) return
     weather.value = {
       temperature: typeof temperature === 'number' ? String(Math.round(temperature)) : '--',
-      condition: weatherCondition(typeof code === 'number' ? code : null),
-      location,
+      condition,
+      location: coordinates.location,
+      source: sourceCount > 1 ? `多源预报 · ${sourceCount}源` : '备用预报',
       status: 'ready',
     }
+    void labelPromise.then((labelResult) => {
+      if (
+        requestId !== weatherRequestId
+        || weather.value.status !== 'ready'
+        || !labelResult?.success
+      ) return
+      const location = String(
+        labelResult.data?.label
+        || labelResult.data?.city
+        || labelResult.data?.district
+        || coordinates.location,
+      )
+      weather.value = { ...weather.value, location }
+    }).catch(() => undefined)
   } catch {
     if (requestId !== weatherRequestId) return
     weather.value = {
       temperature: '--',
       condition: '天气待更新',
       location: coordinates.location,
+      source: '多源预报',
       status: 'unavailable',
     }
   }
@@ -731,7 +754,7 @@ function activate(label: string) {
           @click="loadHomeWeather"
           @keydown.enter.prevent="loadHomeWeather"
           @keydown.space.prevent="loadHomeWeather"
-        ><CloudSun class="sun-icon" /> {{ weather.temperature }}°C&nbsp; {{ weather.condition }} <small>{{ weather.location }}</small></span>
+        ><CloudSun class="sun-icon" /> {{ weather.temperature }}°C&nbsp; {{ weather.condition }} <small>{{ weather.location }} · {{ weather.source }}</small></span>
         <span><CarFront class="mint-icon" /> <strong>{{ availableRange }}</strong> km <small>估算可用</small></span>
         <button
           class="ops-entry-button"

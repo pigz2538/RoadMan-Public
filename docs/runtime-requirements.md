@@ -37,6 +37,7 @@ RoadMan 支持两种运行方式：Docker Compose（推荐，生产风格）与�
 | `LLM_THINKING` | 是否启用供应商支持的思考模式 | 默认 `false` |
 | `LLM_MAX_TOKENS` / `LLM_TIMEOUT_SECONDS` | 输出上限与请求超时 | 可选 |
 | `AMAP_WEBSERVICE_KEY` | 真实驾车/步行/骑行/公交路线、地理编码、POI | 必需；缺失则上述能力降级 |
+| `weather.multi_source` | 首页多源天气 | 无需密钥；Open-Meteo、wttr.in、MET Norway、7Timer 并行，单源失败自动切换 |
 | `FLYAI_API_KEY` | 旅行搜索、住宿、餐饮补充 | 推荐 |
 | `TRAIN_FALLBACK_URL` | 主车次服务不可用时的公开车次备选 | 默认 `https://api.lolimi.cn/API/hc/api`，无需密钥；结果必须有真实车次号 |
 | `MCP_12306_URL` | 可选的铁路实时 MCP 服务地址 | 填服务根地址或 `/mcp` 地址；规划器会完成 MCP 握手并调用 `query-tickets`。留空时继续使用其它车次源；项目许可仅限学习研究，商业部署前需另行确认 |

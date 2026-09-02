@@ -36,6 +36,12 @@
 - 是否必需：否；用于行程天气适配，缺省时跳过天气信息。
 - 失败降级：适配器超时/网络失败时规划继续，天气区间标记为待更新；来源记录标注 `license=CC BY 4.0`。
 
+### 首页多源天气
+
+- 首页接口会并行请求 Open-Meteo、wttr.in、MET Norway Locationforecast 和 7Timer Civil 四个公开天气源，首个返回完整当前天气的源立即作为展示值。
+- 响应会保留每个天气源的成功状态、估算标记、当前温度、来源 URL 和抓取时间，便于审计和排障。
+- 单源超时、限流或格式异常时自动切换其它源；全部源失败返回 WEATHER_ALL_SOURCES_UNAVAILABLE，前端有限等待后显示天气待更新，不会永久停留在天气加载中。
+
 ### FlyAI / 飞猪 CLI（`FLYAI_API_KEY`）
 
 - 已注册 Skill：`flyai.train`、`flyai.flight`、`flyai.ferry`、`flyai.hotel`、`flyai.poi`、`flyai.keyword_search`、`flyai.ai_search`。

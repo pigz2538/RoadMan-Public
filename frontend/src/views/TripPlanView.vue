@@ -787,8 +787,6 @@ watch(bottomPanelCollapsed, (collapsed) => window.localStorage.setItem(panelStor
                 <i class="focus-radar-ping ping-one" />
                 <i class="focus-radar-ping ping-two" />
                 <i class="focus-radar-ping ping-three" />
-                <b class="focus-panel-label">正在扫描旅行约束</b>
-                <small>同行人 · 时间 · 偏好 · 必去地点</small>
               </div>
               <div class="planning-focus-panel focus-search-panel">
                 <span class="focus-search-crosshair"><i /><b /></span>
@@ -802,8 +800,6 @@ watch(bottomPanelCollapsed, (collapsed) => window.localStorage.setItem(panelStor
                 <span class="focus-search-tag tag-origin">出发地</span>
                 <span class="focus-search-tag tag-destination">目的地</span>
                 <span class="focus-search-tag tag-transfer">接驳点</span>
-                <b class="focus-panel-label">正在搜索地点与交通</b>
-                <small>地图地点 · 车站机场 · 沿途候选</small>
               </div>
               <div class="planning-focus-panel focus-candidates-panel">
                 <span class="focus-candidate-dot candidate-one"><i /></span>
@@ -818,8 +814,6 @@ watch(bottomPanelCollapsed, (collapsed) => window.localStorage.setItem(panelStor
                   </i>
                 </div>
                 <span class="focus-candidate-verify"><i>✓</i><b>逐项核对中</b></span>
-                <b class="focus-panel-label">正在筛选目的地候选</b>
-                <small>开放时间 · 预约 · 季节适配</small>
               </div>
               <div class="planning-focus-panel focus-agents-panel">
                 <span class="focus-agent-link link-route" />
@@ -829,8 +823,6 @@ watch(bottomPanelCollapsed, (collapsed) => window.localStorage.setItem(panelStor
                 <span class="focus-agent-node agent-place"><i>点</i><b>地点智能体</b></span>
                 <span class="focus-agent-node agent-weather"><i>天</i><b>天气智能体</b></span>
                 <span class="focus-agent-hub"><i>AI</i><b>协作中</b></span>
-                <b class="focus-panel-label">多个智能体正在协作</b>
-                <small>共享候选 · 相互校验 · 汇合成路线</small>
               </div>
             </div>
             <span class="planning-map-grid" />

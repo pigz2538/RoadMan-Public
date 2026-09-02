@@ -139,7 +139,7 @@ data: {"event":"node_started","trip_id":"trip_x","node":"build_stages","tool":nu
 | `POST` | `/api/v1/skills/amap/driving` | 高德驾车路线 |
 | `POST` | `/api/v1/skills/amap/route` | 驾车/骑行/步行/公共交通统一路线 |
 | `POST` | `/api/v1/skills/amap/poi` | 高德 POI |
-| `POST` | `/api/v1/skills/weather/forecast` | Open-Meteo 天气 |
+| `POST` | `/api/v1/skills/weather/forecast` | 多源天气（当前天气、来源状态与降级信息） |
 | `POST` | `/api/v1/skills/carinfo/search` | 车型目录搜索；有 `query` 时走 `carinfo.catalog` |
 | `POST` | `/api/v1/skills/flyai/poi` | FlyAI POI |
 | `POST` | `/api/v1/skills/flyai/hotel` | FlyAI 酒店 |

@@ -858,8 +858,6 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .planning-map-animation[data-scene='verify'] .planning-map-scan { opacity: 1; animation: planning-map-scan 9s ease-in-out infinite; }.planning-map-animation[data-scene='verify'] .planning-check-badge { animation: planning-check-in 9s ease-in-out infinite; }
 .planning-focus-visual { position: absolute; z-index: 24; inset: 0; pointer-events: none; }
 .planning-focus-panel { position: absolute; inset: 0; visibility: hidden; opacity: 0; transform: scale(.97); transition: opacity .7s ease, transform .7s ease, visibility .7s ease; }
-.planning-focus-panel .focus-panel-label { position: absolute; left: 50%; bottom: 29px; transform: translateX(-50%); color: #22466f; font-size: 12px; font-weight: 850; letter-spacing: .02em; white-space: nowrap; }
-.planning-focus-panel > small { position: absolute; left: 50%; bottom: 13px; transform: translateX(-50%); color: #6d86a5; font-size: 10px; white-space: nowrap; }
 .planning-map-animation[data-scene='understand'] .focus-radar-panel,
 .planning-map-animation[data-scene='intercity'] .focus-search-panel,
 .planning-map-animation[data-scene='discover'] .focus-candidates-panel,

@@ -29,7 +29,13 @@ from ..skills.fallbacks import (
 )
 from ..skills.opentripmap import OpenTripMapNearbyAdapter
 from ..skills.registry import SkillRegistry
-from ..skills.weather import OpenMeteoForecastAdapter
+from ..skills.weather import (
+    MetNoForecastAdapter,
+    MultiSourceWeatherAdapter,
+    OpenMeteoForecastAdapter,
+    SevenTimerForecastAdapter,
+    WttrInForecastAdapter,
+)
 
 
 def build_skill_registry(settings: Settings | None = None) -> SkillRegistry:
@@ -49,6 +55,10 @@ def build_skill_registry(settings: Settings | None = None) -> SkillRegistry:
     registry.register(AmapPoiAdapter(config.amap_webservice_key))
     registry.register(AmapPoiDetailAdapter(config.amap_webservice_key))
     registry.register(OpenMeteoForecastAdapter())
+    registry.register(WttrInForecastAdapter())
+    registry.register(MetNoForecastAdapter())
+    registry.register(SevenTimerForecastAdapter())
+    registry.register(MultiSourceWeatherAdapter())
     registry.register(CarInfoDemoAdapter())
     registry.register(CarInfoCatalogAdapter())
     registry.register(FlyAIHotelAdapter())

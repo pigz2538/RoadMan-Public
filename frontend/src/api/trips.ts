@@ -194,12 +194,31 @@ export async function deleteTrip(tripId: string): Promise<void> {
 export async function fetchWeatherForecast(
   latitude: number,
   longitude: number,
-): Promise<{ success: boolean; data?: { current?: Record<string, number | string | null> } }> {
-  return json(await fetch(`${API_BASE}/api/v1/skills/weather/forecast`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ latitude, longitude, forecast_days: 1, timezone: 'Asia/Shanghai' }),
-  }))
+): Promise<{
+  success: boolean
+  warnings?: string[]
+  data?: {
+    current?: Record<string, number | string | null>
+    selected_provider?: string
+    source_count?: number
+    providers?: Array<{ provider?: string; success?: boolean; estimated?: boolean }>
+  }
+}> {
+  // A weather provider must never leave the home card in a permanent
+  // "loading" state. The server has its own per-source timeouts; this client
+  // guard also covers a stalled proxy or an unavailable local backend.
+  const controller = new AbortController()
+  const timer = window.setTimeout(() => controller.abort(), 12_000)
+  try {
+    return await json(await fetch(`${API_BASE}/api/v1/skills/weather/forecast`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ latitude, longitude, forecast_days: 1, timezone: 'Asia/Shanghai' }),
+      signal: controller.signal,
+    }))
+  } finally {
+    window.clearTimeout(timer)
+  }
 }
 
 export async function reverseGeocodeLocation(
