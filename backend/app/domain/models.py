@@ -241,6 +241,7 @@ class TripRequest(BaseModel):
     end_date: date | None = None
     departure_time: time | None = None
     return_time: time | None = None
+    departure_period: Literal["morning", "afternoon", "evening"] | None = None
     return_before: datetime | None = None
     travelers: int | None = Field(default=None, ge=1)
     preferences: list[str] = Field(default_factory=list)

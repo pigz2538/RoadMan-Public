@@ -43,6 +43,7 @@ async def record_skill_call(
 async def record_agent_call(
     adapter: str,
     *,
+    provider: str = "configured",
     success: bool,
     latency_ms: int,
     usage: dict[str, Any] | None = None,
@@ -68,7 +69,7 @@ async def record_agent_call(
                     request_id=None,
                     trip_id=None,
                     adapter=adapter,
-                    provider="deepseek",
+                    provider=provider,
                     success=success,
                     cache_hit=bool(normalized_usage.get("prompt_cache_hit_tokens")),
                     latency_ms=max(0, int(latency_ms)),
@@ -140,7 +141,10 @@ class SkillCallRepository:
         }
         agent_calls = 0
         for row in audit_rows:
-            if row.provider != "deepseek":
+            # Agent rows are identified by their adapter namespace, so a
+            # custom provider label (openrouter, ollama_cloud, self_hosted,
+            # etc.) is included without maintaining a provider allow-list.
+            if not str(row.adapter or "").startswith("agent."):
                 continue
             agent_calls += 1
             try:

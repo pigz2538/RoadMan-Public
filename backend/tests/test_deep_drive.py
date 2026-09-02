@@ -184,6 +184,35 @@ def test_verifier_rejects_driving_piece_that_spills_into_next_calendar_day():
     assert "DRIVING_STAGE_CALENDAR_MISMATCH" in {item["code"] for item in issues}
 
 
+def test_repair_retries_allow_transport_meal_fallback_instead_of_blocking():
+    stage = _stage()
+    stage["planned_end"] = datetime(2026, 8, 1, 10, 0, tzinfo=SHANGHAI).isoformat()
+    stage["duration_minutes"] = 60
+    stage["distance_km"] = 40
+    stage["route_segments"][0]["duration_minutes"] = 60
+    stage["route_segments"][0]["distance_km"] = 40
+    plan = {
+        "id": "day_1",
+        "day_index": 1,
+        "date": "2026-08-01",
+        "stages": [stage],
+        "activities": [],
+    }
+
+    first_pass = verify_deep_drive_plan([plan], _vehicle(), 120)
+    assert any(
+        item["code"] == "DAILY_MEALS_INCOMPLETE" and item["severity"] == "blocker"
+        for item in first_pass
+    )
+
+    retry_pass = verify_deep_drive_plan([plan], _vehicle(), 120, relaxation_level=1)
+    assert any(item["code"] == "DAILY_MEALS_INCOMPLETE" for item in retry_pass)
+    assert all(item["severity"] != "blocker" for item in retry_pass)
+    fallback = next(item for item in retry_pass if item["code"] == "MEAL_FALLBACK_ALLOWED")
+    assert "\u706b\u8f66" in fallback["description"]
+    assert "\u673a\u573a" in fallback["description"]
+
+
 def test_measured_charge_energy_updates_soc_without_fixed_reset():
     stage = _stage()
     stage["distance_km"] = 100

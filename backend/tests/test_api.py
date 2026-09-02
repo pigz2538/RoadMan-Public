@@ -20,6 +20,9 @@ async def test_health(client):
     response = await client.get("/health")
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
+    llm = response.json()["llm"]
+    assert llm["api_style"] in {"openai", "ollama_generate"}
+    assert "api_key" not in llm
 
 
 @pytest.mark.asyncio

@@ -34,7 +34,7 @@
 
 **智能体 · 外部能力**
 
-[![DeepSeek](https://img.shields.io/badge/DeepSeek-V4-4D6BFE?style=flat-square&logo=deepseek&logoColor=white)](https://www.deepseek.com/)
+[![Configurable LLM](https://img.shields.io/badge/LLM-OpenAI%20compatible-4D6BFE?style=flat-square)](#配置项)
 [![Open-Meteo](https://img.shields.io/badge/Open--Meteo-Free-14A0A5?style=flat-square&logo=sun&logoColor=white)](https://open-meteo.com/)
 [![FlyAI](https://img.shields.io/badge/FlyAI-Travel-FF5A5F?style=flat-square)](https://www.flyai.com/)
 
@@ -186,7 +186,7 @@ flowchart TB
 if (!(Test-Path .env)) { Copy-Item .env.example .env }
 
 # 2. 修改 .env，至少填入两项（其余按需，见下方配置表）
-#    DEEPSEEK_API_KEY=你的 DeepSeek API Key
+#    LLM_API_KEY=你的模型服务 API Key
 #    AMAP_WEBSERVICE_KEY=你的高德 WebService Key
 
 # 3. 启动（首次构建镜像并初始化数据库，耗时几分钟）
@@ -196,9 +196,9 @@ docker compose up -d --build
 python deploy/api_smoke.py
 ```
 
-`backend` 和 `worker` 都从项目根目录的 `.env` 读取 `DEEPSEEK_API_KEY`，不会被主机中同名的旧环境变量覆盖；两者固定使用官方 Chat Completions 地址和 `deepseek-v4-flash`。`.env` 已加入忽略规则，请勿提交或打印密钥。
+`backend` 和 `worker` 都从项目根目录的 `.env` 读取统一的 `LLM_*` 配置，不会把某个供应商或模型写死在智能体代码里。通过 `LLM_PROVIDER`、`LLM_API_URL`、`LLM_API_KEY`、`LLM_MODEL` 和 `LLM_API_STYLE` 即可切换服务；默认请求使用 OpenAI 兼容 Chat Completions 格式。`.env` 已加入忽略规则，请勿提交或打印密钥。
 
-冒烟脚本通过即表示容器、数据库、队列、接口契约和当前可访问的外部能力已完成逐项检查。它不会把「旅行信息服务合法无库存」误判成故障；需求理解/语义编辑会用有效的 DeepSeek Key 单独验证。
+冒烟脚本通过即表示容器、数据库、队列、接口契约和当前可访问的外部能力已完成逐项检查。它不会把「旅行信息服务合法无库存」误判成故障；需求理解/语义编辑会用当前 `LLM_*` 配置单独验证。
 
 **使用入口**
 
@@ -209,7 +209,7 @@ python deploy/api_smoke.py
 **模型 Key 最小验证**（只检查状态，不打印 Key）：
 
 ```powershell
-Invoke-RestMethod https://api.deepseek.com/chat/completions -Method Post -Headers @{ Authorization = "Bearer $env:DEEPSEEK_API_KEY"; "Content-Type" = "application/json" } -Body (@{ model = "deepseek-v4-flash"; messages = @(@{ role = "user"; content = "return JSON: { ok: true }" }); response_format = @{ type = "json_object" }; thinking = @{ type = "enabled" }; reasoning_effort = "max" } | ConvertTo-Json -Depth 5)
+Invoke-RestMethod $env:LLM_API_URL -Method Post -Headers @{ Authorization = "Bearer $env:LLM_API_KEY"; "Content-Type" = "application/json" } -Body (@{ model = $env:LLM_MODEL; messages = @(@{ role = "user"; content = "return JSON: { ok: true }" }); response_format = @{ type = "json_object" } } | ConvertTo-Json -Depth 5)
 ```
 
 返回 401/403 说明账号授权或额度不可用；RoadMan 会明确暂停语义步骤，不会用关键词猜地点。
@@ -231,21 +231,23 @@ docker compose up -d --build      # 更新代码后重新构建
 
 | 变量 | 用途 | 是否必需 |
 | --- | --- | --- |
-| `DEEPSEEK_API_KEY` | 需求理解、目的地研究、语义编辑等云端智能体 | 是 |
+| `LLM_API_KEY` | 需求理解、目的地研究、语义编辑等云端智能体 | 是 |
 | `AMAP_WEBSERVICE_KEY` | 地理编码、POI、真实路线查询 | 是 |
 | `VITE_AMAP_JSAPI_KEY` | 浏览器端真实地图（构建时注入，改动后需重新构建） | 推荐 |
 | `VITE_AMAP_SECURITY_JS_CODE` | 浏览器地图安全密钥 | 推荐 |
 | `FLYAI_API_KEY` | 旅行搜索、住宿、餐饮补充 | 推荐 |
 | `OPENTRIPMAP_API_KEY` | 国际/开放景点数据补充 | 可选 |
-| `DEEPSEEK_MODEL` | 模型名，默认 `deepseek-v4-flash` | 可选 |
-| `DEEPSEEK_REASONING_EFFORT` | 思考深度，默认 `max` | 可选 |
-| `DEEPSEEK_THINKING` | 是否启用思考模式，默认 `true` | 可选 |
-| `DEEPSEEK_API_URL` | Chat Completions 地址 | 可选 |
+| `LLM_PROVIDER` | 供应商标识，仅用于配置与审计 | 可选，默认 `ollama_cloud` |
+| `LLM_MODEL` | 模型名 | 是 |
+| `LLM_API_STYLE` | 请求协议：`openai` 或 `ollama_generate` | 可选，默认 `openai` |
+| `LLM_THINKING` | 是否启用供应商支持的思考模式 | 可选，默认 `false` |
+| `LLM_MAX_TOKENS` / `LLM_TIMEOUT_SECONDS` | 输出上限与请求超时 | 可选 |
+| `LLM_API_URL` | 完整的模型接口地址 | 是 |
 | `ROADMAN_HTTP_PROXY` | 容器访问外网所需的宿主机代理，如 `http://host.docker.internal:7890` | 可选 |
 
 缺少非必需 Key 时对应能力自动降级（例如无浏览器地图 Key 时使用简化地图视图），不影响主流程。
 
-DeepSeek 接口采用 OpenAI 兼容 Chat Completions 协议：请求使用 `messages`、`response_format=json_object`、`thinking=enabled` 与 `reasoning_effort=max`，响应读取 `choices[0].message.content`；模型私有思维链不保存。详见 [Chat Completions API](https://api-docs.deepseek.com/api/create-chat-completion/) 与 [思考模式](https://api-docs.deepseek.com/guides/thinking_mode/)。
+语义智能体统一采用 OpenAI 兼容 Chat Completions 请求/响应适配层：请求使用 `messages` 与可选 `response_format=json_object`，响应读取 `choices[0].message.content`；同时兼容明确配置的 Ollama 原生 `response` 返回。供应商、地址、模型和密钥均来自 `LLM_*` 配置，模型私有思维链不保存。
 
 ## 本地开发
 
@@ -334,4 +336,4 @@ RoadMan 不连接或控制车辆。天气、补能与路线服务失败时会显
 
 班次查询会并行调用多个数据源、按班次号和时间去重后择优。火车使用主旅行信息服务与 `TRAIN_FALLBACK_URL`；航班使用主服务、`FLIGHT_FALLBACK_API_KEY` 对应的备选源与可选的 `AVIATIONSTACK_API_KEY`。只有同时带真实班次号、起终站场和可解析时刻的结果才能进入行程；所有数据源均失败时返回可操作的不可用原因，不生成“机场待确认”或“航班号未返回”之类伪班次。
 
-交通默认规则是：用户没有说交通方式时，跨城与市内全程使用驾车；用户明确说飞机、高铁或火车往返时，跨城使用真实班次，目的地市内再使用公共交通/步行接驳。系统不会因为时间窗口较短而擅自把默认自驾改成飞机或火车。默认使用非思考模式（`DEEPSEEK_THINKING=false`、`DEEPSEEK_REASONING_EFFORT=low`）。
+交通默认规则是：用户没有说交通方式时，跨城与市内全程使用驾车；用户明确说飞机、高铁或火车往返时，跨城使用真实班次，目的地市内再使用公共交通/步行接驳。系统不会因为时间窗口较短而擅自把默认自驾改成飞机或火车。默认使用非思考模式（`LLM_THINKING=false`）。

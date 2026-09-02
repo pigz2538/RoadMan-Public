@@ -26,11 +26,12 @@ from ..domain.models import (
 )
 from ..core.config import get_settings
 from ..planning.llm import (
-    DeepSeekEventResearchAgent,
-    DeepSeekTripEditAgent,
-    DeepSeekRequirementExtractor,
-    DeepSeekRequirementValidator,
+    EventResearchAgent,
+    TripEditAgent,
+    RequirementExtractionAgent,
+    RequirementValidationAgent,
     extract_structural_constraints,
+    llm_is_configured,
 )
 from ..planning.event_research import research_special_events
 from ..planning.editing import (
@@ -61,6 +62,13 @@ from ..skills.base import SkillContext
 from ..skills.registry import SkillRegistry
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
+
+# Source-compatible names for clients/tests that imported the old provider
+# labels.  They point to the provider-neutral implementations above.
+DeepSeekEventResearchAgent = EventResearchAgent
+DeepSeekTripEditAgent = TripEditAgent
+DeepSeekRequirementExtractor = RequirementExtractionAgent
+DeepSeekRequirementValidator = RequirementValidationAgent
 
 
 def _local_today() -> date:
@@ -249,8 +257,8 @@ async def preflight_trip(
         or previous_source_text != payload.raw_text
         or extracted.get("_intent_status") != "ok"
     )
-    if settings.enable_llm_requirement_extraction and settings.deepseek_api_key and should_extract:
-        extracted = await DeepSeekRequirementExtractor(settings).extract(
+    if settings.enable_llm_requirement_extraction and llm_is_configured(settings) and should_extract:
+        extracted = await RequirementExtractionAgent(settings).extract(
             payload.raw_text,
             today,
         )
@@ -351,7 +359,7 @@ async def preflight_trip(
             special_events,
             year=research_year,
             destination=str(extracted.get("destination_name") or "") or None,
-            fact_agent=DeepSeekEventResearchAgent(settings).extract,
+        fact_agent=EventResearchAgent(settings).extract,
         )
 
     def answered(code: str, field: str | None = None) -> bool:
@@ -520,7 +528,7 @@ async def preflight_trip(
                 if value.strip()
             ]]
         )
-        semantic_issues = await DeepSeekRequirementValidator(get_settings()).validate(
+        semantic_issues = await RequirementValidationAgent(get_settings()).validate(
             clarified_text,
             extracted,
         )
@@ -665,7 +673,7 @@ async def interpret_trip_edit(
     state, markdown = await repo.get_planning_snapshot(trip_id)
     state = state or {}
     settings = get_settings()
-    agent_intent = await DeepSeekTripEditAgent(settings).interpret(
+    agent_intent = await TripEditAgent(settings).interpret(
         payload.message,
         _edit_agent_context(trip, state, payload),
     )
@@ -760,6 +768,40 @@ async def confirm_trip_replan(
         value = str(intent.get(field) or "").strip()
         if value:
             request_data[field] = value
+    # A confirmed conversational edit may change the departure clock or the
+    # intercity mode.  Persist these as a planning override as well as on the
+    # request snapshot: the next graph run performs a fresh semantic
+    # extraction, so the override must win over stale wording in raw_text.
+    planning_overrides = dict(state.get("planning_overrides") or {})
+    for field in ("departure_time", "return_time"):
+        value = str(intent.get(field) or "").strip()
+        if value:
+            try:
+                datetime.strptime(value, "%H:%M")
+            except ValueError:
+                value = ""
+            if value:
+                request_data[field] = value
+                planning_overrides[field] = value
+    departure_period = str(intent.get("departure_period") or "").strip().lower()
+    if departure_period in {"morning", "afternoon", "evening"}:
+        request_data["departure_period"] = departure_period
+        planning_overrides["departure_period"] = departure_period
+    raw_modes = intent.get("transport_modes")
+    if isinstance(raw_modes, str):
+        raw_modes = [raw_modes]
+    allowed_modes = {"driving", "train", "flight", "ferry", "transit", "walking", "riding"}
+    modes = [
+        str(mode).strip().lower()
+        for mode in (raw_modes or [])
+        if str(mode).strip().lower() in allowed_modes
+    ]
+    if modes:
+        modes = list(dict.fromkeys(modes))
+        request_data["transport_modes"] = modes
+        planning_overrides["transport_modes"] = modes
+    if planning_overrides:
+        state["planning_overrides"] = planning_overrides
     request_data["raw_text"] = "\n".join([
         str(request_data.get("raw_text") or trip.request.raw_text).strip(),
         "在保留未被修改条件的基础上，按以下已确认修改重新规划：",

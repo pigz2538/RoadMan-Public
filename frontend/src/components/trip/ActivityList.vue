@@ -28,6 +28,7 @@ function formatStayDuration(minutes: number) {
 }
 
 function activityKindLabel(activity: Activity) {
+  if (activity.type === 'meal' && activity.in_transit) return '途中用餐'
   const meal = activity.user_note?.match(/每日(早餐|午餐|晚餐)安排/)
   if (meal) return meal[1]
   if (activity.type === 'hotel') return '住宿'

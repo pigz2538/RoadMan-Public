@@ -18,6 +18,8 @@ export interface Activity {
   required?: boolean
   backup?: boolean
   user_note?: string
+  /** Meal may intentionally be taken during a train/flight/drive or service stop. */
+  in_transit?: boolean
   description?: string
   image_url?: string
   detail_url?: string

@@ -80,7 +80,7 @@ RoadMan 是面向自驾与中短途旅行的多智能体行程工作台。用户
 | FlyAI / 飞猪 CLI | 交通、酒店、POI、旅行搜索 | `FLYAI_API_KEY` 注入；命令超时、解析与调用审计 | 结果展示、缓存与转授权边界 |
 | OpenTripMap | 开放地点候选 | `OPENTRIPMAP_API_KEY` 注入；只作候选，保留来源 | ODbL/服务条款与导出署名要求 |
 | 车型目录与公开补充源 | 品牌/车系/具体版本及可用车辆参数 | Bitefu 主目录不足时动态查询 AutoSeeker、OpenEV Data、AppByte 与 CarNewsChina；无 key，保留来源及缺失/估算字段 | 各来源许可、字段来源、更新周期与商业再分发边界 |
-| DeepSeek 官方 Chat Completions | 需求提取、目的地研究、排序、适配、编辑与附件理解 | `DEEPSEEK_API_KEY`、`DEEPSEEK_MODEL`、`DEEPSEEK_REASONING_EFFORT=max`、`DEEPSEEK_THINKING=true` 注入；不保存模型私有思维链 | 数据处理、日志保留与个人信息条款 |
+| 配置驱动的 OpenAI 兼容模型接口 | 需求提取、目的地研究、排序、适配、编辑与附件理解 | `LLM_PROVIDER`、`LLM_API_URL`、`LLM_API_KEY`、`LLM_MODEL`、`LLM_API_STYLE` 注入；不保存模型私有思维链 | 数据处理、日志保留与个人信息条款 |
 | 百度百科网页元信息 | 景点简介与预览图 | 只作补充，保留详情链接 | 图片与摘要再利用权限；无明确授权时不把图片打包进公开导出 |
 | 浏览器定位 | 首页当地天气 | 浏览器主动授权后使用坐标请求天气；短暂失败只使用浏览器本地记住的上次位置，不再静默回落到固定城市；位置名称单独反向解析 | 明示用途；仅保留浏览器本地的经纬度，不上传历史轨迹 |
 

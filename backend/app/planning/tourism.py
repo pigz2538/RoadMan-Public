@@ -35,6 +35,42 @@ _TRANSIT_FOCUSED_LODGING_RE = re.compile(
 )
 
 
+def _outbound_meal_cutoff(
+    stages: list[dict[str, Any]],
+    day_date,
+) -> datetime | None:
+    """Return the latest legal end for a meal before the outbound leg.
+
+    A meal ending at the exact departure minute is not executable: the
+    traveller still needs time to reach a station/airport or get into the
+    car.  This shared cutoff repairs meals created by both the tourism and
+    driving/energy schedulers.
+    """
+    if not stages:
+        return None
+    first = min(
+        stages,
+        key=lambda item: str(item.get("planned_start") or "9999-99-99T99:99:99"),
+    )
+    if not str(first.get("title") or "").strip().startswith("城市出发"):
+        return None
+    try:
+        departure = datetime.fromisoformat(first["planned_start"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if departure.date() != day_date:
+        return None
+    mode = str(first.get("mode") or "driving").casefold()
+    # This cutoff is for a *meal*, not for airport/station check-in.  The
+    # intercity stage itself keeps the full 150/45-minute boarding buffer;
+    # breakfast can be bought after arriving at the hub.  Using the full
+    # flight buffer here used to create a 04:45 breakfast for an 08:00 flight
+    # (or push an old meal backwards before 06:00).  Keep a short 30-minute
+    # meal-to-departure margin so the visible timeline remains comfortable.
+    buffer_minutes = 30
+    return departure - timedelta(minutes=buffer_minutes)
+
+
 def _hotel_text(candidate: dict[str, Any]) -> str:
     place = candidate.get("place") or {}
     return " ".join(str(place.get(key) or "") for key in ("name", "address"))
@@ -1148,6 +1184,40 @@ def schedule_tourism_activities(
                 for key, value in existing_checks.items():
                     activity.setdefault(key, value)
             activities.append(activity)
+        # Route-derived overnight placeholders can begin immediately when a
+        # long driving piece ends (for example 17:11).  Reserve a normal
+        # check-in window so dinner still has an executable slot instead of
+        # making the whole day fail the three-meal completeness check.
+        for hotel_activity in activities:
+            if hotel_activity.get("type") != "hotel" or hotel_activity.get("user_confirmed"):
+                continue
+            hotel_place = hotel_activity.get("place") or {}
+            hotel_source_id = str(hotel_place.get("source_id") or "")
+            hotel_name = str(hotel_place.get("name") or "")
+            # Only move route-derived overnight placeholders.  A researched
+            # or user-supplied hotel may intentionally have an early check-in;
+            # shifting it would hide the long-drive day's in-transit dinner
+            # and mutate a real booking selected by the traveller.
+            if not (
+                hotel_source_id.startswith("route-derived-overnight:")
+                or "沿途服务区附近可入住酒店" in hotel_name
+                or "路线分段后的过夜位置" in str(hotel_place.get("address") or "")
+            ):
+                continue
+            try:
+                hotel_start = datetime.fromisoformat(hotel_activity["planned_start"])
+                hotel_end = datetime.fromisoformat(hotel_activity["planned_end"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            preferred_check_in = datetime.combine(
+                day_date,
+                time(19, 0),
+                tzinfo=SHANGHAI,
+            )
+            if hotel_start.date() == day_date and hotel_start < preferred_check_in:
+                shift = preferred_check_in - hotel_start
+                hotel_activity["planned_start"] = preferred_check_in.isoformat()
+                hotel_activity["planned_end"] = (hotel_end + shift).isoformat()
         # On a return day the final stage is the intercity leg home.  Local
         # attraction filling must stop before that departure; otherwise the
         # generic gap filler can put a destination POI *after* the traveller
@@ -1702,9 +1772,16 @@ def schedule_tourism_activities(
                 last_end + timedelta(minutes=30),
                 latest_activity_end + timedelta(minutes=15),
             )
+            # A late evening arrival belongs to the night that just ended,
+            # even when the normal 30-minute buffer would cross midnight.  Keep
+            # the check-in on the arrival day so the overnight requirement and
+            # the route timeline agree; the following morning still starts
+            # after a real sleep window.
+            if last_end.date() == day_date and check_in.date() != day_date:
+                check_in = last_end + timedelta(minutes=5)
             check_out = datetime.combine(
                 day_date + timedelta(days=1),
-                time(7, 30),
+                time(7, 0),
                 tzinfo=SHANGHAI,
             )
             if check_out <= check_in:
@@ -2065,6 +2142,66 @@ def _meal_fallback_slot(
     return None
 
 
+def _meal_fallback_context(
+    stages: list[dict[str, Any]],
+    activities: list[dict[str, Any]],
+    start_at: datetime,
+    end_at: datetime,
+    fallback_kind: str,
+) -> tuple[str, dict[str, Any] | None]:
+    """Describe where a fallback meal can truthfully happen.
+
+    A restaurant candidate is valid only when the route has a real free stop.
+    If the slot is inside a train/flight/drive stage, keep that restaurant out
+    of the card and show an explicit onboard/terminal/service-area option.
+    """
+    if fallback_kind == "stop":
+        stop_types = {"rest", "charging", "fueling", "service", "break"}
+        for activity in activities:
+            if activity.get("type") not in stop_types:
+                continue
+            try:
+                activity_start = datetime.fromisoformat(activity["planned_start"])
+                activity_end = datetime.fromisoformat(activity["planned_end"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if max(activity_start, start_at) < min(activity_end, end_at):
+                place = dict(activity.get("place") or {})
+                if place.get("name"):
+                    return "休息/补能点简餐", place
+        return "休息/服务区简餐", None
+
+    mode = ""
+    anchor: dict[str, Any] | None = None
+    for stage in stages:
+        try:
+            stage_start = datetime.fromisoformat(stage["planned_start"])
+            stage_end = datetime.fromisoformat(stage["planned_end"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if max(stage_start, start_at) < min(stage_end, end_at):
+            mode = str(stage.get("mode") or "").casefold()
+            anchor = dict(stage.get("destination") or stage.get("origin") or {})
+            break
+    labels = {
+        "train": "火车上简餐（可备泡面）",
+        "flight": "机场/机上简餐",
+        "ferry": "码头/船上简餐",
+        "driving": "服务区/车上便携餐",
+        "car": "服务区/车上便携餐",
+        "transit": "车站/途中简餐",
+        "bus": "车站/途中简餐",
+        "subway": "车站/途中简餐",
+        "metro": "车站/途中简餐",
+        "tram": "车站/途中简餐",
+        "walking": "途中简餐",
+        "riding": "途中简餐",
+        "bike": "途中简餐",
+        "cycling": "途中简餐",
+    }
+    return labels.get(mode, "途中简餐"), anchor
+
+
 def _ensure_meals(
     day: dict[str, Any],
     activities: list[dict[str, Any]],
@@ -2086,7 +2223,64 @@ def _ensure_meals(
         ("晚餐", time(17, 0), time(22, 0), time(18, 30)),
     ]
     day_date = datetime.fromisoformat(f"{day['date']}T00:00:00+08:00").date()
+    departure_cutoff = _outbound_meal_cutoff(stages, day_date)
+
+    def _expected_meal_label(start_at: datetime) -> str:
+        if start_at.time() < time(10, 30):
+            return "早餐"
+        if start_at.time() < time(16, 30):
+            return "午餐"
+        return "晚餐"
+
+    def _declared_meal_label(activity: dict[str, Any]) -> str | None:
+        note = str(activity.get("user_note") or "").strip()
+        name = str((activity.get("place") or {}).get("name") or "").strip()
+        for label in ("早餐", "午餐", "晚餐"):
+            if note.startswith(label) or f"附近{label}" in name:
+                return label
+        return None
+
+    # Replans can carry an old meal activity into a different slot.  Keep
+    # provider-backed meals only when their declared meal type agrees with
+    # the actual clock window; otherwise a previous “晚餐” placeholder can
+    # become a 07:00 breakfast and the visible day looks contradictory.
+    cleaned_activities: list[dict[str, Any]] = []
+    for activity in activities:
+        if activity.get("type") != "meal":
+            cleaned_activities.append(activity)
+            continue
+        try:
+            meal_start = datetime.fromisoformat(activity["planned_start"])
+            meal_end = datetime.fromisoformat(activity["planned_end"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if meal_start.date() != day_date or meal_end.date() != day_date:
+            continue
+        declared = _declared_meal_label(activity)
+        if declared and declared != _expected_meal_label(meal_start):
+            continue
+        cleaned_activities.append(activity)
+    activities[:] = cleaned_activities
     existing_meals = [item for item in activities if item.get("type") == "meal"]
+    # Keep at most one activity per semantic slot.  Sorting by timestamp is
+    # not enough on a replan: an old 17:20 dinner can appear before a newly
+    # generated breakfast in the list and then be assigned the breakfast
+    # window by the positional loop below.
+    existing_by_label: dict[str, dict[str, Any]] = {}
+    duplicate_meal_ids: set[int] = set()
+    for meal in existing_meals:
+        try:
+            meal_start = datetime.fromisoformat(meal["planned_start"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        meal_label = _declared_meal_label(meal) or _expected_meal_label(meal_start)
+        if meal_label in existing_by_label:
+            duplicate_meal_ids.add(id(meal))
+            continue
+        existing_by_label[meal_label] = meal
+    if duplicate_meal_ids:
+        activities[:] = [item for item in activities if id(item) not in duplicate_meal_ids]
+    existing_meals = list(existing_by_label.values())
     occupied = [
         *[
             (
@@ -2103,32 +2297,110 @@ def _ensure_meals(
         (item for item in candidates if item.get("place", {}).get("name")),
         key=_candidate_quality,
     )
+
+    def _meal_route_anchor(target_at: datetime) -> dict[str, Any] | None:
+        """Return the route point a meal at ``target_at`` can actually use.
+
+        Meal search results are destination-wide, while a long outbound or
+        return leg can spend an entire day hundreds of kilometres away from
+        the destination.  Picking the first high-rated result therefore used
+        to put a Beijing restaurant on a Wuhan-to-Beijing driving day.  Use
+        the stage containing (or immediately surrounding) the meal time as
+        the geographic anchor instead of the global candidate ranking.
+        """
+        timed: list[tuple[datetime, datetime, dict[str, Any]]] = []
+        for stage in stages:
+            try:
+                start_at = datetime.fromisoformat(stage["planned_start"])
+                end_at = datetime.fromisoformat(stage["planned_end"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            timed.append((start_at, end_at, stage))
+        if not timed:
+            return None
+        timed.sort(key=lambda item: item[0])
+        for start_at, end_at, stage in timed:
+            if start_at <= target_at <= end_at:
+                return stage.get("destination") or stage.get("origin")
+        before = [item for item in timed if item[1] < target_at]
+        if before:
+            return before[-1][2].get("destination") or before[-1][2].get("origin")
+        return timed[0][2].get("origin") or timed[0][2].get("destination")
+
+    def _meal_candidate_is_near_route(
+        candidate: dict[str, Any],
+        target_at: datetime,
+        meal_label: str,
+    ) -> bool:
+        """Keep a searched restaurant close to the day's active route point."""
+        candidate_name = str((candidate.get("place") or {}).get("name") or "")
+        # A previous model round can leave a generated placeholder such as
+        # “酒店附近晚餐” in the shared candidate pool. It is not a real
+        # restaurant and must not be reused as breakfast or lunch on a later
+        # day. Provider restaurant names are left untouched; only the explicit
+        # nearby-meal suffix is treated as a placeholder marker.
+        for other_label in ("早餐", "午餐", "晚餐"):
+            if other_label != meal_label and f"附近{other_label}" in candidate_name:
+                return False
+        anchor = _meal_route_anchor(target_at)
+        if not anchor:
+            return True
+        place = candidate.get("place") or {}
+        distance = _place_distance_km(place, anchor)
+        if distance is not None:
+            # Route-derived service/overnight anchors are approximate. A wide
+            # radius keeps a nearby town's searched restaurant usable without
+            # allowing an entire destination city to leak into the leg.
+            return distance <= 80.0
+        candidate_city = str(place.get("city") or "").strip()
+        anchor_city = str(anchor.get("city") or "").strip()
+        if not candidate_city or not anchor_city:
+            # Sparse/degraded provider records have no coordinates or city;
+            # retain them as an honest nearby-food label rather than dropping
+            # every searched option.
+            return True
+        return (
+            candidate_city == anchor_city
+            or candidate_city in anchor_city
+            or anchor_city in candidate_city
+        )
+
     candidate_cursor = 0
     for meal_index, (label, window_start, window_end, preferred_time) in enumerate(definitions):
-        if meal_index < len(existing_meals):
-            used_names.add(existing_meals[meal_index].get("place", {}).get("name"))
+        existing = existing_by_label.get(label)
+        if existing is not None:
+            used_names.add(existing.get("place", {}).get("name"))
             continue
+        candidate_target = datetime.combine(day_date, preferred_time, tzinfo=SHANGHAI)
+        nearby_candidates = [
+            item
+            for item in available
+            if _meal_candidate_is_near_route(item, candidate_target, label)
+        ]
         candidate = next(
             (
                 item
-                for item in available[candidate_cursor:] + available[:candidate_cursor]
+                for item in nearby_candidates[candidate_cursor:] + nearby_candidates[:candidate_cursor]
                 if item.get("place", {}).get("name") not in used_names
             ),
             None,
         )
         reused_candidate = False
-        if candidate is None and available:
+        if candidate is None and nearby_candidates:
             # Small destinations may return fewer restaurants than meal
             # slots. Reuse the best sourced option instead of leaving a meal
             # blank, and expose the reuse in the activity note.
-            candidate = available[candidate_cursor % len(available)]
+            candidate = nearby_candidates[candidate_cursor % len(nearby_candidates)]
             reused_candidate = True
+        candidate_note = candidate.get("user_note") if candidate else None
         if reused_candidate and candidate:
-            candidate["user_note"] = (
-                f"{candidate.get('user_note') or ''}；候选池不足，已轮换复用有来源餐厅"
-            )
+            # Do not mutate the shared provider candidate.  The same record
+            # can be reused on another day/meal; mutating ``user_note`` here
+            # used to make a later breakfast display the previous dinner
+            # label and leak stale scheduling context into the UI.
+            candidate_note = f"{candidate_note or ''}；候选池不足，已轮换复用有来源餐厅"
         if candidate:
-            candidate_cursor = (available.index(candidate) + 1) % len(available)
+            candidate_cursor = (nearby_candidates.index(candidate) + 1) % len(nearby_candidates)
             place = dict(candidate["place"])
             used_names.add(place.get("name"))
         else:
@@ -2153,6 +2425,37 @@ def _ensure_meals(
             occupied=occupied,
             minimum_minutes=30,
         )
+        needs_departure_cutoff = departure_cutoff is not None and (
+            meal_index == 0
+            or window_start < departure_cutoff.time() < window_end
+        )
+        if needs_departure_cutoff:
+            window_start_at = datetime.combine(day_date, window_start, tzinfo=SHANGHAI)
+            window_end_at = min(
+                datetime.combine(day_date, window_end, tzinfo=SHANGHAI),
+                departure_cutoff,
+            )
+            # If the remaining pre-departure window is shorter than a normal
+            # meal, leave ``slot`` empty and let the fallback place a short
+            # airport/vehicle meal during the movement stage.  Never move the
+            # start backwards before 06:00 just to manufacture a 45-minute
+            # block (the old code produced 04:45 breakfast for an 08:00
+            # flight).
+            preferred_at = min(
+                datetime.combine(day_date, preferred_time, tzinfo=SHANGHAI),
+                window_end_at - timedelta(minutes=45),
+            )
+            if window_end_at - window_start_at >= timedelta(minutes=30):
+                slot = _closest_free_slot(
+                    window_start_at,
+                    window_end_at,
+                    preferred=preferred_at,
+                    duration_minutes=45,
+                    occupied=occupied,
+                    minimum_minutes=30,
+                )
+            else:
+                slot = None
         in_transit = False
         fallback_kind = None
         if not slot:
@@ -2175,6 +2478,22 @@ def _ensure_meals(
                 slot_start, slot_duration, fallback_kind = fallback
                 slot = (slot_start, slot_duration)
                 in_transit = True
+                # There is no restaurant stop at this timestamp.  Replace a
+                # destination-wide restaurant candidate with a truthful
+                # onboard/terminal/service-area label rather than suggesting
+                # that travellers can reach that restaurant mid-transfer.
+                fallback_label, fallback_anchor = _meal_fallback_context(
+                    stages,
+                    activities,
+                    slot_start,
+                    slot_start + timedelta(minutes=slot_duration),
+                    fallback_kind,
+                )
+                if fallback_label:
+                    place = dict(fallback_anchor or {})
+                    place["name"] = fallback_label
+                candidate = None
+                candidate_note = None
             else:
                 # Do not fabricate an activity outside the requested day.  A
                 # day with no executable movement/break is allowed to remain
@@ -2195,14 +2514,14 @@ def _ensure_meals(
             ticket_or_price=candidate.get("ticket_or_price") if candidate else None,
             user_note=(
                 (
-                    f"{label}；{candidate.get('user_note') or '出发前确认餐厅营业状态'}"
+                    f"{label}；{candidate_note or '出发前确认餐厅营业状态'}"
                     if candidate
                     else f"{label}；未返回可靠餐饮候选，可在附近灵活选择"
                 )
                 + (
-                    "；途中用餐（与驾驶/交通或休息补能合并，不新增路线）"
+                    "；途中用餐（可在车上、火车/飞机上、机场/车站或服务区解决；与驾驶/交通或休息补能合并，不新增路线）"
                     if fallback_kind == "movement"
-                    else "；途中用餐（与休息/补能合并，不新增路线）"
+                    else "；途中用餐（可在休息点、服务区或补能点解决；与休息/补能合并，不新增路线）"
                     if fallback_kind == "stop"
                     else ""
                 )
@@ -2336,10 +2655,35 @@ def _reschedule_meals(
         return
     day_date = datetime.fromisoformat(f"{day['date']}T00:00:00+08:00").date()
     definitions = [
-        (time(6, 0), time(9, 30), time(7, 30)),
-        (time(11, 0), time(15, 0), time(12, 0)),
-        (time(17, 0), time(22, 0), time(18, 30)),
+        ("早餐", time(6, 0), time(9, 30), time(7, 30)),
+        ("午餐", time(11, 0), time(15, 0), time(12, 0)),
+        ("晚餐", time(17, 0), time(22, 0), time(18, 30)),
     ]
+    departure_cutoff = _outbound_meal_cutoff(stages, day_date)
+    meal_by_label: dict[str, dict[str, Any]] = {}
+    for meal in meals:
+        note = str(meal.get("user_note") or "").strip()
+        name = str((meal.get("place") or {}).get("name") or "").strip()
+        declared = next(
+            (
+                label
+                for label in ("早餐", "午餐", "晚餐")
+                if note.startswith(label) or f"附近{label}" in name
+            ),
+            None,
+        )
+        try:
+            meal_start = datetime.fromisoformat(meal["planned_start"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        inferred = (
+            "早餐"
+            if meal_start.time() < time(10, 30)
+            else "午餐"
+            if meal_start.time() < time(16, 30)
+            else "晚餐"
+        )
+        meal_by_label.setdefault(declared or inferred, meal)
     stage_ranges = [
         (
             datetime.fromisoformat(stage["planned_start"]),
@@ -2351,21 +2695,100 @@ def _reschedule_meals(
         [item for item in activities if item.get("type") != "meal"]
     )
     scheduled_meals: list[tuple[datetime, datetime]] = []
-    for meal, (window_start, window_end, preferred_time) in zip(
-        meals,
-        definitions,
-        strict=False,
-    ):
+    for meal_index, (label, window_start, window_end, preferred_time) in enumerate(definitions):
+        meal = meal_by_label.get(label)
+        if meal is None:
+            continue
         duration = max(30, int(meal.get("duration_minutes") or 45))
-        slot = _closest_free_slot(
-            datetime.combine(day_date, window_start, tzinfo=SHANGHAI),
-            datetime.combine(day_date, window_end, tzinfo=SHANGHAI),
-            preferred=datetime.combine(day_date, preferred_time, tzinfo=SHANGHAI),
-            duration_minutes=duration,
-            occupied=[*stage_ranges, *fixed_activity_ranges, *scheduled_meals],
-            minimum_minutes=duration,
+        window_start_at = datetime.combine(day_date, window_start, tzinfo=SHANGHAI)
+        window_end_at = datetime.combine(day_date, window_end, tzinfo=SHANGHAI)
+        preferred_at = datetime.combine(day_date, preferred_time, tzinfo=SHANGHAI)
+        needs_departure_cutoff = departure_cutoff is not None and (
+            meal_index == 0
+            or window_start < departure_cutoff.time() < window_end
         )
+        if needs_departure_cutoff:
+            window_end_at = min(window_end_at, departure_cutoff)
+            preferred_at = min(preferred_at, window_end_at - timedelta(minutes=duration))
+        if window_end_at - window_start_at >= timedelta(minutes=min(duration, 30)):
+            slot = _closest_free_slot(
+                window_start_at,
+                window_end_at,
+                preferred=preferred_at,
+                duration_minutes=duration,
+                occupied=[*stage_ranges, *fixed_activity_ranges, *scheduled_meals],
+                minimum_minutes=duration,
+            )
+        else:
+            # Do not backshift a persisted meal before the normal 06:00
+            # breakfast boundary when a very early departure leaves no room.
+            # The movement fallback below can mark it as an in-transit meal.
+            slot = None
         if not slot:
+            # Preserve the meal as an onboard/waypoint break rather than
+            # leaving a stale timestamp that overlaps the outbound stage.
+            # The fallback is explicitly marked ``in_transit`` and therefore
+            # is excluded from the hard activity-overlap check.
+            fallback = _meal_fallback_slot(
+                day_date,
+                window_start,
+                window_end,
+                preferred_time,
+                stages,
+                activities,
+            )
+            if fallback is not None:
+                start_at, actual_duration, fallback_kind = fallback
+                meal["planned_start"] = start_at.isoformat()
+                meal["planned_end"] = (
+                    start_at + timedelta(minutes=actual_duration)
+                ).isoformat()
+                meal["duration_minutes"] = actual_duration
+                meal["in_transit"] = True
+                fallback_label, fallback_anchor = _meal_fallback_context(
+                    stages,
+                    activities,
+                    start_at,
+                    start_at + timedelta(minutes=actual_duration),
+                    fallback_kind,
+                )
+                if fallback_label and not meal.get("user_confirmed"):
+                    place = dict(fallback_anchor or {})
+                    place["name"] = fallback_label
+                    meal["place"] = place
+                    meal["source_records"] = []
+                    meal["description"] = None
+                note = str(meal.get("user_note") or "")
+                if fallback_label and fallback_label not in note:
+                    meal["user_note"] = f"{note}；{fallback_label}".lstrip("；")
+                scheduled_meals.append(
+                    (start_at, start_at + timedelta(minutes=actual_duration))
+                )
+            else:
+                # A persisted meal may be surrounded by stages/rests after an
+                # edit, leaving no free gap. Keep it as a clearly marked
+                # in-transit meal, but clamp it back inside its semantic
+                # breakfast/lunch/dinner window instead of exposing a stale
+                # 22:19 end or another out-of-window timestamp.
+                fallback_duration = min(duration, 30)
+                latest_start = window_end_at - timedelta(minutes=fallback_duration)
+                if latest_start >= window_start_at:
+                    try:
+                        original_start = datetime.fromisoformat(meal["planned_start"])
+                    except (KeyError, TypeError, ValueError):
+                        original_start = preferred_at
+                    start_at = min(max(original_start, window_start_at), latest_start)
+                    end_at = start_at + timedelta(minutes=fallback_duration)
+                    meal["planned_start"] = start_at.isoformat()
+                    meal["planned_end"] = end_at.isoformat()
+                    meal["duration_minutes"] = fallback_duration
+                    meal["in_transit"] = True
+                    note = str(meal.get("user_note") or "")
+                    if "途中用餐" not in note:
+                        meal["user_note"] = (
+                            f"{note}；途中用餐（可在车上、火车/飞机上、机场/车站或服务区解决；时间窗已自动收敛）"
+                        ).lstrip("；")
+                    scheduled_meals.append((start_at, end_at))
             continue
         start_at, actual_duration = slot
         end_at = start_at + timedelta(minutes=actual_duration)

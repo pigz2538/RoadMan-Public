@@ -188,7 +188,7 @@ Skills/         provider skill 指南与本地开发参考（不放密钥）
 | 旅行信息搜索 | 旅行信息服务 Adapter | `FLYAI_API_KEY` 和 CLI；失败降级为其他来源，不伪造结果 |
 | 景点补充 | `opentripmap.nearby` | `OPENTRIPMAP_API_KEY`；结果需来源追溯 |
 | 车型目录 | `carinfo.catalog` | 主目录未覆盖具体版本时动态并行查询 AutoSeeker、OpenEV Data、AppByte Fleet Catalog 与公开车型页；仍无结果时返回可解释空结果，缺失字段不造默认值 |
-| 语义智能体 | DeepSeek 官方 Chat Completions | `DEEPSEEK_API_KEY`、`DEEPSEEK_MODEL=deepseek-v4-flash`、默认 `DEEPSEEK_REASONING_EFFORT=low`、`DEEPSEEK_THINKING=false`；未配置或请求失败时暂停语义步骤，离线逻辑只补显式日历结构，不猜地点 |
+| 语义智能体 | 配置驱动的 OpenAI 兼容 Chat Completions 适配层 | `LLM_PROVIDER`、`LLM_API_URL`、`LLM_API_KEY`、`LLM_MODEL`、`LLM_API_STYLE`；未配置或请求失败时暂停语义步骤，离线逻辑只补显式日历结构，不猜地点 |
 
 所有凭据通过环境变量注入；`.env`、本地凭据文件、数据库、上传与验收产物均被 Git 忽略。日志和 SSE 不记录密钥、附件原文或模型私有输出；调用审计只保存 adapter、耗时、成功、缓存、错误码和来源摘要。
 
@@ -198,7 +198,7 @@ Skills/         provider skill 指南与本地开发参考（不放密钥）
 - Redis + ARQ 执行异步规划；API 与 Worker 共享规划状态。
 - 上传内容在 `UPLOAD_DIR`，数据库只保存安全文件名和元数据；扩展名/MIME 白名单见配置。
 - 删除单条行程执行不可恢复的级联硬删除：同步清理 Trip、消息/规划状态、版本、任务、行程级 Skill 调用、附件元数据和安全上传目录内的实体文件；系统级健康审计不随单条行程删除。
-- DeepSeek 调用审计只记录智能体角色、成功状态、耗时和官方 usage Token，不保存 prompt、回答或私有推理文本；`/api/v1/ops/metrics` 汇总平均/P95 延迟、成功率与 Token 用量。
+- 模型调用审计只记录智能体角色、配置中的 provider、成功状态、耗时和 usage Token，不保存 prompt、回答或私有推理文本；`/api/v1/ops/metrics` 汇总平均/P95 延迟、成功率与 Token 用量。
 - Compose 入口是 `8080`，后端容器内部 `8000`；前端 Nginx 反代 `/api` 到后端。
 - 通过 `CORS_ORIGINS`、`POSTGRES_*`、`ROADMAN_HTTP_PROXY` 等变量覆盖部署参数。
 - 备份恢复脚本在 `deploy/scripts/`（`backup.ps1` / `restore.ps1`）。

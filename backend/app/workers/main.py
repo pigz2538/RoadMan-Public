@@ -210,8 +210,8 @@ class WorkerSettings:
     functions = [execute_job]
     cron_jobs = [cron(cleanup_expired_files, hour=3, minute=15)]
     queue_name = "roadman"
-    # DeepSeek V4 Flash runs with maximum reasoning and a planning graph can
-    # legitimately fan out to many map/travel lookups.  The old ARQ default
+    # A hosted semantic model and the planning graph can legitimately fan out
+    # to many map/travel lookups.  The old ARQ default
     # (five minutes) could kill a healthy long-distance plan in the final
     # service-discovery pass.  Keep the finite bound, but leave enough room
     # for the complete plan plus an automatic verification/retry cycle.

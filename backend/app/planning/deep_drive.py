@@ -773,6 +773,8 @@ def verify_deep_drive_plan(
     plans: list[dict[str, Any]],
     vehicle: dict[str, Any] | None,
     max_continuous_drive_minutes: int,
+    *,
+    relaxation_level: int = 0,
 ) -> list[dict[str, Any]]:
     issues: list[dict[str, Any]] = []
     if not vehicle:
@@ -879,13 +881,30 @@ def verify_deep_drive_plan(
             previous_stage = stage
         meals = [item for item in day.get("activities", []) if item.get("type") == "meal"]
         if len(meals) < 3:
+            # The first pass is strict so the repair loop gets a chance to
+            # fill a missing slot.  On retries, a genuine transport day may
+            # use food on the train/plane, at a station/airport, or at a
+            # service stop; do not fail the whole itinerary when that is the
+            # only remaining gap.
+            meal_severity = "warning" if int(relaxation_level or 0) >= 1 else "blocker"
             issues.append(
                 _issue(
                     "DAILY_MEALS_INCOMPLETE",
-                    "blocker",
+                    meal_severity,
                     f"第 {day.get('day_index')} 天未完整安排早餐、午餐和晚餐",
                 )
             )
+    if int(relaxation_level or 0) >= 1 and any(
+        item.get("code") == "DAILY_MEALS_INCOMPLETE" and item.get("severity") == "warning"
+        for item in issues
+    ):
+        issues.append(
+            _issue(
+                "MEAL_FALLBACK_ALLOWED",
+                "warning",
+                "\u9910\u5385\u65e0\u53ef\u7528\u65f6\uff0c\u53ef\u5728\u8f66\u4e0a\u3001\u706b\u8f66/\u98de\u673a\u4e0a\u3001\u673a\u573a/\u8f66\u7ad9\u6216\u670d\u52a1\u533a\u7528\u4fbf\u643a\u9910\uff08\u5982\u6ce1\u9762\uff09\uff0c\u4e0d\u518d\u963b\u65ad\u884c\u7a0b\u3002",
+            )
+        )
     return _dedupe_issues(issues)
 
 

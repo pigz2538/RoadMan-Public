@@ -38,13 +38,15 @@ from .deep_drive import (
 from .event_research import event_research_summary, research_special_events
 from .destination_research import research_destination, research_destinations
 from .llm import (
-    DeepSeekDestinationPlanAgent,
-    DeepSeekDestinationResearchAgent,
-    DeepSeekEventResearchAgent,
-    DeepSeekPoiCurator,
-    DeepSeekPoiRanker,
-    DeepSeekPoiSuitabilityAgent,
-    DeepSeekRequirementExtractor,
+    DestinationPlanAgent,
+    DestinationResearchAgent,
+    EventResearchAgent,
+    PoiCuratorAgent,
+    PoiRankerAgent,
+    PoiSuitabilityAgent,
+    RequirementExtractionAgent,
+    llm_is_configured,
+    llm_timeout_seconds,
 )
 from .recommendations import (
     apply_agent_ranking,
@@ -60,6 +62,7 @@ from .state import RoadManState
 from .tourism import (
     deduplicate_attraction_candidates,
     review_daily_schedule,
+    _reschedule_meals,
     schedule_tourism_activities,
     select_primary_hotel,
     verify_tourism_plan,
@@ -529,13 +532,13 @@ def build_planning_graph(
     settings: Settings,
     progress_callback: ProgressCallback | None = None,
 ):
-    extractor = DeepSeekRequirementExtractor(settings)
-    event_research_agent = DeepSeekEventResearchAgent(settings)
-    poi_curator = DeepSeekPoiCurator(settings)
-    poi_ranker = DeepSeekPoiRanker(settings)
-    poi_suitability_agent = DeepSeekPoiSuitabilityAgent(settings)
-    destination_research_agent = DeepSeekDestinationResearchAgent(settings)
-    destination_plan_agent = DeepSeekDestinationPlanAgent(settings)
+    extractor = RequirementExtractionAgent(settings)
+    event_research_agent = EventResearchAgent(settings)
+    poi_curator = PoiCuratorAgent(settings)
+    poi_ranker = PoiRankerAgent(settings)
+    poi_suitability_agent = PoiSuitabilityAgent(settings)
+    destination_research_agent = DestinationResearchAgent(settings)
+    destination_plan_agent = DestinationPlanAgent(settings)
 
     async def emit(
         state: RoadManState,
@@ -604,7 +607,15 @@ def build_planning_graph(
                 )
             )
         defaults = set(current.get("defaults_applied", []))
-        for field in ("start_date", "end_date", "departure_time", "return_time", "travelers", "max_days"):
+        for field in (
+            "start_date",
+            "end_date",
+            "departure_time",
+            "return_time",
+            "departure_period",
+            "travelers",
+            "max_days",
+        ):
             if extracted.get(field) is not None and (
                 current.get(field) is None
                 or (field == "travelers" and "travelers=1" in defaults)
@@ -644,6 +655,25 @@ def build_planning_graph(
                 [*current.get("transport_modes", []), *extracted.get("transport_modes", [])]
             )
         )
+        # A confirmed edit is stronger than a second pass over the old raw
+        # request.  Keep the user's explicit train/flight/time choice alive
+        # when the fresh Requirement Agent extraction returns the original
+        # wording as well.
+        planning_overrides = state.get("planning_overrides") or {}
+        if isinstance(planning_overrides, dict):
+            for field in ("departure_time", "return_time", "departure_period"):
+                value = planning_overrides.get(field)
+                if value:
+                    current[field] = value
+            override_modes = planning_overrides.get("transport_modes")
+            if isinstance(override_modes, list) and override_modes:
+                current["transport_modes"] = list(
+                    dict.fromkeys(
+                        str(mode).strip().lower()
+                        for mode in override_modes
+                        if str(mode).strip()
+                    )
+                )
         current["special_events"] = list(
             dict.fromkeys([*current.get("special_events", []), *extracted.get("special_events", [])])
         )
@@ -881,6 +911,7 @@ def build_planning_graph(
             *,
             requested_departure: datetime | None = None,
             arrival_deadline: datetime | None = None,
+            departure_period: str | None = None,
         ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
             if mode == "train":
                 return await _train_route(
@@ -891,6 +922,7 @@ def build_planning_graph(
                     travel_date=travel_date,
                     requested_departure=requested_departure,
                     arrival_deadline=arrival_deadline,
+                    departure_period=departure_period,
                 )
             if mode == "flight":
                 return await _flight_route(
@@ -919,6 +951,7 @@ def build_planning_graph(
             *,
             requested_departure: datetime | None = None,
             arrival_deadline: datetime | None = None,
+            departure_period: str | None = None,
         ) -> dict[str, Any]:
             # A non-driving mode is used only when the Requirement Agent
             # explicitly selected/allowed it (or it is required by a semantic
@@ -945,6 +978,7 @@ def build_planning_graph(
                         travel_date,
                         requested_departure=requested_departure,
                         arrival_deadline=arrival_deadline,
+                        departure_period=departure_period,
                     )
                     warnings.extend(mode_warnings)
                     if route.get("success"):
@@ -1000,6 +1034,7 @@ def build_planning_graph(
                         travel_date,
                         requested_departure=requested_departure,
                         arrival_deadline=arrival_deadline,
+                        departure_period=departure_period,
                     )
                 warnings.extend(mode_warnings)
                 if route.get("success"):
@@ -1026,6 +1061,7 @@ def build_planning_graph(
             destination,
             start_date,
             requested_departure=departure_at,
+            departure_period=str(request.get("departure_period") or "") or None,
         )
         inbound = await resolve_leg(
             destination,
@@ -1140,7 +1176,7 @@ def build_planning_graph(
                 if isinstance(item, dict)
             ]
         recommendations: list[dict[str, Any]] = []
-        research_timeout = min(45, max(15, int(settings.deepseek_timeout_seconds)))
+        research_timeout = min(45, max(15, int(llm_timeout_seconds(settings))))
         try:
             for bundle in research_bundles:
                 bundle_recommendations = await asyncio.wait_for(
@@ -1157,7 +1193,7 @@ def build_planning_graph(
                             {**item, "research_destination": bundle.get("destination")}
                         )
         except asyncio.TimeoutError:
-            destination_research["agent_error"] = "DEEPSEEK_DESTINATION_RESEARCH_TIMEOUT"
+            destination_research["agent_error"] = "LLM_DESTINATION_RESEARCH_TIMEOUT"
         destination_research["agent_recommendations"] = recommendations[:48]
         destination_research["destination_names"] = destination_names
         try:
@@ -1167,7 +1203,7 @@ def build_planning_graph(
                 "目的地策划智能体正在根据研究结果生成分区与每日计划单",
                 66,
                 event="tool_started",
-                tool="deepseek.destination_plan",
+                tool="llm.destination_plan",
             )
             destination_research["agent_plan"] = await asyncio.wait_for(
                 destination_plan_agent.draft(
@@ -1179,14 +1215,14 @@ def build_planning_graph(
             )
         except asyncio.TimeoutError:
             destination_research["agent_plan"] = {}
-            destination_research["agent_plan_error"] = "DEEPSEEK_DESTINATION_PLAN_TIMEOUT"
+            destination_research["agent_plan_error"] = "LLM_DESTINATION_PLAN_TIMEOUT"
         await emit(
             state,
             "destination_plan",
             "目的地策划智能体已生成分区与每日计划单，交给路线智能体执行",
             67,
             event="tool_completed",
-            tool="deepseek.destination_plan",
+            tool="llm.destination_plan",
         )
         await emit(
             state,
@@ -1558,7 +1594,7 @@ def build_planning_graph(
                     "地点策展智能体正在比对多源景点、合并同地点并生成中文显示名",
                     66,
                     event="tool_started",
-                    tool="deepseek.poi_curator",
+                    tool="llm.poi_curator",
                 )
                 decisions = await poi_curator.curate(
                     _destination_search_area(destination),
@@ -1641,7 +1677,7 @@ def build_planning_graph(
                     ),
                     67,
                     event="tool_completed",
-                    tool="deepseek.poi_curator",
+                    tool="llm.poi_curator",
                 )
         if flyai_ticket_items:
             for candidate in candidates["attractions"]:
@@ -2205,14 +2241,14 @@ def build_planning_graph(
                 event="tool_completed",
                 tool="web.poi_research",
             )
-        if settings.deepseek_api_key:
+        if llm_is_configured(settings):
             await emit(
                 state,
                 "rank_tourism_candidates",
                 "候选排序智能体正在根据偏好、距离、评分、价格综合排序候选",
                 68,
                 event="tool_started",
-                tool="deepseek.poi_ranker",
+                tool="llm.poi_ranker",
             )
             agent_decisions = await poi_ranker.rank(
                 candidates,
@@ -2234,7 +2270,7 @@ def build_planning_graph(
                 "候选排序智能体已完成候选排序与推荐理由",
                 68,
                 event="tool_completed",
-                tool="deepseek.poi_ranker",
+                tool="llm.poi_ranker",
             )
         # A deleted activity is a durable user constraint.  Apply it after all
         # provider and Agent ranking passes so a second provider cannot put the
@@ -4049,7 +4085,7 @@ def build_planning_graph(
             "候选适配智能体正在逐项结合日期、天气、气温、海拔与用户偏好复核候选",
             87,
             event="tool_started",
-            tool="deepseek.poi_suitability",
+            tool="llm.poi_suitability",
         )
         candidates = state.get("tourism_candidates", {})
         # A cloud suitability pass can legitimately take longer than a single
@@ -4077,9 +4113,9 @@ def build_planning_graph(
                     f"候选适配智能体仍在核验（已等待 {elapsed} 秒），将保留可解释的保守候选",
                     88,
                     event="progress",
-                    tool="deepseek.poi_suitability",
+                    tool="llm.poi_suitability",
                 )
-                if elapsed >= min(45, max(12, int(settings.deepseek_timeout_seconds))):
+                if elapsed >= min(45, max(12, int(llm_timeout_seconds(settings)))):
                     review_task.cancel()
                     await emit(
                         state,
@@ -4087,7 +4123,7 @@ def build_planning_graph(
                         "候选适配智能体超时，已切换到逐候选保守复核",
                         89,
                         event="progress",
-                        tool="deepseek.poi_suitability",
+                        tool="llm.poi_suitability",
                     )
                     break
             except (Exception, asyncio.CancelledError):
@@ -4104,7 +4140,7 @@ def build_planning_graph(
             "候选适配智能体已返回，正在合并每个景点的日期与天气结论",
             89,
             event="progress",
-            tool="deepseek.poi_suitability",
+            tool="llm.poi_suitability",
         )
         if decisions:
             candidates = apply_agent_suitability(candidates, decisions)
@@ -4127,7 +4163,7 @@ def build_planning_graph(
             ),
             89,
             event="tool_completed",
-            tool="deepseek.poi_suitability",
+            tool="llm.poi_suitability",
         )
         return {
             "tourism_candidates": candidates,
@@ -4745,9 +4781,17 @@ def build_planning_graph(
                 normalized_days,
                 state.get("vehicle_profile"),
                 int(state["trip_request"].get("max_continuous_drive_minutes") or 120),
+                relaxation_level=int(state.get("repair_attempts") or 0),
             )
         )
         issues.extend(_verify_route_closure(normalized_days))
+        issues.extend(
+            _verify_comfort_timeline(
+                normalized_days,
+                state.get("trip_request", {}),
+                relaxation_level=int(state.get("repair_attempts") or 0),
+            )
+        )
         issues.extend(
             verify_tourism_plan(
                 normalized_days,
@@ -4843,6 +4887,8 @@ def build_planning_graph(
                 "REQUIRED_PLACES_UNSCHEDULED",
                 "OVERNIGHT_HOTEL_MISSING",
                 "DRIVING_STAGE_CALENDAR_MISMATCH",
+                "COMFORT_NIGHT_DRIVING",
+                "PREDEPARTURE_MEAL_CONFLICT",
                 # A late return is often caused by the route stage being
                 # built after the day's activities were already filled.  A
                 # fresh stage build applies the arrival-deadline cutoff above
@@ -4891,6 +4937,12 @@ def build_planning_graph(
             state.get("trip_request", {}),
         )
         repaired_days = _repair_activity_stage_overlaps(repaired_days)
+        # The overlap pass may push a fixed service stop or a stage forward
+        # after the meal scheduler has run. Re-run the semantic meal slots on
+        # the final stage clock so a dinner is never left at 22:19 merely
+        # because a repair inserted an earlier connector.
+        for day in repaired_days:
+            _reschedule_meals(day, day.get("activities", []), day.get("stages", []))
 
         # A route rebuild starts from freshly split stages and therefore does
         # not pass through the normal deep-drive node's continuity guard.
@@ -5824,6 +5876,7 @@ async def _train_route(
     travel_date: date,
     requested_departure: datetime | None = None,
     arrival_deadline: datetime | None = None,
+    departure_period: str | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """Select a real FlyAI train option for an intercity leg.
 
@@ -5906,7 +5959,10 @@ async def _train_route(
         )
 
     # Prefer options satisfying the user's time window.  A small station
-    # buffer is accounted for when testing the arrival deadline.
+    # buffer is accounted for when testing the arrival deadline.  A period
+    # preference (such as “周五上午出发”) is kept separate from the exact
+    # clock: if a service exists in that period, choose it; otherwise retain a
+    # real later service and expose a clear availability warning.
     candidates = parsed
     if requested_departure:
         on_or_after = [item for item in parsed if item[1] >= requested_departure]
@@ -5921,6 +5977,38 @@ async def _train_route(
                 {
                     "code": "TRAIN_DEPARTURE_WINDOW_RELAXED",
                     "message": "当天没有晚于期望出发时间的直达车次，已选择最接近班次",
+                    "severity": "warning",
+                }
+            )
+    normalized_period = str(departure_period or "").strip().lower()
+    period_ranges = {
+        "morning": (0, 12 * 60),
+        "afternoon": (12 * 60, 18 * 60),
+        "evening": (18 * 60, 24 * 60),
+    }
+    if normalized_period in period_ranges:
+        period_start, period_end = period_ranges[normalized_period]
+        period_candidates = [
+            item
+            for item in candidates
+            if item[1].date() == travel_date
+            and period_start <= item[1].hour * 60 + item[1].minute < period_end
+        ]
+        if period_candidates:
+            candidates = period_candidates
+        else:
+            period_label = {
+                "morning": "上午",
+                "afternoon": "下午",
+                "evening": "晚上",
+            }[normalized_period]
+            warnings.append(
+                {
+                    "code": "TRAIN_DEPARTURE_PERIOD_UNAVAILABLE",
+                    "message": (
+                        f"当天{period_label}暂无符合条件的直达车次，已保留最接近的真实车次；"
+                        "可改乘其他交通方式或调整出发时段。"
+                    ),
                     "severity": "warning",
                 }
             )
@@ -6843,6 +6931,160 @@ def _verify_route_closure(day_plans: list[dict[str, Any]]) -> list[dict[str, Any
                 "description": "行程终点未回到整体出发点，路线尚未形成闭环",
             }
         )
+    return issues
+
+
+def _verify_comfort_timeline(
+    day_plans: list[dict[str, Any]],
+    request: dict[str, Any],
+    *,
+    relaxation_level: int = 0,
+) -> list[dict[str, Any]]:
+    """Catch implausible night driving before a plan is marked complete.
+
+    The route builder already splits long drives into daytime pieces, but a
+    provider response or an edit can reintroduce a 03:00 segment afterwards.
+    This validator is deliberately semantic: an explicitly requested night
+    departure remains allowed, while an ordinary comfortable trip is repaired
+    automatically instead of being shown as a successful itinerary.
+    """
+    raw_text = str(request.get("raw_text") or "")
+    explicit_night = any(
+        token in raw_text
+        for token in ("凌晨", "深夜", "夜间开车", "夜间驾驶", "通宵", "午夜")
+    )
+    # A phrase such as “周五晚上出发” permits a short first-night outbound
+    # drive, but it must still end soon enough for sleep.  Keep the normal
+    # 07:00–22:00 rule on the first pass; each automatic repair may relax this
+    # one step (22:30 → 23:30 → 00:30) only for the initial city-departure
+    # chain.  This prevents a legitimate 19:00 departure from being rejected
+    # while never turning ordinary sightseeing into night driving.
+    evening_departure_requested = bool(
+        re.search(
+            r"(?:晚上|晚间|傍晚|夜间|晚).{0,12}(?:出发|走|动身)"
+            r"|(?:出发|走|动身).{0,12}(?:晚上|晚间|傍晚|夜间)",
+            raw_text,
+        )
+    )
+    relaxation_level = max(0, min(3, int(relaxation_level or 0)))
+    evening_limit_minutes = {0: 22 * 60, 1: 22 * 60 + 30, 2: 23 * 60 + 30, 3: 24 * 60 + 30}[
+        relaxation_level
+    ]
+    request_start_date = None
+    try:
+        request_start_date = date.fromisoformat(str(request.get("start_date") or ""))
+    except (TypeError, ValueError):
+        pass
+    if explicit_night:
+        return []
+    issues: list[dict[str, Any]] = []
+    for day in day_plans:
+        for stage in day.get("stages", []):
+            if str(stage.get("mode") or "").casefold() not in {"driving", "car"}:
+                continue
+            try:
+                start_at = datetime.fromisoformat(stage["planned_start"])
+                end_at = datetime.fromisoformat(stage["planned_end"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            is_initial_evening_departure = False
+            if evening_departure_requested and str(stage.get("title") or "").startswith("城市出发"):
+                same_start_day = (
+                    request_start_date is None
+                    and day.get("day_index") in {None, 1}
+                ) or (
+                    request_start_date is not None
+                    and start_at.date() == request_start_date
+                )
+                start_minutes = start_at.hour * 60 + start_at.minute
+                if same_start_day and start_minutes >= 18 * 60:
+                    if start_at.date() == end_at.date():
+                        end_minutes = end_at.hour * 60 + end_at.minute
+                        is_initial_evening_departure = end_minutes <= evening_limit_minutes
+                    elif end_at.date() == start_at.date() + timedelta(days=1):
+                        end_minutes = 24 * 60 + end_at.hour * 60 + end_at.minute
+                        is_initial_evening_departure = end_minutes <= evening_limit_minutes
+            if start_at.date() != end_at.date() and is_initial_evening_departure:
+                continue
+            if start_at.date() != end_at.date():
+                # Cross-day self-drive is valid only when it has been split by
+                # the deep-drive agent.  A raw cross-midnight stage is always
+                # a repairable scheduling defect for a comfortable itinerary.
+                issues.append(
+                    {
+                        "code": "COMFORT_NIGHT_DRIVING",
+                        "severity": "blocker",
+                        "description": (
+                            f"阶段“{stage.get('title') or stage.get('id') or '驾驶'}”跨越午夜，"
+                            "请由行程智能体拆分为白天驾驶与沿途住宿"
+                        ),
+                    }
+                )
+                continue
+            end_minutes = end_at.hour * 60 + end_at.minute
+            if is_initial_evening_departure:
+                start_minutes = start_at.hour * 60 + start_at.minute
+                if start_minutes >= 18 * 60 and end_minutes <= evening_limit_minutes:
+                    continue
+            if start_at.time() < time(7, 0) or end_at.time() > time(22, 0):
+                issues.append(
+                    {
+                        "code": "COMFORT_NIGHT_DRIVING",
+                        "severity": "blocker",
+                        "description": (
+                            f"阶段“{stage.get('title') or stage.get('id') or '驾驶'}”安排在 "
+                            f"{start_at:%H:%M}–{end_at:%H:%M}，超出舒适出行的白天驾驶窗口，"
+                            "请自动调整为 07:00–22:00 内驾驶并补充住宿/休息"
+                        ),
+                    }
+                )
+    # The first meal must finish before the station/airport/car departure
+    # buffer.  This catches the common 07:15–08:00 breakfast + 08:00 flight
+    # defect even when the generic overlap check sees the endpoints as equal.
+    for day in day_plans:
+        stages = day.get("stages", [])
+        if not stages:
+            continue
+        first = min(stages, key=lambda item: str(item.get("planned_start") or ""))
+        if not str(first.get("title") or "").startswith("城市出发"):
+            continue
+        try:
+            departure = datetime.fromisoformat(first["planned_start"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        # The boarding/check-in buffer belongs to the transport stage.  A
+        # breakfast at the departure hub may happen after check-in, so the
+        # comfort validator uses the same short meal margin as the scheduler
+        # instead of rejecting a realistic 06:45–07:30 breakfast before an
+        # 08:00 flight.
+        cutoff = departure - timedelta(minutes=30)
+        for activity in day.get("activities", []):
+            if activity.get("type") != "meal" or activity.get("in_transit") is True:
+                continue
+            try:
+                start_at = datetime.fromisoformat(activity["planned_start"])
+                end_at = datetime.fromisoformat(activity["planned_end"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            # Meals that begin after the outbound leg has arrived (for
+            # example dinner after an afternoon flight) are destination meals,
+            # not pre-departure conflicts.
+            if (
+                start_at < departure
+                and end_at > cutoff
+                and end_at.date() == departure.date()
+            ):
+                issues.append(
+                    {
+                        "code": "PREDEPARTURE_MEAL_CONFLICT",
+                        "severity": "blocker",
+                        "description": (
+                            f"{activity.get('place', {}).get('name') or '餐饮'}结束于 "
+                            f"{end_at:%H:%M}，晚于出发前缓冲截止 {cutoff:%H:%M}，"
+                            "请自动提前用餐或改为途中用餐"
+                        ),
+                    }
+                )
     return issues
 
 

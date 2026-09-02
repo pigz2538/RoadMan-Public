@@ -10,6 +10,8 @@ from app.planning.recommendations import (
     rank_tourism_candidates,
 )
 from app.planning.tourism import (
+    _ensure_meals,
+    _reschedule_meals,
     _suggested_duration,
     activity_checks,
     deduplicate_attraction_candidates,
@@ -18,6 +20,166 @@ from app.planning.tourism import (
     select_primary_hotel,
     verify_tourism_plan,
 )
+
+
+def test_outbound_meals_leave_a_real_departure_buffer():
+    day = {
+        "id": "day_1",
+        "date": "2026-09-04",
+        "stages": [
+            {
+                "id": "outbound",
+                "title": "\u57ce\u5e02\u51fa\u53d1",
+                "mode": "driving",
+                "planned_start": "2026-09-04T19:00:00+08:00",
+                "planned_end": "2026-09-04T20:00:00+08:00",
+            }
+        ],
+        "activities": [
+            {
+                "type": "meal",
+                "place": {"name": "breakfast"},
+                "planned_start": "2026-09-04T07:15:00+08:00",
+                "planned_end": "2026-09-04T08:00:00+08:00",
+                "duration_minutes": 45,
+                "in_transit": False,
+            },
+            {
+                "type": "meal",
+                "place": {"name": "lunch"},
+                "planned_start": "2026-09-04T12:00:00+08:00",
+                "planned_end": "2026-09-04T12:45:00+08:00",
+                "duration_minutes": 45,
+                "in_transit": False,
+            },
+            {
+                "type": "meal",
+                "place": {"name": "dinner"},
+                "planned_start": "2026-09-04T18:15:00+08:00",
+                "planned_end": "2026-09-04T19:00:00+08:00",
+                "duration_minutes": 45,
+                "in_transit": False,
+            },
+        ],
+    }
+    _reschedule_meals(day, day["activities"], day["stages"])
+    dinner = next(item for item in day["activities"] if item["place"]["name"] == "dinner")
+    assert dinner["planned_end"] <= "2026-09-04T18:30:00+08:00"
+
+
+def test_morning_flight_never_backshifts_breakfast_before_six():
+    """An 08:00 flight must not create an implausible 04:45 breakfast."""
+    day = {
+        "id": "day_flight_breakfast",
+        "date": "2026-09-06",
+        "activities": [],
+    }
+    stages = [
+        {
+            "id": "outbound_flight",
+            "title": "\u57ce\u5e02\u51fa\u53d1",
+            "mode": "flight",
+            "planned_start": "2026-09-06T08:00:00+08:00",
+            "planned_end": "2026-09-06T12:30:00+08:00",
+        }
+    ]
+    _ensure_meals(day, day["activities"], stages, [], used_names=set())
+    breakfast = next(
+        item
+        for item in day["activities"]
+        if item["type"] == "meal" and item["user_note"].startswith("\u65e9\u9910")
+    )
+    assert breakfast["planned_start"] >= "2026-09-06T06:00:00+08:00"
+    assert breakfast["planned_end"] <= "2026-09-06T07:30:00+08:00"
+
+
+def test_meals_do_not_leak_destination_restaurant_onto_outbound_route():
+    """A destination-wide search result must not appear before arrival."""
+    day = {
+        "id": "day_outbound",
+        "date": "2026-09-04",
+        "items": [],
+        "activities": [],
+        "stages": [
+            {
+                "id": "outbound_drive",
+                "title": "城市出发",
+                "mode": "driving",
+                "origin": {
+                    "name": "武汉",
+                    "city": "武汉市",
+                    "coordinates": {"longitude": 114.304569, "latitude": 30.593354},
+                },
+                "destination": {
+                    "name": "沿途服务区",
+                    "city": "信阳市",
+                    "coordinates": {"longitude": 114.08, "latitude": 32.13},
+                },
+                "planned_start": "2026-09-04T19:00:00+08:00",
+                "planned_end": "2026-09-04T20:00:00+08:00",
+            }
+        ],
+    }
+    candidates = {
+        "attractions": [],
+        "hotels": [],
+        "meals": [
+            {
+                "place": {
+                    "name": "北京烤鸭（故宫店）",
+                    "city": "北京市",
+                    "coordinates": {"longitude": 116.4074, "latitude": 39.9042},
+                },
+                "score": 100,
+            }
+        ],
+    }
+
+    scheduled = schedule_tourism_activities([day], candidates)
+    meals = [item for item in scheduled[0]["activities"] if item["type"] == "meal"]
+
+    assert len(meals) == 3
+    assert all("北京烤鸭" not in item["place"]["name"] for item in meals)
+
+
+def test_scheduler_replaces_stale_meal_label_with_clock_aligned_slot():
+    day = {
+        "id": "day_stale_meals",
+        "date": "2026-09-04",
+        "items": [],
+        "activities": [
+            {
+                "type": "meal",
+                "place": {"name": "酒店附近晚餐"},
+                "planned_start": "2026-09-04T07:00:00+08:00",
+                "planned_end": "2026-09-04T07:30:00+08:00",
+                "user_note": "晚餐；上一轮残留",
+            },
+            {
+                "type": "meal",
+                "place": {"name": "酒店附近早餐"},
+                "planned_start": "2026-09-04T12:00:00+08:00",
+                "planned_end": "2026-09-04T12:30:00+08:00",
+                "user_note": "早餐；上一轮残留",
+            },
+        ],
+        "stages": [],
+    }
+
+    scheduled = schedule_tourism_activities(
+        [day],
+        {"attractions": [], "hotels": [], "meals": []},
+    )
+    meals = [item for item in scheduled[0]["activities"] if item["type"] == "meal"]
+
+    assert len(meals) == 3
+    assert [item["user_note"].split("；", 1)[0] for item in meals] == [
+        "早餐",
+        "午餐",
+        "晚餐",
+    ]
+
+
 from app.skills.base import SkillContext
 from app.skills.flyai import (
     FlyAIFerryAdapter,
@@ -820,6 +982,9 @@ def test_tourism_scheduler_keeps_meals_inside_long_transfer_stage():
 
     assert len(meals) == 3
     assert sum(item["in_transit"] for item in meals) == 2
+    lunch = next(item for item in meals if "\u5348\u9910" in (item.get("user_note") or ""))
+    assert "\u706b\u8f66/\u98de\u673a\u4e0a" in (lunch.get("user_note") or "")
+    assert "\u706b\u8f66\u4e0a\u7b80\u9910" in lunch["place"]["name"]
     assert verify_tourism_plan(scheduled, {"attractions": [], "hotels": [], "meals": []}) == []
 
 
@@ -1413,6 +1578,9 @@ def test_tourism_scheduler_keeps_three_meals_on_long_drive_day():
     dinner = next(item for item in meals if "晚餐" in (item.get("user_note") or ""))
     assert lunch["in_transit"] is True
     assert dinner["in_transit"] is True
+    assert "\u9014\u4e2d\u7528\u9910" in (lunch.get("user_note") or "")
+    assert "\u4f11\u606f\u70b9" in (lunch.get("user_note") or "")
+    assert "\u4f11\u606f/\u8865\u80fd\u70b9\u7b80\u9910" in lunch["place"]["name"]
     assert lunch["planned_start"].startswith("2026-08-24T11:")
     assert dinner["planned_start"].startswith(("2026-08-24T17:", "2026-08-24T18:"))
     assert not any(

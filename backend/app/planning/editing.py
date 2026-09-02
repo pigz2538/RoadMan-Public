@@ -68,7 +68,8 @@ def interpret_edit_intent(
 ) -> tuple[str, PlanPatch | None, bool]:
     """Build a patch from a validated Agent intent.
 
-    User language is interpreted by DeepSeekTripEditAgent. This layer only
+    User language is interpreted by the configured trip-editing intelligent
+    agent. This layer only
     resolves IDs and exact values from the returned structure; it never
     classifies the raw message with keyword lists or name substrings.
     """

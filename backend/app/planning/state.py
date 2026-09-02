@@ -46,3 +46,7 @@ class RoadManState(TypedDict, total=False):
     seasonal_review: list[dict[str, Any]]
     destination_research: dict[str, Any]
     destination_plan: dict[str, Any]
+    # User-confirmed route preferences that must survive a fresh semantic
+    # extraction during a replan (for example “改成周五上午坐高铁”).  Keeping
+    # these outside TripRequest also lets older persisted requests load safely.
+    planning_overrides: dict[str, Any]

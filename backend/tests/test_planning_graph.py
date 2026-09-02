@@ -17,9 +17,11 @@ from app.planning.graph import (
     _estimated_driving_arrival_date,
     _movement_stage,
     _scheduled_route_result,
+    _train_route,
     _train_route_result,
     _return_stage_start,
     _return_deadline_issue,
+    _verify_comfort_timeline,
     build_planning_graph,
 )
 from app.planning.deep_drive import _ensure_daily_meals
@@ -34,6 +36,91 @@ from app.repositories import TripRepository, VehicleRepository
 from app.services.sse import sse_manager
 from app.skills.base import SkillAdapter, SkillContext
 from app.skills.registry import SkillRegistry
+
+
+def test_comfort_validator_rejects_unrequested_night_driving():
+    issues = _verify_comfort_timeline(
+        [
+            {
+                "date": "2026-09-04",
+                "stages": [
+                    {
+                        "title": "\u57ce\u5e02\u51fa\u53d1",
+                        "mode": "driving",
+                        "planned_start": "2026-09-04T04:00:00+08:00",
+                        "planned_end": "2026-09-04T05:00:00+08:00",
+                    }
+                ],
+                "activities": [],
+            }
+        ],
+        {"raw_text": "周五晚上出发，情侣出游，舒适为主"},
+    )
+    assert any(item["code"] == "COMFORT_NIGHT_DRIVING" for item in issues)
+
+
+def test_comfort_validator_allows_explicit_night_travel_request():
+    assert not _verify_comfort_timeline(
+        [
+            {
+                "date": "2026-09-04",
+                "stages": [
+                    {
+                        "title": "\u57ce\u5e02\u51fa\u53d1",
+                        "mode": "driving",
+                        "planned_start": "2026-09-04T04:00:00+08:00",
+                        "planned_end": "2026-09-04T05:00:00+08:00",
+                    }
+                ],
+                "activities": [],
+            }
+        ],
+        {"raw_text": "凌晨四点出发，必须夜间开车"},
+    )
+
+
+def test_comfort_validator_relaxes_requested_evening_departure_in_steps():
+    day = {
+        "day_index": 1,
+        "date": "2026-09-04",
+        "stages": [
+            {
+                "title": "\u57ce\u5e02\u51fa\u53d1 \u00b7 \u7b2c 2/2 \u6bb5",
+                "mode": "driving",
+                "planned_start": "2026-09-04T21:20:00+08:00",
+                "planned_end": "2026-09-04T23:27:00+08:00",
+            }
+        ],
+        "activities": [],
+    }
+    request = {
+        "start_date": "2026-09-04",
+        "raw_text": "\u5468\u4e94\u665a\u4e0a\u4ece\u6b66\u6c49\u51fa\u53d1\uff0c\u53bb\u5408\u80a5\uff0c\u60c5\u4fa3\u51fa\u6e38\u8212\u9002\u4e3a\u4e3b",
+    }
+    assert _verify_comfort_timeline([day], request)
+    assert _verify_comfort_timeline([day], request, relaxation_level=1)
+    assert not _verify_comfort_timeline([day], request, relaxation_level=2)
+
+
+def test_comfort_validator_allows_short_cross_midnight_outbound_after_final_relaxation():
+    day = {
+        "day_index": 1,
+        "date": "2026-09-04",
+        "stages": [
+            {
+                "title": "\u57ce\u5e02\u51fa\u53d1 \u00b7 \u7b2c 2/2 \u6bb5",
+                "mode": "driving",
+                "planned_start": "2026-09-04T21:20:00+08:00",
+                "planned_end": "2026-09-05T00:20:00+08:00",
+            }
+        ],
+        "activities": [],
+    }
+    request = {
+        "start_date": "2026-09-04",
+        "raw_text": "\u5468\u4e94\u665a\u4e0a\u4ece\u6b66\u6c49\u51fa\u53d1\u53bb\u5408\u80a5\uff0c\u8212\u9002\u51fa\u6e38",
+    }
+    assert not _verify_comfort_timeline([day], request, relaxation_level=3)
 
 
 def test_return_deadline_allows_small_drift_and_half_day_grace():
@@ -84,6 +171,56 @@ def test_scheduled_routes_reject_missing_real_service_numbers():
 
     assert _scheduled_route_result(schedule, origin, destination, [], mode="flight")["error_code"] == "FLIGHT_SERVICE_NUMBER_MISSING"
     assert _train_route_result(schedule, origin, destination, [])["error_code"] == "TRAIN_SERVICE_NUMBER_MISSING"
+
+
+@pytest.mark.asyncio
+async def test_train_route_warns_when_requested_morning_has_no_service(monkeypatch):
+    class FakeTrainAdapter(SkillAdapter):
+        def __init__(self, name: str):
+            self.name = name
+
+        async def execute(self, payload: dict[str, Any], _: SkillContext) -> SkillResult:
+            day = payload["dep_date"]
+            return SkillResult(
+                success=True,
+                provider=self.name,
+                data={
+                    "items": [
+                        {
+                            "train_number": "G9001",
+                            "departure_station": "武汉站",
+                            "arrival_station": "合肥南站",
+                            "departure_at": f"{day}T13:10:00",
+                            "arrival_at": f"{day}T15:00:00",
+                        }
+                    ]
+                },
+            )
+
+        async def health_check(self) -> dict[str, Any]:
+            return {"status": "ready"}
+
+    registry = SkillRegistry()
+    for adapter_name in ("flyai.train", "mcp12306.train", "freeapi.train"):
+        registry.register(FakeTrainAdapter(adapter_name))
+
+    async def no_terminal_lookup(registry, route, origin, destination, trip_id):
+        return route
+
+    monkeypatch.setattr("app.planning.graph._attach_scheduled_terminals", no_terminal_lookup)
+    route, warnings = await _train_route(
+        registry,
+        {"name": "武汉", "coordinates": {"longitude": 114.3, "latitude": 30.6}},
+        {"name": "合肥", "coordinates": {"longitude": 117.2, "latitude": 31.8}},
+        "trip_train_period",
+        travel_date=date(2026, 9, 4),
+        requested_departure=datetime(2026, 9, 4, 9, 0, tzinfo=ZoneInfo("Asia/Shanghai")),
+        departure_period="morning",
+    )
+
+    assert route["success"] is True
+    assert any(item["code"] == "TRAIN_DEPARTURE_PERIOD_UNAVAILABLE" for item in warnings)
+    assert route["data"]["scheduled_departure_at"].startswith("2026-09-04T13:10")
 
 
 def test_long_outbound_drive_arrival_date_respects_daytime_and_daily_budget():
@@ -271,7 +408,12 @@ async def test_requirement_agent_decides_semantic_party_size(monkeypatch):
 
     monkeypatch.setattr("app.planning.llm.httpx.AsyncClient", FakeClient)
     extractor = OllamaRequirementExtractor(
-        Settings(ollama_api_key="test-key", enable_llm_requirement_extraction=True)
+        Settings(
+            ollama_api_key="test-key",
+            ollama_api_url="https://test.example/v1/chat/completions",
+            ollama_model="test-model",
+            enable_llm_requirement_extraction=True,
+        )
     )
 
     extracted = await extractor.extract(
@@ -309,7 +451,13 @@ async def test_requirement_agent_preserves_explicit_party_size(monkeypatch):
             return FakeResponse()
 
     monkeypatch.setattr("app.planning.llm.httpx.AsyncClient", FakeClient)
-    extractor = OllamaRequirementExtractor(Settings(ollama_api_key="test-key"))
+    extractor = OllamaRequirementExtractor(
+        Settings(
+            ollama_api_key="test-key",
+            ollama_api_url="https://test.example/v1/chat/completions",
+            ollama_model="test-model",
+        )
+    )
 
     extracted = await extractor.extract(
         "情侣出游，从武汉到庐山，同行 4 人",
@@ -356,7 +504,12 @@ async def test_requirement_agent_repairs_serialized_multi_destination_without_ge
 
     monkeypatch.setattr("app.planning.llm.httpx.AsyncClient", FakeClient)
     extracted = await OllamaRequirementExtractor(
-        Settings(ollama_api_key="test-key", enable_llm_requirement_extraction=True)
+        Settings(
+            ollama_api_key="test-key",
+            ollama_api_url="https://test.example/v1/chat/completions",
+            ollama_model="test-model",
+            enable_llm_requirement_extraction=True,
+        )
     ).extract("我从武汉出发去西藏和新疆看自然风光", date(2026, 8, 1))
 
     assert extracted["origin_name"] == "武汉"

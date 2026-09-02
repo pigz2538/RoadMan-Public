@@ -868,10 +868,10 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 /* The first four stages use one calm focal animation at a time.  The older
    route particles remain available for the schedule/verification scenes, but
    are intentionally hidden here so the meaning of each early stage is clear. */
-.planning-map-animation:is([data-scene='understand'], [data-scene='intercity'], [data-scene='discover'], [data-scene='connect']) > svg,
-.planning-map-animation:is([data-scene='understand'], [data-scene='intercity'], [data-scene='discover'], [data-scene='connect']) :is(.planning-ambient-road, .planning-map-route-pulse, .planning-map-spark, .planning-map-bead, .planning-map-sheen, .planning-map-pin, .planning-map-origin, .planning-map-destination, .planning-map-traveller, .planning-map-scan, .planning-map-radar, .planning-map-orbit, .planning-map-cloud, .planning-map-card, .planning-itinerary-stack, .planning-check-badge, .planning-stage-beacons) { opacity: 0 !important; animation: none !important; }
-.planning-map-animation:is([data-scene='understand'], [data-scene='intercity'], [data-scene='discover'], [data-scene='connect'])::before,
-.planning-map-animation:is([data-scene='understand'], [data-scene='intercity'], [data-scene='discover'], [data-scene='connect'])::after { opacity: 0; animation: none; }
+.planning-map-animation:is([data-scene='understand'], [data-scene='intercity'], [data-scene='connect']) > svg,
+.planning-map-animation:is([data-scene='understand'], [data-scene='intercity'], [data-scene='connect']) :is(.planning-ambient-road, .planning-map-route-pulse, .planning-map-spark, .planning-map-bead, .planning-map-sheen, .planning-map-pin, .planning-map-origin, .planning-map-destination, .planning-map-traveller, .planning-map-scan, .planning-map-radar, .planning-map-orbit, .planning-map-cloud, .planning-map-card, .planning-itinerary-stack, .planning-check-badge, .planning-stage-beacons) { opacity: 0 !important; animation: none !important; }
+.planning-map-animation:is([data-scene='understand'], [data-scene='intercity'], [data-scene='connect'])::before,
+.planning-map-animation:is([data-scene='understand'], [data-scene='intercity'], [data-scene='connect'])::after { opacity: 0; animation: none; }
 
 /* 1. 需求理解：a restrained radar sweep and three soft pings. */
 .focus-radar-ring { position: absolute; left: 27%; top: 50%; border: 1px solid rgba(43,130,219,.22); border-radius: 50%; transform: translate(-50%,-50%); }
@@ -909,6 +909,26 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .focus-candidate-dot.candidate-two i { animation-delay: 1.8s; }.focus-candidate-dot.candidate-three i { animation-delay: 3.6s; }
 .focus-candidate-card { position: absolute; z-index: 4; display: flex; align-items: center; gap: 6px; padding: 5px 9px 5px 5px; border: 1px solid rgba(140,180,221,.58); border-radius: 10px; background: rgba(255,255,255,.9); color: #416281; font-size: 10px; font-weight: 800; box-shadow: 0 6px 14px rgba(46,94,148,.1); opacity: 0; transform: translateY(8px) scale(.94); animation: focus-candidate-card 9s ease-in-out infinite; }
 .focus-candidate-card b { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 6px; color: #fff; background: #2f88de; font-size: 10px; }.focus-candidate-card i { font-style: normal; white-space: nowrap; }.focus-candidate-card.candidate-card-one { left: 18%; top: 22%; }.focus-candidate-card.candidate-card-two { left: 47%; top: 73%; animation-delay: 1.8s; }.focus-candidate-card.candidate-card-three { right: 8%; top: 14%; animation-delay: 3.6s; }.focus-candidate-card.candidate-card-two b { background: #e58c55; }.focus-candidate-card.candidate-card-three b { background: #735edb; }
+.focus-candidate-stream { position: absolute; z-index: 3; left: 18%; right: 18%; bottom: 22%; display: grid; grid-template-columns: repeat(6, 1fr); gap: 5px; padding: 6px 8px; border: 1px solid rgba(132,174,222,.4); border-radius: 10px; background: rgba(247,252,255,.72); box-shadow: 0 6px 14px rgba(45,94,148,.08); }
+.focus-candidate-stream > i { display: flex; align-items: center; gap: 4px; min-width: 0; height: 8px; font-style: normal; opacity: .35; animation: focus-candidate-stream 5.4s ease-in-out infinite; }
+.focus-candidate-stream > i:nth-child(2) { animation-delay: .45s; }.focus-candidate-stream > i:nth-child(3) { animation-delay: .9s; }.focus-candidate-stream > i:nth-child(4) { animation-delay: 1.35s; }.focus-candidate-stream > i:nth-child(5) { animation-delay: 1.8s; }.focus-candidate-stream > i:nth-child(6) { animation-delay: 2.25s; }
+.focus-candidate-stream b { display: grid; place-items: center; flex: 0 0 12px; width: 12px; height: 12px; border-radius: 50%; color: #fff; background: #3c8dde; font-size: 7px; line-height: 1; }
+.focus-candidate-stream em { display: block; flex: 1; height: 4px; border-radius: 99px; background: linear-gradient(90deg,#8fc5ef 0 45%,#dcecf9 45%); transform-origin: left center; animation: focus-candidate-score 5.4s ease-in-out infinite; }
+.focus-candidate-verify { position: absolute; z-index: 5; right: 12%; bottom: 8%; display: flex; align-items: center; gap: 5px; padding: 4px 8px; border: 1px solid rgba(45,166,150,.32); border-radius: 999px; background: rgba(239,253,249,.86); color: #257b72; font-size: 9px; font-weight: 800; animation: focus-candidate-verify 5.4s ease-in-out infinite; }
+.focus-candidate-verify i { display: grid; place-items: center; width: 14px; height: 14px; border-radius: 50%; color: #fff; background: #28a693; font-style: normal; font-size: 9px; }
+.planning-map-animation[data-scene='discover'] .planning-map-grid { opacity: .46 !important; animation: planning-map-drift 8s ease-in-out infinite alternate !important; }
+.planning-map-animation[data-scene='discover'] .planning-map-route { opacity: .46 !important; animation: planning-route-flow 8s linear infinite !important; }
+.planning-map-animation[data-scene='discover'] .planning-map-pin { opacity: .82 !important; animation-duration: 5.6s !important; }
+.planning-map-animation[data-scene='discover'] .planning-map-pin i { animation-duration: 2.6s !important; }
+.planning-map-animation[data-scene='discover'] .planning-map-radar { opacity: .64 !important; animation-duration: 6.4s !important; }
+.planning-map-animation[data-scene='discover'] .planning-map-radar b { animation-duration: 3.2s !important; }
+.planning-map-animation[data-scene='discover'] .planning-map-scan { opacity: .58 !important; animation: planning-map-scan 5.8s ease-in-out infinite !important; }
+.planning-map-animation[data-scene='discover'] .planning-map-route-pulse { opacity: .75 !important; animation-duration: 5.2s !important; }
+.planning-map-animation[data-scene='discover'] .planning-map-spark,
+.planning-map-animation[data-scene='discover'] .planning-map-bead { opacity: .5 !important; animation-duration: 7.5s !important; }
+.planning-map-animation[data-scene='discover'] .focus-candidate-dot,
+.planning-map-animation[data-scene='discover'] .focus-candidate-dot i,
+.planning-map-animation[data-scene='discover'] .focus-candidate-card { animation-duration: 5.4s !important; }
 
 /* 4. 智能体协作：a quiet hub-and-spoke diagram with a single moving signal. */
 .focus-agent-link { position: absolute; z-index: 1; left: 30%; top: 49%; width: 40%; height: 1px; background: linear-gradient(90deg, rgba(48,133,219,.12), rgba(48,133,219,.48), rgba(48,133,219,.12)); transform-origin: left center; }
@@ -932,6 +952,9 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 @keyframes focus-candidate-dot { 0%,12% { opacity: 0; transform: scale(.45); } 25%,76% { opacity: 1; transform: scale(1); } 91%,100% { opacity: 0; transform: scale(.72); } }
 @keyframes focus-candidate-ring { 0%,25% { opacity: 0; transform: scale(.35); } 40% { opacity: .64; } 82%,100% { opacity: 0; transform: scale(1.75); } }
 @keyframes focus-candidate-card { 0%,15% { opacity: 0; transform: translateY(8px) scale(.94); } 30%,74% { opacity: 1; transform: none; } 90%,100% { opacity: 0; transform: translateY(-4px) scale(.97); } }
+@keyframes focus-candidate-stream { 0%,8% { opacity: .24; transform: translateY(2px); } 24%,72% { opacity: 1; transform: translateY(0); } 90%,100% { opacity: .24; transform: translateY(-1px); } }
+@keyframes focus-candidate-score { 0%,12% { transform: scaleX(.28); opacity: .42; } 38%,72% { transform: scaleX(1); opacity: .9; } 92%,100% { transform: scaleX(.38); opacity: .34; } }
+@keyframes focus-candidate-verify { 0%,14% { opacity: 0; transform: translateY(5px) scale(.92); } 30%,76% { opacity: 1; transform: none; } 92%,100% { opacity: 0; transform: translateY(-3px) scale(.96); } }
 @keyframes focus-agent-signal { 0%,10% { left: 0; opacity: 0; } 20% { opacity: 1; } 80% { left: 100%; opacity: .8; } 92%,100% { left: 100%; opacity: 0; } }
 @keyframes focus-agent-node { 0%,12% { opacity: 0; transform: translateY(6px); } 28%,78% { opacity: 1; transform: none; } 93%,100% { opacity: 0; transform: translateY(-4px); } }
 @keyframes focus-hub-breathe { 0%,100% { transform: translate(-50%,-50%) scale(.94); } 50% { transform: translate(-50%,-50%) scale(1.04); } }

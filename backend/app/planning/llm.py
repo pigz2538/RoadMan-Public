@@ -9,38 +9,120 @@ import httpx
 from ..core.config import Settings
 
 
-DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions"
-DEEPSEEK_MODEL = "deepseek-v4-flash"
+def _llm_config(settings: Settings) -> tuple[str, str, str, str, float, bool, int]:
+    """Return one provider-neutral connection tuple.
+
+    The planner never chooses an endpoint or model per agent.  Values come
+    from the canonical ``LLM_*`` settings and fall back to legacy names only
+    to keep older deployments bootable.  ``api_style`` controls the request
+    body shape: ``openai`` for Chat Completions or ``ollama_generate`` for the
+    native Ollama endpoint.
+    """
+    api_key = str(
+        getattr(settings, "llm_api_key", "")
+        or getattr(settings, "ollama_api_key", "")
+        or getattr(settings, "deepseek_api_key", "")
+        or ""
+    ).strip()
+    api_url = str(
+        getattr(settings, "llm_api_url", "")
+        or getattr(settings, "ollama_api_url", "")
+        or ""
+    ).strip()
+    model = str(
+        getattr(settings, "llm_model", "")
+        or getattr(settings, "ollama_model", "")
+        or getattr(settings, "deepseek_model", "")
+        or ""
+    ).strip()
+    api_style = str(getattr(settings, "llm_api_style", "openai") or "openai").strip().lower()
+    if api_style not in {"openai", "ollama_generate"}:
+        api_style = "openai"
+    timeout = float(
+        getattr(settings, "llm_timeout_seconds", 0)
+        or getattr(settings, "ollama_timeout_seconds", 0)
+        or getattr(settings, "deepseek_timeout_seconds", 0)
+        or 90
+    )
+    if timeout <= 0:
+        timeout = 90
+    thinking_value = getattr(settings, "llm_thinking", None)
+    if thinking_value is None:
+        thinking_value = getattr(settings, "ollama_thinking", False) or getattr(
+            settings, "deepseek_thinking", False
+        )
+    thinking = bool(thinking_value)
+    max_tokens = int(
+        getattr(settings, "llm_max_tokens", 0)
+        or getattr(settings, "ollama_max_tokens", 0)
+        or getattr(settings, "deepseek_max_tokens", 0)
+        or 32768
+    )
+    return api_key, api_url, model, api_style, timeout, thinking, max(256, max_tokens)
+
+
+def llm_is_configured(settings: Settings) -> bool:
+    """Whether a usable semantic-provider credential is available."""
+    api_key, api_url, model, *_ = _llm_config(settings)
+    return bool(api_key and api_url and model)
+
+
+def llm_timeout_seconds(settings: Settings) -> float:
+    """Return the configured timeout without exposing provider aliases."""
+    return _llm_config(settings)[4]
+
+
+def llm_config_summary(settings: Settings) -> dict[str, Any]:
+    """Return safe runtime diagnostics (never the API key or request body)."""
+    api_key, api_url, model, api_style, timeout, thinking, max_tokens = _llm_config(settings)
+    return {
+        "provider": str(getattr(settings, "llm_provider", "configured") or "configured"),
+        "api_style": api_style,
+        "api_url": api_url.split("?", 1)[0],
+        "model": model,
+        "key_configured": bool(api_key),
+        "thinking": thinking,
+        "max_tokens": max_tokens,
+        "timeout_seconds": timeout,
+    }
+
+
+# Compatibility for integrations that imported the old tuple helper.  The
+# tuple now describes the configured provider, not a hard-coded vendor.
+def _ollama_config(settings: Settings) -> tuple[str, str, str, float, bool, int]:
+    api_key, api_url, model, _style, timeout, thinking, max_tokens = _llm_config(settings)
+    return api_key, api_url, model, timeout, thinking, max_tokens
 
 
 def _deepseek_config(settings: Settings) -> tuple[str, str, str, float, bool, int, str]:
-    """Return the effective DeepSeek connection settings.
-
-    ``OLLAMA_*`` is accepted only as a deprecated input alias.  In
-    particular, an old Ollama URL is never used for runtime requests: every
-    semantic agent goes through DeepSeek's official Chat Completions endpoint.
-    """
-    api_key = str(getattr(settings, "deepseek_api_key", "") or getattr(settings, "ollama_api_key", "") or "").strip()
-    api_url = str(getattr(settings, "deepseek_api_url", "") or DEEPSEEK_API_URL).strip()
-    if not api_url or "ollama.com" in api_url or api_url.rstrip("/").endswith("/api/generate"):
-        api_url = DEEPSEEK_API_URL
-    model = str(getattr(settings, "deepseek_model", "") or getattr(settings, "ollama_model", "") or DEEPSEEK_MODEL).strip()
-    if model in {"v4flash", "deepseek-v4-flash:0731-cloud"} or model.startswith("deepseek-v4-flash:"):
-        model = DEEPSEEK_MODEL
-    timeout = float(getattr(settings, "deepseek_timeout_seconds", 180) or 180)
-    if timeout <= 0:
-        timeout = 180
-    thinking = bool(getattr(settings, "deepseek_thinking", True))
-    max_tokens = int(getattr(settings, "deepseek_max_tokens", 32768) or 32768)
-    if max_tokens < 256:
-        max_tokens = 256
-    effort = str(getattr(settings, "deepseek_reasoning_effort", "max") or "max").strip().lower()
-    if effort not in {"low", "medium", "high", "max"}:
-        effort = "max"
-    return api_key, api_url, model, timeout, thinking, max_tokens, effort
+    api_key, api_url, model, _style, timeout, thinking, max_tokens = _llm_config(settings)
+    return api_key, api_url, model, timeout, thinking, max_tokens, "off"
 
 
-async def deepseek_complete(
+def _content_from_response(body: Any) -> str | None:
+    """Extract visible text from OpenAI-shaped or native response bodies."""
+    if not isinstance(body, dict):
+        return None
+    content: Any = body.get("response")
+    if content is None:
+        choices = body.get("choices")
+        if isinstance(choices, list) and choices and isinstance(choices[0], dict):
+            message = choices[0].get("message")
+            if isinstance(message, dict):
+                content = message.get("content")
+            if content is None:
+                content = choices[0].get("text")
+    if isinstance(content, list):
+        # OpenAI multimodal-compatible proxies may return content parts.
+        content = "".join(
+            str(part.get("text") or part.get("content") or "")
+            for part in content
+            if isinstance(part, dict)
+        )
+    return content.strip() if isinstance(content, str) and content.strip() else None
+
+
+async def llm_complete(
     settings: Settings,
     prompt: str,
     *,
@@ -48,30 +130,42 @@ async def deepseek_complete(
     json_output: bool = True,
     agent_name: str = "semantic_agent",
 ) -> str:
-    """Call DeepSeek once and return only the assistant's visible content.
+    """Call the configured semantic provider and return visible content.
 
-    The reasoning trace (``reasoning_content``) is intentionally discarded;
-    it is neither persisted nor sent to the UI.  A legacy ``response`` field
-    is accepted solely for deterministic unit-test fakes from the Ollama era.
+    Every agent uses this function.  With ``LLM_API_STYLE=openai`` the request
+    and response follow the OpenAI Chat Completions contract regardless of the
+    configured provider name.  Native Ollama remains available only when the
+    external configuration explicitly selects ``ollama_generate``.
     """
-    api_key, api_url, model, configured_timeout, thinking, max_tokens, effort = _deepseek_config(settings)
+    api_key, api_url, model, api_style, configured_timeout, thinking, max_tokens = _llm_config(
+        settings
+    )
     if not api_key:
-        raise ValueError("DEEPSEEK_API_KEY is not configured")
-    payload: dict[str, Any] = {
-        "model": model,
-        "messages": [{"role": "user", "content": prompt}],
-        "stream": False,
-        # Semantic extraction is a structured decision, not creative writing.
-        # Keep sampling deterministic so the same natural-language request
-        # cannot alternate between an administrative parent and its explicit
-        # child city on successive planning attempts.
-        "temperature": 0.0,
-        "thinking": {"type": "enabled" if thinking else "disabled"},
-        "reasoning_effort": effort,
-        "max_tokens": max_tokens,
-    }
-    if json_output:
-        payload["response_format"] = {"type": "json_object"}
+        raise ValueError("LLM_API_KEY is not configured")
+    if not api_url:
+        raise ValueError("LLM_API_URL is not configured")
+    if not model:
+        raise ValueError("LLM_MODEL is not configured")
+    if api_style == "ollama_generate":
+        payload: dict[str, Any] = {
+            "model": model,
+            "prompt": prompt,
+            "stream": False,
+            "think": thinking,
+            "options": {"num_predict": max_tokens, "temperature": 0},
+        }
+        if json_output:
+            payload["format"] = "json"
+    else:
+        payload = {
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "stream": False,
+            "temperature": 0,
+            "max_tokens": max_tokens,
+        }
+        if json_output:
+            payload["response_format"] = {"type": "json_object"}
     request_timeout = float(timeout if timeout is not None else configured_timeout)
     started_at = monotonic()
     try:
@@ -92,19 +186,10 @@ async def deepseek_complete(
             success=False,
             latency_ms=round((monotonic() - started_at) * 1000),
             error_code=type(error).__name__.upper(),
+            provider=str(getattr(settings, "llm_provider", "configured") or "configured"),
         )
         raise
-    content: Any = None
-    if isinstance(body, dict):
-        choices = body.get("choices")
-        if isinstance(choices, list) and choices and isinstance(choices[0], dict):
-            message = choices[0].get("message")
-            if isinstance(message, dict):
-                content = message.get("content")
-        # Compatibility with old local test doubles only; production DeepSeek
-        # responses always use choices[0].message.content.
-        if content is None:
-            content = body.get("response")
+    content = _content_from_response(body)
     if not isinstance(content, str) or not content.strip():
         await _audit_deepseek_call(
             agent_name,
@@ -112,20 +197,62 @@ async def deepseek_complete(
             latency_ms=round((monotonic() - started_at) * 1000),
             error_code="EMPTY_AGENT_RESPONSE",
             usage=body.get("usage") if isinstance(body, dict) else None,
+            provider=str(getattr(settings, "llm_provider", "configured") or "configured"),
         )
-        raise ValueError("DeepSeek response did not contain assistant content")
+        raise ValueError("LLM response did not contain assistant content")
     await _audit_deepseek_call(
         agent_name,
         success=True,
         latency_ms=round((monotonic() - started_at) * 1000),
         usage=body.get("usage") if isinstance(body, dict) else None,
+        provider=str(getattr(settings, "llm_provider", "configured") or "configured"),
     )
     return content
 
 
-async def _audit_deepseek_call(
+# Compatibility name for callers that explicitly requested the previous
+# Ollama helper.  It now follows the same provider-neutral configuration.
+async def ollama_complete(
+    settings: Settings,
+    prompt: str,
+    *,
+    timeout: float | None = None,
+    json_output: bool = True,
+    agent_name: str = "semantic_agent",
+) -> str:
+    return await llm_complete(
+        settings,
+        prompt,
+        timeout=timeout,
+        json_output=json_output,
+        agent_name=agent_name,
+    )
+
+
+# Compatibility for integrations and tests that still import the old helper.
+# It delegates to the provider-neutral adapter; the configured endpoint is
+# the only source of transport/provider behavior.
+async def deepseek_complete(
+    settings: Settings,
+    prompt: str,
+    *,
+    timeout: float | None = None,
+    json_output: bool = True,
+    agent_name: str = "semantic_agent",
+) -> str:
+    return await llm_complete(
+        settings,
+        prompt,
+        timeout=timeout,
+        json_output=json_output,
+        agent_name=agent_name,
+    )
+
+
+async def _audit_llm_call(
     agent_name: str,
     *,
+    provider: str,
     success: bool,
     latency_ms: int,
     usage: dict[str, Any] | None = None,
@@ -135,6 +262,7 @@ async def _audit_deepseek_call(
 
     await record_agent_call(
         f"agent.{agent_name}",
+        provider=provider,
         success=success,
         latency_ms=latency_ms,
         usage=usage,
@@ -142,7 +270,28 @@ async def _audit_deepseek_call(
     )
 
 
-class DeepSeekRequirementExtractor:
+# Keep the old audit hook patchable for existing tests/integrations while the
+# persisted provider is now the configured provider label.
+async def _audit_deepseek_call(
+    agent_name: str,
+    *,
+    provider: str = "configured",
+    success: bool,
+    latency_ms: int,
+    usage: dict[str, Any] | None = None,
+    error_code: str | None = None,
+) -> None:
+    await _audit_llm_call(
+        agent_name,
+        provider=provider,
+        success=success,
+        latency_ms=latency_ms,
+        usage=usage,
+        error_code=error_code,
+    )
+
+
+class RequirementExtractionAgent:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
 
@@ -155,7 +304,7 @@ class DeepSeekRequirementExtractor:
         structural = extract_structural_constraints(raw_text, today)
         if (
             not self.settings.enable_llm_requirement_extraction
-            or not self.settings.deepseek_api_key
+            or not llm_is_configured(self.settings)
         ):
             return {
                 **structural,
@@ -167,7 +316,7 @@ class DeepSeekRequirementExtractor:
             f"Today is {today.isoformat()}. Return ONLY one valid JSON object (no markdown, no explanation) "
             "with exactly these keys: origin_name, destination_name, destination_names, destination_scope, "
             "travel_intents, start_date, end_date, "
-            "departure_time, return_time, travelers, max_days, preferences, transport_modes, special_events, "
+            "departure_time, return_time, departure_period, travelers, max_days, preferences, transport_modes, special_events, "
             "cross_sea_required, cross_sea_mode, past_return_requested, time_window_minutes, stay_only_at_destination, must_visit_names. "
             "Dates must be YYYY-MM-DD; unknown scalar fields must be null and all list fields must be arrays. "
             "destination_name is one canonical route anchor string or null; destination_names is the complete ordered "
@@ -216,7 +365,7 @@ class DeepSeekRequirementExtractor:
             response_text = await deepseek_complete(
                 self.settings,
                 prompt,
-                timeout=self.settings.deepseek_timeout_seconds,
+                timeout=llm_timeout_seconds(self.settings),
                 agent_name="requirement_extractor",
             )
             parsed = _parse_json_object(response_text)
@@ -311,6 +460,11 @@ class DeepSeekRequirementExtractor:
                         merged[clock_field] = normalized_clock
                     else:
                         merged.pop(clock_field, None)
+                departure_period = str(merged.get("departure_period") or "").strip().lower()
+                if departure_period in {"morning", "afternoon", "evening"}:
+                    merged["departure_period"] = departure_period
+                else:
+                    merged.pop("departure_period", None)
                 # Party size is a semantic decision owned by the Requirement
                 # Agent (for example, “情侣” means two people). The backend
                 # only validates the returned scalar and never scans raw text.
@@ -363,11 +517,11 @@ class DeepSeekRequirementExtractor:
                 )
                 merged["_intent_status"] = "ok"
                 merged["_intent_source"] = (
-                    "deepseek_destination_adjudication"
+                    "llm_destination_adjudication"
                     if destination_adjudication_used
-                    else "deepseek_repair"
+                    else "llm_repair"
                     if semantic_repair_used
-                    else "deepseek"
+                    else "llm"
                 )
                 if semantic_repair_used:
                     merged["_intent_repair_attempted"] = True
@@ -410,7 +564,7 @@ class DeepSeekRequirementExtractor:
             await deepseek_complete(
                 self.settings,
                 repair_prompt,
-                timeout=min(self.settings.deepseek_timeout_seconds, 45),
+                timeout=min(llm_timeout_seconds(self.settings), 45),
                 agent_name="requirement_repair",
             )
         )
@@ -465,7 +619,7 @@ class DeepSeekRequirementExtractor:
                 await deepseek_complete(
                     self.settings,
                     repair_prompt,
-                    timeout=min(self.settings.deepseek_timeout_seconds, 45),
+                    timeout=min(llm_timeout_seconds(self.settings), 45),
                     agent_name="requirement_repair",
                 )
             )
@@ -542,7 +696,7 @@ class DeepSeekRequirementExtractor:
                 await deepseek_complete(
                     self.settings,
                     prompt,
-                    timeout=min(self.settings.deepseek_timeout_seconds, 45),
+                    timeout=min(llm_timeout_seconds(self.settings), 45),
                     agent_name="destination_entity_adjudicator",
                 )
             )
@@ -570,7 +724,7 @@ class DeepSeekRequirementExtractor:
         return result, True
 
 
-class DeepSeekRequirementValidator:
+class RequirementValidationAgent:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
 
@@ -579,7 +733,7 @@ class DeepSeekRequirementValidator:
         raw_text: str,
         extracted: dict[str, Any],
     ) -> list[dict[str, Any]]:
-        if not self.settings.deepseek_api_key:
+        if not llm_is_configured(self.settings):
             return []
         prompt = (
             "你是 RoadMan Requirement Guard，只检查旅行需求是否自相矛盾、"
@@ -600,7 +754,7 @@ class DeepSeekRequirementValidator:
                 await deepseek_complete(
                     self.settings,
                     prompt,
-                    timeout=self.settings.deepseek_timeout_seconds,
+                    timeout=llm_timeout_seconds(self.settings),
                     agent_name="requirement_validator",
                 )
             )
@@ -627,7 +781,7 @@ class DeepSeekRequirementValidator:
             return []
 
 
-class DeepSeekTripEditAgent:
+class TripEditAgent:
     """Interpret free-form edits before the deterministic patch builder runs.
 
     The patch builder remains the only component allowed to mutate a trip.  This
@@ -644,7 +798,7 @@ class DeepSeekTripEditAgent:
         message: str,
         trip_context: dict[str, Any],
     ) -> dict[str, Any] | None:
-        if not self.settings.deepseek_api_key:
+        if not llm_is_configured(self.settings):
             return None
         prompt = (
             "你是 RoadMan 行程修改 Agent。你只能理解用户要如何调整已经存在的行程，"
@@ -656,9 +810,13 @@ class DeepSeekTripEditAgent:
               '"target_name":"","candidate_name":"","duration_minutes":null,'
               '"duration_delta_minutes":0,'
               '"origin_name":"","destination_name":"","start_date":"","end_date":"",'
+              '"departure_time":"","return_time":"","departure_period":"morning|afternoon|evening|null","transport_modes":[],'
               '"must_visit_names":[],"exclude_names":[],"restore_names":[],"stay_only_at_destination":false,'
               '"reply":"给用户的简短中文说明"}。'
              "如果用户要求增加或减少天数、重排整体路线、改变出发/返回日期，intent 用 replan。"
+             "如果用户要求改成高铁/火车/飞机/自驾/轮船，必须用 replan，并在 transport_modes 返回 train/flight/driving/ferry；"
+             "不要沿用旧交通方式。‘早上/上午出发’返回 departure_time=09:00，‘下午出发’返回 14:00，‘晚上出发’返回 19:00；"
+             "这些是时间偏好而非具体班次，后续由班次查询智能体核对可用性。"
              "如果一句话同时明确指出一个现有安排和一个新的地点（例如‘把 A 替换为 B’、‘把 A 换成 B’、‘A 改成 B’），"
              "intent 必须用 replace，并填写 target_activity_id/target_name 与 candidate_name；只有‘再加/新增/添加’才用 add。"
              "即使上下文提供了 current_target_id，也不能把明确的替换请求误判为新增。"
@@ -678,7 +836,7 @@ class DeepSeekTripEditAgent:
                 await deepseek_complete(
                     self.settings,
                     prompt,
-                    timeout=min(self.settings.deepseek_timeout_seconds, 45),
+                    timeout=min(llm_timeout_seconds(self.settings), 45),
                     agent_name="trip_editor",
                 )
             )
@@ -703,6 +861,15 @@ class DeepSeekTripEditAgent:
         except (TypeError, ValueError):
             duration = None
         duration = max(30, min(240, duration)) if duration is not None else None
+        raw_transport_modes = value.get("transport_modes")
+        if isinstance(raw_transport_modes, str):
+            raw_transport_modes = [raw_transport_modes]
+        transport_modes = _normalize_transport_modes(raw_transport_modes)
+        departure_time = _normalize_clock(value.get("departure_time"))
+        return_time = _normalize_clock(value.get("return_time"))
+        departure_period = str(value.get("departure_period") or "").strip().lower()
+        if departure_period not in {"morning", "afternoon", "evening"}:
+            departure_period = None
         return {
             "intent": intent,
             "day_index": day_index,
@@ -719,6 +886,10 @@ class DeepSeekTripEditAgent:
               "destination_name": str(value.get("destination_name") or "").strip()[:120],
               "start_date": str(value.get("start_date") or "").strip()[:20],
               "end_date": str(value.get("end_date") or "").strip()[:20],
+              "departure_time": departure_time,
+              "return_time": return_time,
+              "departure_period": departure_period,
+              "transport_modes": transport_modes,
               "must_visit_names": [str(item).strip()[:120] for item in (value.get("must_visit_names") or []) if str(item).strip()][:40],
               "exclude_names": [str(item).strip()[:120] for item in (value.get("exclude_names") or []) if str(item).strip()][:40],
               "restore_names": [str(item).strip()[:120] for item in (value.get("restore_names") or []) if str(item).strip()][:40],
@@ -727,7 +898,7 @@ class DeepSeekTripEditAgent:
         }
 
 
-class DeepSeekPoiCurator:
+class PoiCuratorAgent:
     """Let the planning agent reconcile AMap and OSM/OpenTripMap POIs."""
 
     def __init__(self, settings: Settings) -> None:
@@ -741,7 +912,7 @@ class DeepSeekPoiCurator:
     ) -> list[dict[str, Any]]:
         # Merging two POI sources is a semantic decision.  Never guess it from
         # a local substring/keyword table when the curator Agent is unavailable.
-        if not self.settings.deepseek_api_key or not osm_items:
+        if not llm_is_configured(self.settings) or not osm_items:
             return []
         local_places = [item.get("place", {}) for item in local_candidates]
         compact_osm = [
@@ -771,7 +942,7 @@ class DeepSeekPoiCurator:
                 await deepseek_complete(
                     self.settings,
                     prompt,
-                    timeout=self.settings.deepseek_timeout_seconds,
+                    timeout=llm_timeout_seconds(self.settings),
                     agent_name="poi_curator",
                 )
             )
@@ -805,7 +976,7 @@ class DeepSeekPoiCurator:
             return []
 
 
-class DeepSeekDestinationResearchAgent:
+class DestinationResearchAgent:
     """Turn destination search evidence into source-backed highlights."""
 
     def __init__(self, settings: Settings) -> None:
@@ -817,7 +988,7 @@ class DeepSeekDestinationResearchAgent:
         research: dict[str, Any],
         trip_request: dict[str, Any],
     ) -> list[dict[str, Any]]:
-        if not self.settings.deepseek_api_key:
+        if not llm_is_configured(self.settings):
             return []
         evidence = [
             {
@@ -882,7 +1053,7 @@ class DeepSeekDestinationResearchAgent:
                 await deepseek_complete(
                     self.settings,
                     prompt,
-                    timeout=min(self.settings.deepseek_timeout_seconds, 45),
+                    timeout=min(llm_timeout_seconds(self.settings), 45),
                     agent_name="destination_research",
                 )
             )
@@ -939,7 +1110,7 @@ class DeepSeekDestinationResearchAgent:
         return cleaned
 
 
-class DeepSeekDestinationPlanAgent:
+class DestinationPlanAgent:
     """Turn destination evidence into a high-level, routeable trip brief.
 
     This is intentionally separate from the route adapter.  The Agent first
@@ -958,7 +1129,7 @@ class DeepSeekDestinationPlanAgent:
         research: dict[str, Any],
         trip_request: dict[str, Any],
     ) -> dict[str, Any]:
-        if not self.settings.deepseek_api_key:
+        if not llm_is_configured(self.settings):
             return {}
         recommendations = research.get("agent_recommendations") or []
         if not recommendations and research.get("destinations"):
@@ -1003,7 +1174,7 @@ class DeepSeekDestinationPlanAgent:
                 await deepseek_complete(
                     self.settings,
                     prompt,
-                    timeout=min(self.settings.deepseek_timeout_seconds, 45),
+                    timeout=min(llm_timeout_seconds(self.settings), 45),
                     agent_name="destination_planner",
                 )
             )
@@ -1052,12 +1223,12 @@ class DeepSeekDestinationPlanAgent:
         }
 
 
-class DeepSeekPoiRanker:
+class PoiRankerAgent:
     """Rank discovered POIs from the Agent's semantic requirements.
 
     The local scorer is deliberately objective (distance, rating and price).
     Preference words are not interpreted with a Python keyword table; when an
-    DeepSeek key is available this Agent decides the trade-offs and supplies the
+    When the configured model is available this Agent decides the trade-offs and supplies the
     human-readable reason shown in the UI.
     """
 
@@ -1074,7 +1245,7 @@ class DeepSeekPoiRanker:
         travel_end: str | None = None,
         destination_research: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
-        if not self.settings.deepseek_api_key:
+        if not llm_is_configured(self.settings):
             return []
         compact: list[dict[str, Any]] = []
         for category, items in candidates.items():
@@ -1118,7 +1289,7 @@ class DeepSeekPoiRanker:
                 await deepseek_complete(
                     self.settings,
                     prompt,
-                    timeout=min(self.settings.deepseek_timeout_seconds, 45),
+                    timeout=min(llm_timeout_seconds(self.settings), 45),
                     agent_name="poi_ranker",
                 )
             )
@@ -1157,7 +1328,7 @@ class DeepSeekPoiRanker:
         return cleaned
 
 
-class DeepSeekPoiSuitabilityAgent:
+class PoiSuitabilityAgent:
     """Review every candidate against the actual travel conditions.
 
     Ranking answers "which option is attractive".  This pass answers the
@@ -1177,7 +1348,7 @@ class DeepSeekPoiSuitabilityAgent:
         day_plans: list[dict[str, Any]],
         weather_results: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        if not self.settings.deepseek_api_key:
+        if not llm_is_configured(self.settings):
             return []
         compact: list[dict[str, Any]] = []
         for category, items in candidates.items():
@@ -1250,7 +1421,7 @@ class DeepSeekPoiSuitabilityAgent:
                 await deepseek_complete(
                     self.settings,
                     prompt,
-                    timeout=min(self.settings.deepseek_timeout_seconds, 45),
+                    timeout=min(llm_timeout_seconds(self.settings), 45),
                     agent_name="poi_suitability",
                 )
             )
@@ -1344,7 +1515,7 @@ def _match_candidate_weather(
     return matched
 
 
-class DeepSeekEventResearchAgent:
+class EventResearchAgent:
     """Extract source-backed facts for a user-requested seasonal event.
 
     Web search only supplies evidence.  This Agent turns the snippets into a
@@ -1362,7 +1533,7 @@ class DeepSeekEventResearchAgent:
         year: int,
         sources: list[dict[str, Any]],
     ) -> dict[str, Any]:
-        if not self.settings.deepseek_api_key or not sources:
+        if not llm_is_configured(self.settings) or not sources:
             return {}
         compact = [
             {
@@ -1393,7 +1564,7 @@ class DeepSeekEventResearchAgent:
                 await deepseek_complete(
                     self.settings,
                     prompt,
-                    timeout=min(self.settings.deepseek_timeout_seconds, 45),
+                    timeout=min(llm_timeout_seconds(self.settings), 45),
                     agent_name="event_research",
                 )
             )
@@ -1438,17 +1609,26 @@ def _clean_event_facts(value: dict[str, Any], year: int, source_count: int) -> d
 
 
 # Backward-compatible import names for integrations written before the
-# provider migration.  The implementations above are DeepSeek-backed; these
-# aliases do not retain an Ollama transport.
-OllamaRequirementExtractor = DeepSeekRequirementExtractor
-OllamaRequirementValidator = DeepSeekRequirementValidator
-OllamaTripEditAgent = DeepSeekTripEditAgent
-OllamaPoiCurator = DeepSeekPoiCurator
-OllamaDestinationResearchAgent = DeepSeekDestinationResearchAgent
-OllamaDestinationPlanAgent = DeepSeekDestinationPlanAgent
-OllamaPoiRanker = DeepSeekPoiRanker
-OllamaPoiSuitabilityAgent = DeepSeekPoiSuitabilityAgent
-OllamaEventResearchAgent = DeepSeekEventResearchAgent
+# provider-neutral adapter was introduced.  The implementation reads LLM_*
+# configuration at call time; these aliases do not select a vendor or model.
+DeepSeekRequirementExtractor = RequirementExtractionAgent
+DeepSeekRequirementValidator = RequirementValidationAgent
+DeepSeekTripEditAgent = TripEditAgent
+DeepSeekPoiCurator = PoiCuratorAgent
+DeepSeekDestinationResearchAgent = DestinationResearchAgent
+DeepSeekDestinationPlanAgent = DestinationPlanAgent
+DeepSeekPoiRanker = PoiRankerAgent
+DeepSeekPoiSuitabilityAgent = PoiSuitabilityAgent
+DeepSeekEventResearchAgent = EventResearchAgent
+OllamaRequirementExtractor = RequirementExtractionAgent
+OllamaRequirementValidator = RequirementValidationAgent
+OllamaTripEditAgent = TripEditAgent
+OllamaPoiCurator = PoiCuratorAgent
+OllamaDestinationResearchAgent = DestinationResearchAgent
+OllamaDestinationPlanAgent = DestinationPlanAgent
+OllamaPoiRanker = PoiRankerAgent
+OllamaPoiSuitabilityAgent = PoiSuitabilityAgent
+OllamaEventResearchAgent = EventResearchAgent
 
 
 def _parse_json_object(text: str) -> dict[str, Any]:
@@ -1463,6 +1643,7 @@ def _parse_json_object(text: str) -> dict[str, Any]:
         "end_date",
         "departure_time",
         "return_time",
+        "departure_period",
         "travelers",
         "preferences",
         "transport_modes",

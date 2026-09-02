@@ -27,6 +27,7 @@ from .core.errors import (
 from .db import create_tables
 from .services.registry_factory import build_skill_registry
 from .services.observability import RequestMetrics, SlidingWindowRateLimiter
+from .planning.llm import llm_config_summary
 
 settings = get_settings()
 logger = structlog.get_logger()
@@ -114,4 +115,5 @@ async def health():
         "service": "roadman-api",
         "environment": settings.app_env,
         "skills": registry.names(),
+        "llm": llm_config_summary(settings),
     }

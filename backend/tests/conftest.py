@@ -8,6 +8,7 @@ os.environ["ENABLE_JOB_QUEUE"] = "false"
 # ignored .env file.  Provider-degradation assertions are intentionally
 # deterministic; integration calls are exercised separately in Docker.
 for _provider_key in (
+    "LLM_API_KEY",
     "AMAP_WEBSERVICE_KEY",
     "OPENTRIPMAP_API_KEY",
     "FLYAI_API_KEY",

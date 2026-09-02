@@ -1,4 +1,8 @@
 .git
+.omo
+.codegraph
+tmp
+output
 .pytest_cache
 **/__pycache__
 **/.pytest_cache

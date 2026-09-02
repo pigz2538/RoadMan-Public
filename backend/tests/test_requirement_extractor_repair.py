@@ -47,7 +47,7 @@ async def test_requirement_agent_retries_missing_origin_semantically(monkeypatch
     assert result["destination_name"] == "三亚"
     assert result["destination_names"] == ["三亚"]
     assert result["_intent_status"] == "ok"
-    assert result["_intent_source"] == "deepseek_repair"
+    assert result["_intent_source"] == "llm_repair"
     assert result["_intent_repair_attempted"] is True
 
 
@@ -71,7 +71,7 @@ async def test_requirement_agent_does_not_overwrite_existing_anchor(monkeypatch)
     assert calls == ["requirement_extractor"]
     assert result["origin_name"] == "武汉"
     assert result["destination_name"] == "北京"
-    assert result["_intent_source"] == "deepseek"
+    assert result["_intent_source"] == "llm"
 
 
 @pytest.mark.asyncio

@@ -514,6 +514,9 @@ function formatTime(value: string) {
     hour: '2-digit',
     minute: '2-digit',
     hour12: false,
+    // Planning timestamps are persisted as Asia/Shanghai instants.  Do not
+    // let the browser/OS timezone silently move a card to the previous day.
+    timeZone: 'Asia/Shanghai',
   }).format(new Date(value))
 }
 
@@ -535,6 +538,12 @@ function planningAgentName(event: { tool?: string; node?: string }) {
     'ollama.poi_curator': '地点策展智能体',
     'open_meteo.forecast': '天气智能体',
   }
+  // Provider-neutral audit IDs are emitted by the backend.  Keep the former
+  // deepseek/ollama keys above readable for historical records.
+  tools['llm.destination_plan'] = tools['deepseek.destination_plan'] || '目的地分区规划智能体'
+  tools['llm.poi_ranker'] = tools['deepseek.poi_ranker'] || '候选排序智能体'
+  tools['llm.poi_suitability'] = tools['deepseek.poi_suitability'] || '候选适配智能体'
+  tools['llm.poi_curator'] = tools['deepseek.poi_curator'] || '地点策展智能体'
   const nodes: Record<string, string> = {
     destination_research: '目的地研究智能体',
     review_tourism_suitability: '候选适配智能体',
@@ -803,6 +812,12 @@ watch(bottomPanelCollapsed, (collapsed) => window.localStorage.setItem(panelStor
                 <span class="focus-candidate-card candidate-card-one"><b>景</b><i>自然风景</i></span>
                 <span class="focus-candidate-card candidate-card-two"><b>餐</b><i>附近餐饮</i></span>
                 <span class="focus-candidate-card candidate-card-three"><b>住</b><i>舒适住宿</i></span>
+                <div class="focus-candidate-stream">
+                  <i v-for="index in 6" :key="`candidate-stream-${index}`">
+                    <b>{{ index }}</b><em />
+                  </i>
+                </div>
+                <span class="focus-candidate-verify"><i>✓</i><b>逐项核对中</b></span>
                 <b class="focus-panel-label">正在筛选目的地候选</b>
                 <small>开放时间 · 预约 · 季节适配</small>
               </div>

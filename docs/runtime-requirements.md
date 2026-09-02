@@ -29,10 +29,13 @@ RoadMan 支持两种运行方式：Docker Compose（推荐，生产风格）与�
 
 | 变量 | 用途 | 说明 |
 | --- | --- | --- |
-| `DEEPSEEK_API_KEY` | 需求理解、目的地研究、语义编辑等云端智能体 | 必需；默认模型 `DEEPSEEK_MODEL=deepseek-v4-flash` |
-| `DEEPSEEK_REASONING_EFFORT` | 云端智能体思考深度 | 默认 `low` |
-| `DEEPSEEK_THINKING` | 是否启用思考模式 | 默认 `false`；需要深度评测时显式开启 |
-| `DEEPSEEK_API_URL` | DeepSeek 官方 Chat Completions 地址 | 默认 `https://api.deepseek.com/chat/completions` |
+| `LLM_PROVIDER` | 语义模型供应商标识（用于配置与审计） | 默认 `ollama_cloud` |
+| `LLM_API_URL` | 完整的模型接口地址 | 必需；默认示例为 OpenAI 兼容 Chat Completions |
+| `LLM_API_KEY` | 需求理解、目的地研究、语义编辑等云端智能体凭据 | 必需 |
+| `LLM_MODEL` | 模型名 | 必需；默认示例 `deepseek-v4-flash:0731-cloud` |
+| `LLM_API_STYLE` | 请求协议：`openai` 或明确选择的 `ollama_generate` | 默认 `openai` |
+| `LLM_THINKING` | 是否启用供应商支持的思考模式 | 默认 `false` |
+| `LLM_MAX_TOKENS` / `LLM_TIMEOUT_SECONDS` | 输出上限与请求超时 | 可选 |
 | `AMAP_WEBSERVICE_KEY` | 真实驾车/步行/骑行/公交路线、地理编码、POI | 必需；缺失则上述能力降级 |
 | `FLYAI_API_KEY` | 旅行搜索、住宿、餐饮补充 | 推荐 |
 | `TRAIN_FALLBACK_URL` | 主车次服务不可用时的公开车次备选 | 默认 `https://api.lolimi.cn/API/hc/api`，无需密钥；结果必须有真实车次号 |
@@ -66,7 +69,7 @@ RoadMan 支持两种运行方式：Docker Compose（推荐，生产风格）与�
 服务依赖关系保证顺序启动并健康后才拉起下游：backend 依赖 postgres+redis，worker 依赖 backend+postgres+redis，frontend 依赖 backend。后端与 worker 共享 `UPLOAD_DIR=/app/data/uploads` 卷与 `FILE_RETENTION_DAYS`。
 
 ```powershell
-if (!(Test-Path .env)) { Copy-Item .env.example .env }   # 至少填入 DEEPSEEK_API_KEY 与 AMAP_WEBSERVICE_KEY
+if (!(Test-Path .env)) { Copy-Item .env.example .env }   # 至少填入 LLM_API_KEY 与 AMAP_WEBSERVICE_KEY
 docker compose up -d --build
 docker compose ps
 ```
