@@ -16,52 +16,32 @@
 
 ## 技术栈
 
-**后端 · 编排**
+**核心编排**
 
-[![Python](https://img.shields.io/badge/Python-3.11-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![LangGraph](https://img.shields.io/badge/LangGraph-1.0-1C3C3C?style=flat-square&logo=langchain&logoColor=white)](https://langchain-ai.github.io/langgraph/)
-[![Pydantic](https://img.shields.io/badge/Pydantic-2.x-E92063?style=flat-square&logo=pydantic&logoColor=white)](https://docs.pydantic.dev/)
-[![SQLAlchemy](https://img.shields.io/badge/SQLAlchemy-2.0-D71F00?style=flat-square&logo=sqlalchemy&logoColor=white)](https://www.sqlalchemy.org/)
-[![Alembic](https://img.shields.io/badge/Alembic-1.14-2A2EEC?style=flat-square&logo=alembic&logoColor=white)](https://alembic.sqlalchemy.org/)
-[![ARQ](https://img.shields.io/badge/ARQ-0.26-5275E9?style=flat-square&logo=redis&logoColor=white)](https://arq-docs.helpmanual.io/)
-[![Uvicorn](https://img.shields.io/badge/Uvicorn-0.34-499848?style=flat-square&logo=uvicorn&logoColor=white)](https://www.uvicorn.org/)
 
-**数据 · 基础设施**
+**产品界面 · 地图**
+
+[![Vue](https://img.shields.io/badge/Vue-3.5-4FC08D?style=flat-square&logo=vuedotjs&logoColor=white)](https://vuejs.org/)
+[![AMap JSAPI](https://img.shields.io/badge/AMap%20JSAPI-2.0-2899F5?style=flat-square)](https://lbs.amap.com/api/javascript-api-v2/summary)
+
+**数据 · 运行环境**
 
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-17-4169E1?style=flat-square&logo=postgresql&logoColor=white)](https://www.postgresql.org/)
 [![Redis](https://img.shields.io/badge/Redis-7.4-DC382D?style=flat-square&logo=redis&logoColor=white)](https://redis.io/)
 [![Docker Compose](https://img.shields.io/badge/Docker%20Compose-2.x-2496ED?style=flat-square&logo=docker&logoColor=white)](https://docs.docker.com/compose/)
-[![Nginx](https://img.shields.io/badge/Nginx-1.27-009639?style=flat-square&logo=nginx&logoColor=white)](https://nginx.org/)
-[![Node.js](https://img.shields.io/badge/Node.js-22-5FA04E?style=flat-square&logo=nodedotjs&logoColor=white)](https://nodejs.org/)
-[![SSE](https://img.shields.io/badge/SSE-Event%20Stream-4169E1?style=flat-square)](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events)
-[![OpenAPI](https://img.shields.io/badge/OpenAPI-3-6BA539?style=flat-square&logo=swagger&logoColor=white)](https://swagger.io/)
 
-**前端 · 交互**
-
-[![Vue](https://img.shields.io/badge/Vue-3.5-4FC08D?style=flat-square&logo=vuedotjs&logoColor=white)](https://vuejs.org/)
-[![Vite](https://img.shields.io/badge/Vite-8-646CFF?style=flat-square&logo=vite&logoColor=white)](https://vitejs.dev/)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.9-3178C6?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-[![Pinia](https://img.shields.io/badge/Pinia-3-FFD859?style=flat-square&logo=pinia&logoColor=black)](https://pinia.vuejs.org/)
-[![Vue Router](https://img.shields.io/badge/Vue%20Router-4.5-42B883?style=flat-square&logo=vuedotjs&logoColor=white)](https://router.vuejs.org/)
-[![TanStack Query](https://img.shields.io/badge/TanStack%20Query-5.66-FF4154?style=flat-square&logo=reactquery&logoColor=white)](https://tanstack.com/query/latest)
-[![AMap JSAPI](https://img.shields.io/badge/AMap%20JSAPI-1.x-2899F5?style=flat-square)](https://lbs.amap.com/api/javascript-api-v2/summary)
-[![Model Viewer](https://img.shields.io/badge/Model%20Viewer-4.3-60C0EB?style=flat-square&logo=google&logoColor=white)](https://modelviewer.dev/)
-
-**质量 · 测试**
-
-[![Playwright](https://img.shields.io/badge/Playwright-1.62-2EAD33?style=flat-square&logo=playwright&logoColor=white)](https://playwright.dev/)
-[![Vitest](https://img.shields.io/badge/Vitest-4.1-6E9F18?style=flat-square&logo=vitest&logoColor=white)](https://vitest.dev/)
-[![pytest](https://img.shields.io/badge/pytest-8.3-0A9EDC?style=flat-square&logo=pytest&logoColor=white)](https://docs.pytest.org/)
-[![vue-tsc](https://img.shields.io/badge/vue--tsc-3.3-4FC08D?style=flat-square&logo=vuedotjs&logoColor=white)](https://github.com/vuejs/language-tools)
-[![SQLite](https://img.shields.io/badge/SQLite-dev-003B57?style=flat-square&logo=sqlite&logoColor=white)](https://www.sqlite.org/)
-
-**外部能力**
+**智能体 · 外部能力**
 
 [![DeepSeek](https://img.shields.io/badge/DeepSeek-V4-4D6BFE?style=flat-square&logo=deepseek&logoColor=white)](https://www.deepseek.com/)
 [![Open-Meteo](https://img.shields.io/badge/Open--Meteo-Free-14A0A5?style=flat-square&logo=sun&logoColor=white)](https://open-meteo.com/)
-[![OpenTripMap](https://img.shields.io/badge/OpenTripMap-POI-5B8DEF?style=flat-square)](https://opentripmap.io/)
 [![FlyAI](https://img.shields.io/badge/FlyAI-Travel-FF5A5F?style=flat-square)](https://www.flyai.com/)
+
+**质量 · 测试**
+
+[![pytest](https://img.shields.io/badge/pytest-8.3-0A9EDC?style=flat-square&logo=pytest&logoColor=white)](https://docs.pytest.org/)
+[![Playwright](https://img.shields.io/badge/Playwright-1.62-2EAD33?style=flat-square&logo=playwright&logoColor=white)](https://playwright.dev/)
 
 ---
 
@@ -95,19 +75,19 @@ RoadMan 的做法是：**把「内容建议」放进可执行工作流**。一�
 
 ### 一句话，开始出发
 
-用自然语言说出「**周六早上从武汉出发，去庐山两天一夜，周日晚八点前回来，喜欢自然景观**」。系统先做需求核对与逐项追问，确认后才启动后台规划；也可以附加图片、PDF、DOCX、Markdown 或 XLSX 作为上下文。理解「新疆」「南京」「西藏和新疆」这类行政区、城市与多目的地，不会把目的地猜成同名餐馆或校园。
+用自然语言说出「**周六早上从武汉出发，去庐山两天一夜，周日晚八点前回来，喜欢自然景观**」。系统先做需求核对与逐项追问，确认后才启动后台规划；也可以附加图片、PDF、DOCX、Markdown 或 XLSX 作为上下文。首页快捷需求直接覆盖情侣周边游、沿途慢游、新能源补能和雨天改排等真实任务；地点理解能区分「新疆」「南京」「西藏和新疆」这类行政区、城市与多目的地，不会把目的地猜成同名餐馆或校园。天气卡在用户授权后按浏览器当前位置请求预报并解析城市标签；临时定位失败时只使用本机浏览器记住的上次位置，未取得位置时保持不可用，不会静默切到固定城市。
 
 ![一句话出发与快捷入口](docs/screenshots/home.png)
 
 ### 后台渐进规划，实时可见
 
-规划是持续数分钟的长任务：Redis + ARQ 执行 LangGraph 工作流，SSE 把每个节点的进度实时推送到详情页——顶部进度条、地图逐段出现路线、阶段卡与活动逐项生成、右侧智能体协作消息实时滚动。前端动画节奏与后台速度分离，历史行程直接从数据库恢复，不重播「生成中」。
+规划是持续数分钟的长任务：Redis + ARQ 执行 LangGraph 工作流，SSE 把每个节点的进度实时推送到详情页。等待界面依次聚焦需求约束、地点与交通搜索、候选筛选、多智能体协作、上下文补齐、全天编排和最终复核，每一幕只保留一个清晰主视觉；进入工作台后，顶部进度、地图路线、阶段卡、活动和协作消息继续随真实节点推进。前端动画节奏与后台速度分离，历史行程直接从数据库恢复，不重播「生成中」。
 
 ![渐进规划进度视图](docs/screenshots/plan_planning.png)
 
 ### 地图与逐日编排，看起来就懂
 
-每一天是一条完整时间线：早餐、出发、沿途服务区休息与充电、景点停留、餐饮、住宿，附带路况、天气、路费与能耗估算。当前阶段路线高亮、其他灰显，支持平移缩放、阶段切换与地图选点。规划页左侧日程、右侧行程助理和底部阶段详情都可独立收起；底栏收起后只保留上一段、当前序号和下一段，让地图获得更大空间，折叠状态会在本机浏览器保留。
+每一天是一条完整时间线：早餐、出发、沿途服务区休息与充电、景点停留、餐饮、住宿，附带路况、天气、路费与能耗估算。景点候选先合并入口、停车场等同一景区变体，再综合研究优先级、适配评分与当前路线距离选入；活动卡只采用当日路线实际经过的候选，避免地图和日程各说各话。每日游览路线会在合理时段回到住宿基点，同一地点或近距离锚点不生成零距离返程卡。当前阶段路线高亮、其他灰显，支持平移缩放、阶段切换与地图选点。规划页左侧日程、右侧行程助理和底部阶段详情都可独立收起；底栏收起后只保留上一段、当前序号和下一段，让地图获得更大空间，折叠状态会在本机浏览器保留。
 
 ![规划详情 · 地图与阶段编排](docs/screenshots/plan_lushan.png)
 
@@ -125,7 +105,7 @@ RoadMan 的做法是：**把「内容建议」放进可执行工作流**。一�
 
 ### 车辆与能源上下文
 
-车型管理支持从真实车型目录搜索并保存车辆（续航、电量、座位数等），规划时按车辆上下文计算可用续航与补能节点——纯电、燃油、混动的规划策略各不相同。
+车型管理先查询主车型目录；具体版本缺失或只命中模糊结果时，再动态并行查询多个公开车型数据源，覆盖纯电、混动与燃油车的续航、能耗、电池、充电、座位和尺寸等可用字段。结果保留具体版本、原始来源和缺失/估算标记，由用户确认后保存；规划时按车辆上下文计算可用续航与补能节点，纯电、燃油、混动采用不同策略。
 
 ![车型管理与续航估算](docs/screenshots/home_vehicle.png)
 

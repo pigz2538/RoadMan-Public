@@ -16,52 +16,32 @@
 
 ## Tech Stack
 
-**Backend · Orchestration**
+**Core Orchestration**
 
-[![Python](https://img.shields.io/badge/Python-3.11-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![LangGraph](https://img.shields.io/badge/LangGraph-1.0-1C3C3C?style=flat-square&logo=langchain&logoColor=white)](https://langchain-ai.github.io/langgraph/)
-[![Pydantic](https://img.shields.io/badge/Pydantic-2.x-E92063?style=flat-square&logo=pydantic&logoColor=white)](https://docs.pydantic.dev/)
-[![SQLAlchemy](https://img.shields.io/badge/SQLAlchemy-2.0-D71F00?style=flat-square&logo=sqlalchemy&logoColor=white)](https://www.sqlalchemy.org/)
-[![Alembic](https://img.shields.io/badge/Alembic-1.14-2A2EEC?style=flat-square&logo=alembic&logoColor=white)](https://alembic.sqlalchemy.org/)
-[![ARQ](https://img.shields.io/badge/ARQ-0.26-5275E9?style=flat-square&logo=redis&logoColor=white)](https://arq-docs.helpmanual.io/)
-[![Uvicorn](https://img.shields.io/badge/Uvicorn-0.34-499848?style=flat-square&logo=uvicorn&logoColor=white)](https://www.uvicorn.org/)
 
-**Data · Infrastructure**
+**Product UI · Maps**
+
+[![Vue](https://img.shields.io/badge/Vue-3.5-4FC08D?style=flat-square&logo=vuedotjs&logoColor=white)](https://vuejs.org/)
+[![AMap JSAPI](https://img.shields.io/badge/AMap%20JSAPI-2.0-2899F5?style=flat-square)](https://lbs.amap.com/api/javascript-api-v2/summary)
+
+**Data · Runtime**
 
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-17-4169E1?style=flat-square&logo=postgresql&logoColor=white)](https://www.postgresql.org/)
 [![Redis](https://img.shields.io/badge/Redis-7.4-DC382D?style=flat-square&logo=redis&logoColor=white)](https://redis.io/)
 [![Docker Compose](https://img.shields.io/badge/Docker%20Compose-2.x-2496ED?style=flat-square&logo=docker&logoColor=white)](https://docs.docker.com/compose/)
-[![Nginx](https://img.shields.io/badge/Nginx-1.27-009639?style=flat-square&logo=nginx&logoColor=white)](https://nginx.org/)
-[![Node.js](https://img.shields.io/badge/Node.js-22-5FA04E?style=flat-square&logo=nodedotjs&logoColor=white)](https://nodejs.org/)
-[![SSE](https://img.shields.io/badge/SSE-Event%20Stream-4169E1?style=flat-square)](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events)
-[![OpenAPI](https://img.shields.io/badge/OpenAPI-3-6BA539?style=flat-square&logo=swagger&logoColor=white)](https://swagger.io/)
 
-**Frontend · Interaction**
-
-[![Vue](https://img.shields.io/badge/Vue-3.5-4FC08D?style=flat-square&logo=vuedotjs&logoColor=white)](https://vuejs.org/)
-[![Vite](https://img.shields.io/badge/Vite-8-646CFF?style=flat-square&logo=vite&logoColor=white)](https://vitejs.dev/)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.9-3178C6?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-[![Pinia](https://img.shields.io/badge/Pinia-3-FFD859?style=flat-square&logo=pinia&logoColor=black)](https://pinia.vuejs.org/)
-[![Vue Router](https://img.shields.io/badge/Vue%20Router-4.5-42B883?style=flat-square&logo=vuedotjs&logoColor=white)](https://router.vuejs.org/)
-[![TanStack Query](https://img.shields.io/badge/TanStack%20Query-5.66-FF4154?style=flat-square&logo=reactquery&logoColor=white)](https://tanstack.com/query/latest)
-[![AMap JSAPI](https://img.shields.io/badge/AMap%20JSAPI-1.x-2899F5?style=flat-square)](https://lbs.amap.com/api/javascript-api-v2/summary)
-[![Model Viewer](https://img.shields.io/badge/Model%20Viewer-4.3-60C0EB?style=flat-square&logo=google&logoColor=white)](https://modelviewer.dev/)
-
-**Quality · Testing**
-
-[![Playwright](https://img.shields.io/badge/Playwright-1.62-2EAD33?style=flat-square&logo=playwright&logoColor=white)](https://playwright.dev/)
-[![Vitest](https://img.shields.io/badge/Vitest-4.1-6E9F18?style=flat-square&logo=vitest&logoColor=white)](https://vitest.dev/)
-[![pytest](https://img.shields.io/badge/pytest-8.3-0A9EDC?style=flat-square&logo=pytest&logoColor=white)](https://docs.pytest.org/)
-[![vue-tsc](https://img.shields.io/badge/vue--tsc-3.3-4FC08D?style=flat-square&logo=vuedotjs&logoColor=white)](https://github.com/vuejs/language-tools)
-[![SQLite](https://img.shields.io/badge/SQLite-dev-003B57?style=flat-square&logo=sqlite&logoColor=white)](https://www.sqlite.org/)
-
-**External Capabilities**
+**Agents · External Capabilities**
 
 [![DeepSeek](https://img.shields.io/badge/DeepSeek-V4-4D6BFE?style=flat-square&logo=deepseek&logoColor=white)](https://www.deepseek.com/)
 [![Open-Meteo](https://img.shields.io/badge/Open--Meteo-Free-14A0A5?style=flat-square&logo=sun&logoColor=white)](https://open-meteo.com/)
-[![OpenTripMap](https://img.shields.io/badge/OpenTripMap-POI-5B8DEF?style=flat-square)](https://opentripmap.io/)
 [![FlyAI](https://img.shields.io/badge/FlyAI-Travel-FF5A5F?style=flat-square)](https://www.flyai.com/)
+
+**Quality · Testing**
+
+[![pytest](https://img.shields.io/badge/pytest-8.3-0A9EDC?style=flat-square&logo=pytest&logoColor=white)](https://docs.pytest.org/)
+[![Playwright](https://img.shields.io/badge/Playwright-1.62-2EAD33?style=flat-square&logo=playwright&logoColor=white)](https://playwright.dev/)
 
 ---
 
@@ -97,19 +77,19 @@ From a "natural language requirement" to an "executable, editable, verifiable it
 
 ### One Sentence to Get Started
 
-Say in natural language: "**Depart Wuhan Saturday morning, two days and one night at Lushan, back before 8 p.m. Sunday, love natural scenery**". The system first reviews the requirement with item-by-item clarifying questions, and only starts background planning after confirmation; you can also attach images, PDFs, DOCX, Markdown or XLSX as context. It understands administrative regions, cities and multi-destination requests like "Xinjiang", "Nanjing" or "Tibet and Xinjiang", and won't mistake a destination for a same-named restaurant or campus.
+Say in natural language: "**Depart Wuhan Saturday morning, two days and one night at Lushan, back before 8 p.m. Sunday, love natural scenery**". The system first reviews the requirement with item-by-item clarifying questions, and only starts background planning after confirmation; you can also attach images, PDFs, DOCX, Markdown or XLSX as context. Home-page shortcuts use realistic couple getaways, scenic slow travel, EV charging and rainy-day replanning tasks. Place understanding distinguishes administrative regions, cities and multi-destination requests such as "Xinjiang", "Nanjing" or "Tibet and Xinjiang", rather than mistaking them for a same-named restaurant or campus. With permission, the weather card requests a forecast for the browser's current coordinates and resolves a city label; a temporary location failure may reuse only the last position stored in that browser, while no available position remains unavailable instead of silently switching to a fixed city.
 
 ![One-sentence start & quick entries](docs/screenshots/home.png)
 
 ### Progressive Background Planning, Visible in Real Time
 
-Planning is a long-running task lasting minutes: Redis + ARQ execute the LangGraph workflow, and SSE pushes each node's progress to the detail page in real time — top progress bar, route segments appearing on the map one by one, stage cards and activities generating item by item, and agent collaboration messages scrolling live on the right. Frontend animation pacing is decoupled from backend speed; historical trips are restored straight from the database without replaying "generating".
+Planning is a long-running task lasting minutes: Redis + ARQ execute the LangGraph workflow, and SSE pushes each node's progress to the detail page in real time. The waiting view moves through requirement constraints, place and transport search, candidate screening, multi-agent collaboration, context completion, day scheduling and final verification, with one clear visual focus per scene; inside the workbench, progress, map routes, stage cards, activities and collaboration messages continue to follow the real workflow nodes. Frontend animation pacing is decoupled from backend speed; historical trips are restored straight from the database without replaying "generating".
 
 ![Progressive planning progress view](docs/screenshots/plan_planning.png)
 
 ### Map & Day-by-Day Orchestration, Understandable at a Glance
 
-Each day is a complete timeline: breakfast, departure, service-area rest and charging along the way, sightseeing stops, dining, lodging — with traffic, weather, tolls and energy estimates attached. The current stage's route is highlighted while others are dimmed; pan/zoom, stage switching and map point picking are supported. The planning page's left itinerary, right trip assistant and bottom stage details can each collapse independently; when the bottom bar is collapsed only the previous stage, current index and next stage remain, giving the map more space. Collapse state is remembered in the local browser.
+Each day is a complete timeline: breakfast, departure, service-area rest and charging along the way, sightseeing stops, dining and lodging, with traffic, weather, tolls and energy estimates attached. Attraction candidates first collapse entrances, parking lots and other variants of the same landmark, then balance research priority, suitability and transfer distance from the active route; activity cards are only filled from candidates represented by that day's route, keeping map and itinerary consistent. Each sightseeing day closes back at the lodging base within a practical evening window, while same-place or near-identical anchors do not produce zero-distance return cards. The current stage's route is highlighted while others are dimmed; pan/zoom, stage switching and map point picking are supported. The planning page's left itinerary, right trip assistant and bottom stage details can each collapse independently; when the bottom bar is collapsed only the previous stage, current index and next stage remain, giving the map more space. Collapse state is remembered in the local browser.
 
 ![Planning detail · map & stage orchestration](docs/screenshots/plan_lushan.png)
 
@@ -127,7 +107,7 @@ All trips are automatically saved as history and restored in seconds; batch dele
 
 ### Vehicle & Energy Context
 
-The vehicle manager searches a real vehicle catalog and saves vehicles (range, battery capacity, seat count, etc.); planning uses the vehicle context to compute usable range and charging stops — EV, fuel and hybrid each get different planning strategies.
+The vehicle manager queries the primary catalog first, then dynamically searches several public vehicle datasets when a specific trim is missing or only fuzzy matches are available. EV, hybrid and fuel records can carry range, consumption, battery, charging, seating and dimension fields together with their exact trim, original source and missing/estimated markers. After user confirmation, planning uses that vehicle context to compute usable range and replenishment stops with powertrain-specific strategies.
 
 ![Vehicle management & range estimation](docs/screenshots/home_vehicle.png)
 
