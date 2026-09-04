@@ -292,8 +292,16 @@ async def preflight_trip(
         answered_fields.update({"start_date", "end_date", "date"})
     if "CROSS_SEA_MODE_REQUIRED" in answered_codes:
         answered_fields.update({"preferences", "cross_sea_mode", "transport_mode"})
+    # Dates inferred from a weekend/month/holiday phrase are drafts, not hard
+    # constraints.  They must not override a semantic Agent answer; only
+    # literal calendar tokens are authoritative here.
+    inferred_date_fields = set(structural_dates.get("_inferred_date_fields") or [])
     for field in ("start_date", "end_date", "cross_sea_required"):
-        if structural_dates.get(field) and field not in answered_fields:
+        if (
+            structural_dates.get(field)
+            and field not in inferred_date_fields
+            and field not in answered_fields
+        ):
             extracted[field] = structural_dates[field]
     for key, value in payload.answers.items():
         value = value.strip()

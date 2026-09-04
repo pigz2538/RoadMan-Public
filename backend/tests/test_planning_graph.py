@@ -15,6 +15,7 @@ from app.planning.graph import (
     _destination_focus_radius,
     _is_local_destination_anchor,
     _estimated_driving_arrival_date,
+    _estimated_ferry_route,
     _movement_stage,
     _scheduled_route_result,
     _train_route,
@@ -22,6 +23,8 @@ from app.planning.graph import (
     _return_stage_start,
     _return_deadline_issue,
     _best_effort_delivery_allowed,
+    _local_day_candidate_pool,
+    _local_target_identity_keys,
     _verify_comfort_timeline,
     build_planning_graph,
 )
@@ -144,6 +147,50 @@ def test_return_deadline_allows_small_drift_and_half_day_grace():
     assert blocker is not None
     assert blocker["code"] == "RETURN_DEADLINE_UNACHIEVABLE"
     assert blocker["severity"] == "blocker"
+
+
+def test_local_day_candidate_pool_never_recycles_one_scenic_attraction():
+    candidates = [
+        {"place": {"name": "银河谷漂流"}},
+        {"place": {"name": "银河谷漂流（游客服务中心）"}},
+        {"place": {"name": "九宫山森林公园"}},
+    ]
+    used: set[str] = set()
+
+    first_day = _local_day_candidate_pool(candidates, 0, used)
+    assert first_day
+    used.update(_local_target_identity_keys(first_day[0]))
+
+    second_day = _local_day_candidate_pool(candidates, 1, used)
+
+    assert all(not (_local_target_identity_keys(item) & used) for item in second_day)
+    assert all(
+        item["place"]["name"] != "银河谷漂流（游客服务中心）"
+        for item in second_day
+    )
+
+
+def test_estimated_ferry_route_keeps_the_sea_leg_structured_without_fake_road():
+    result = _estimated_ferry_route(
+        {
+            "name": "北海国际客运港",
+            "coordinates": {"longitude": 109.12, "latitude": 21.48},
+        },
+        {
+            "name": "涠洲岛西角码头",
+            "coordinates": {"longitude": 109.13, "latitude": 21.02},
+        },
+        travel_date=date(2026, 10, 3),
+    )
+
+    assert result["success"] is True
+    assert result["data"]["selected_mode"] == "ferry"
+    assert result["data"]["geometry"] == []
+    assert result["data"]["estimated"] is True
+    assert result["data"]["service_status"] == "unavailable"
+    assert result["data"]["service_number"] is None
+    assert result["data"]["departure_port"].endswith("待确认）")
+    assert result["warnings"]
 
 
 def test_best_effort_delivery_turns_all_verification_issues_into_reminders_after_three_repairs():
@@ -461,6 +508,70 @@ def test_structural_calendar_supports_relative_weekend_and_english_dates():
     assert extract_structural_constraints("next Sunday出发，Monday回来", today) == {
         "start_date": "2026-08-16",
         "end_date": "2026-08-17",
+    }
+
+
+def test_structural_calendar_keeps_next_month_weekend_in_target_month():
+    extracted = extract_structural_constraints(
+        "下个月找个周末去杭州",
+        date(2026, 9, 4),
+    )
+
+    assert extracted == {
+        "start_date": "2026-10-03",
+        "end_date": "2026-10-04",
+        "_inferred_date_fields": ["end_date", "start_date"],
+    }
+
+
+def test_structural_calendar_widens_next_month_weekend_with_duration():
+    extracted = extract_structural_constraints(
+        "下个月找个周末去杭州，最多五天",
+        date(2026, 9, 4),
+    )
+
+    assert extracted == {
+        "start_date": "2026-10-03",
+        "end_date": "2026-10-07",
+        "_inferred_date_fields": ["end_date", "start_date"],
+    }
+
+
+def test_structural_calendar_widens_weekend_with_chinese_duration():
+    extracted = extract_structural_constraints(
+        "这个周末去杭州玩五天",
+        date(2026, 9, 4),
+    )
+
+    assert extracted == {
+        "start_date": "2026-09-05",
+        "end_date": "2026-09-09",
+        "_inferred_date_fields": ["end_date", "start_date"],
+    }
+
+
+def test_structural_calendar_resolves_national_day_holiday():
+    extracted = extract_structural_constraints(
+        "下个月国庆节假期去杭州，最多五天",
+        date(2026, 9, 4),
+    )
+
+    assert extracted == {
+        "start_date": "2026-10-01",
+        "end_date": "2026-10-05",
+        "_inferred_date_fields": ["end_date", "start_date"],
+    }
+
+
+def test_structural_calendar_keeps_explicit_range_with_duration():
+    extracted = extract_structural_constraints(
+        "9月12号到9月15号去杭州，最多五天",
+        date(2026, 9, 4),
+    )
+
+    assert extracted == {
+        "start_date": "2026-09-12",
+        "end_date": "2026-09-15",
     }
 
 
@@ -1364,7 +1475,9 @@ async def test_graph_builds_five_days_and_multiple_transport_modes():
     )
     stages = [stage for day in result["day_plans"] for stage in day["stages"]]
     assert len(result["day_plans"]) == 5
-    assert len(stages) >= 13
+    # The planner no longer recycles the same scenic candidate merely to pad
+    # later days; sparse days retain a connected free-time node instead.
+    assert len(stages) >= 11
     assert {"transit", "walking", "riding"} <= {
         stage["mode"] for stage in stages
     }

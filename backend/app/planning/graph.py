@@ -48,6 +48,7 @@ from .llm import (
     llm_is_configured,
     llm_timeout_seconds,
 )
+from .metrics import walking_totals
 from .recommendations import (
     apply_agent_ranking,
     apply_agent_suitability,
@@ -62,7 +63,9 @@ from .seasonality import apply_seasonal_guard, parse_trip_date
 from .state import RoadManState
 from .tourism import (
     deduplicate_attraction_candidates,
+    hotel_focus_radius_km,
     review_daily_schedule,
+    _attraction_identity_key,
     _reschedule_meals,
     schedule_tourism_activities,
     select_primary_hotel,
@@ -173,6 +176,48 @@ def _return_deadline_issue(
 def _normalize_poi_name(value: Any) -> str:
     """Normalize a model-selected POI name for exact identity matching."""
     return "".join(str(value or "").split()).casefold()
+
+
+def _local_target_identity_keys(value: dict[str, Any] | None) -> set[str]:
+    """Return provider-agnostic identity keys for a local attraction.
+
+    One attraction is commonly returned as its main gate, visitor centre or
+    branch label.  Local route construction uses this helper across calendar
+    days so a suffix/entrance variant cannot consume another day's sightseeing
+    slot as if it were a new place.
+    """
+    if not isinstance(value, dict):
+        return set()
+    place = value.get("place") if isinstance(value.get("place"), dict) else value
+    name = str((place or {}).get("name") or "").strip()
+    keys = {_normalize_poi_name(name), _attraction_identity_key(name)}
+    return {key for key in keys if key}
+
+
+def _local_day_candidate_pool(
+    selected_candidates: list[dict[str, Any]],
+    day_index: int,
+    used_target_keys: set[str],
+) -> list[dict[str, Any]]:
+    """Pick one day's unconsumed local targets without recycling attractions."""
+    def available(candidate: dict[str, Any]) -> bool:
+        return not (_local_target_identity_keys(candidate) & used_target_keys)
+
+    day_pool = [
+        candidate
+        for candidate in selected_candidates
+        if candidate.get("coverage_day_index") == day_index + 1
+        and available(candidate)
+    ]
+    day_pool.extend(
+        candidate
+        for candidate in selected_candidates
+        if candidate not in day_pool
+        and not (candidate.get("user_required") or candidate.get("user_confirmed"))
+        and not candidate.get("coverage_day_index")
+        and available(candidate)
+    )
+    return day_pool
 
 
 def _poi_name_matches(requested: Any, candidate: Any) -> bool:
@@ -1066,9 +1111,74 @@ def build_planning_graph(
                             }
                         )
                     return selected
-                # Never manufacture a timetable when every provider failed.
-                # A requested flight/train without a real service number is
-                # not an executable route and must not enter later planning.
+                # A ferry is a physical cross-water transfer, not an AMap road
+                # route. If the timetable search is unavailable, first ask
+                # the map service for an integrated public-transit result (it
+                # may include a local shuttle/terminal connection). If that
+                # also fails, keep an estimated ferry stage with no sea-road
+                # geometry so the itinerary remains usable and the missing
+                # ticket is shown as a confirmation reminder. Flights/trains
+                # remain strict: without a real service number we must not
+                # invent a ticket.
+                if "ferry" in intercity_order:
+                    transit_route = await _route(
+                        registry,
+                        leg_origin,
+                        leg_destination,
+                        state["trip_id"],
+                        preferred_mode="transit",
+                        fallback_modes=["transit"],
+                    )
+                    if (
+                        transit_route.get("success")
+                        and isinstance(transit_route.get("data"), dict)
+                        and transit_route["data"].get("selected_mode") == "transit"
+                    ):
+                        warnings.append(
+                            {
+                                "code": "FERRY_PUBLIC_TRANSIT_FALLBACK",
+                                "message": "轮渡班次暂不可用，已切换为公共交通接驳结果；请确认码头与船班",
+                                "severity": "warning",
+                            }
+                        )
+                        return transit_route
+                    if leg_origin.get("coordinates") and leg_destination.get("coordinates"):
+                        warnings.append(
+                            {
+                                "code": "FERRY_ESTIMATED_FALLBACK",
+                                "message": "轮渡班次暂不可用，已保留无海上道路轨迹的估算轮渡阶段",
+                                "severity": "warning",
+                            }
+                        )
+                        return _estimated_ferry_route(
+                            leg_origin,
+                            leg_destination,
+                            travel_date=travel_date,
+                            requested_departure=requested_departure,
+                            arrival_deadline=arrival_deadline,
+                        )
+                if leg_origin.get("coordinates") and leg_destination.get("coordinates"):
+                    warnings.append(
+                        {
+                            "code": f"{intercity_order[0].upper()}_ESTIMATED_FALLBACK",
+                            "message": (
+                                f"未取得可核对的{_intercity_mode_label(intercity_order[0])}，"
+                                "已保留估算交通阶段；班次确认后可一键替换"
+                            ),
+                            "severity": "warning",
+                        }
+                    )
+                    return _estimated_scheduled_route(
+                        leg_origin,
+                        leg_destination,
+                        mode=intercity_order[0],
+                        travel_date=travel_date,
+                        requested_departure=requested_departure,
+                        arrival_deadline=arrival_deadline,
+                    )
+                # No coordinates means even an honest estimate cannot be
+                # placed on the map. Keep the structured failure for the
+                # clarification/error path instead of inventing an endpoint.
                 last_route.setdefault("warnings", []).append(
                     f"未从多个班次数据源取得可核对的{_intercity_mode_label(intercity_order[0])}"
                 )
@@ -2480,6 +2590,10 @@ def build_planning_graph(
         attraction_candidates = state.get("tourism_candidates", {}).get(
             "attractions", []
         )
+        local_focus_radius_km = _destination_focus_radius(
+            destination,
+            explicit_local=bool(request.get("stay_only_at_destination")),
+        )
         # Pick the same comfortable base that the tourism scheduler will use.
         # Local movement must be built around that hotel; otherwise the cards
         # can show an overnight property while the route still starts from a
@@ -2493,16 +2607,13 @@ def build_planning_graph(
                 for item in request.get("must_visit", [])
                 if isinstance(item, dict) and str(item.get("name") or "").strip()
             },
+            max_distance_km=hotel_focus_radius_km(destination, request),
         )
         local_base = (primary_hotel or {}).get("place") or destination
         # A semantic request such as “三天都在九宫山，不去其他地方” must not
         # reuse stale candidates from the origin city or a previous plan. The
         # same locality boundary is also used for a named scenic anchor (for
         # example a two-day lake trip), while city requests remain broad.
-        local_focus_radius_km = _destination_focus_radius(
-            destination,
-            explicit_local=bool(request.get("stay_only_at_destination")),
-        )
         if local_focus_radius_km is not None:
             destination_city = str(destination.get("city") or destination.get("name") or "").strip()
             destination_point = destination.get("coordinates")
@@ -2539,18 +2650,20 @@ def build_planning_graph(
                     filtered_candidates.append(candidate)
             attraction_candidates = filtered_candidates
         attraction_candidates = deduplicate_attraction_candidates(attraction_candidates)
+        local_route_warnings: list[dict[str, Any]] = []
         if not attraction_candidates:
-            return {
-                "local_routes": [],
-                "warnings": [
-                    *state.get("warnings", []),
-                    {
-                        "code": "LOCAL_MOBILITY_UNAVAILABLE",
-                        "message": "目的地周边 POI 暂不可用，未生成本地接驳阶段",
-                        "severity": "warning",
-                    },
-                ],
-            }
+            # Search/ranking outages must not erase the transport skeleton.
+            # Keep one connected hotel-area/free-time node per calendar day;
+            # this gives train/ferry users a usable itinerary and lets the
+            # user add a researched place later. The missing POIs remain a
+            # reminder instead of becoming a blocking route error.
+            local_route_warnings.append(
+                {
+                    "code": "LOCAL_POI_SEARCH_DEGRADED",
+                    "message": "目的地景点候选暂不可用，已保留酒店与公共交通骨架；恢复数据后可补充景点",
+                    "severity": "warning",
+                }
+            )
         day_count = len(state["day_plans"])
         # Match local route capacity to the researched highlight set.  A
         # destination with twelve named highlights over four days gets three
@@ -2599,7 +2712,7 @@ def build_planning_graph(
             return_candidates=True,
         )
         if not selected_candidates:
-            return {"local_routes": []}
+            selected_candidates = []
 
         # Keep local movement consistent with the trip's transport choice.
         # Self-drive requests must not silently switch to public transit once
@@ -2876,39 +2989,15 @@ def build_planning_graph(
         local_routes: list[dict[str, Any]] = []
         used_target_names: set[str] = set()
         for day_index in range(day_count):
-            day_pool = [
-                candidate
-                for candidate in selected_candidates
-                if candidate.get("coverage_day_index") == day_index + 1
-                and _normalize_poi_name(candidate.get("place", {}).get("name"))
-                not in used_target_names
-            ]
-            day_pool.extend(
-                candidate
-                for candidate in selected_candidates
-                if candidate not in day_pool
-                and not (
-                    candidate.get("user_required") or candidate.get("user_confirmed")
-                )
-                and not candidate.get("coverage_day_index")
-                and _normalize_poi_name(candidate.get("place", {}).get("name"))
-                not in used_target_names
+            day_pool = _local_day_candidate_pool(
+                selected_candidates,
+                day_index,
+                used_target_names,
             )
-            # A small destination may expose fewer unique POIs than the
-            # number of comfortable sightseeing legs. Reuse only
-            # non-researched fallback places in that case; a source-backed
-            # highlight is never repeated until the full researched set has
-            # had a chance to enter the itinerary.
-            day_pool.extend(
-                candidate
-                for candidate in selected_candidates
-                if candidate not in day_pool
-                and not candidate.get("destination_research_priority")
-                and not (
-                    candidate.get("user_required") or candidate.get("user_confirmed")
-                )
-                and not candidate.get("coverage_day_index")
-            )
+            # Never recycle an attraction simply to fill a later day.  A
+            # sparse/failed search is represented as a connected free-time
+            # placeholder; the user can add another verified place instead of
+            # seeing the same rafting/park card repeated across the itinerary.
             day_targets = _select_itinerary_places(
                 day_pool,
                 destination,
@@ -2997,7 +3086,7 @@ def build_planning_graph(
                         }
                     )
                     anchor = target
-                    used_target_names.add(_normalize_poi_name(target.get("name")))
+                    used_target_names.update(_local_target_identity_keys({"place": target}))
                     route_sequence += 1
                 elif target:
                     fallback_mode = _safe_fallback_local_mode(
@@ -3021,7 +3110,7 @@ def build_planning_graph(
                         }
                     )
                     anchor = target
-                    used_target_names.add(_normalize_poi_name(target.get("name")))
+                    used_target_names.update(_local_target_identity_keys({"place": target}))
                     route_sequence += 1
             if not _same_place(anchor, local_base):
                 return_distance = _distance_between_places(anchor, local_base)
@@ -3065,6 +3154,7 @@ def build_planning_graph(
         )
         return {
             "local_routes": local_routes,
+            "warnings": [*state.get("warnings", []), *local_route_warnings],
             "sources": [
                 *state.get("sources", []),
                 *[
@@ -3125,6 +3215,10 @@ def build_planning_graph(
                 for item in request.get("must_visit", [])
                 if isinstance(item, dict) and str(item.get("name") or "").strip()
             },
+            max_distance_km=hotel_focus_radius_km(
+                request.get("destination"),
+                request,
+            ),
         )
         hotel_place = (hotel_base or {}).get("place") or request["destination"]
         # The first scheduled leg may start at an airport/station rather than
@@ -4094,6 +4188,7 @@ def build_planning_graph(
                     stage.destination.model_dump(mode="json"),
                 )
             ]
+            walk_minutes, walk_distance_km = walking_totals(stages)
             plan = DayPlan(
                 id=f"day_{index + 1}",
                 day_index=index + 1,
@@ -4105,9 +4200,8 @@ def build_planning_graph(
                 total_drive_minutes=sum(
                     stage.duration_minutes for stage in stages if stage.mode == "driving"
                 ),
-                total_walk_minutes=sum(
-                    stage.duration_minutes for stage in stages if stage.mode == "walking"
-                ),
+                total_walk_minutes=walk_minutes,
+                total_walk_distance_km=walk_distance_km,
             )
             plans.append(plan.model_dump(mode="json"))
         return {
@@ -4123,12 +4217,21 @@ def build_planning_graph(
             "正在按各阶段预计抵达时间匹配小时天气",
             82,
             event="tool_started",
-            tool="open_meteo.forecast",
+            tool=(
+                "weather.multi_source"
+                if "weather.multi_source" in registry.names()
+                else "open_meteo.forecast"
+            ),
         )
         plans = state.get("day_plans", [])
         weather_cache: dict[tuple[float, float, int], dict[str, Any] | None] = {}
         weather_sources: list[dict[str, Any]] = []
         now = datetime.now(SHANGHAI)
+        weather_skill = (
+            "weather.multi_source"
+            if "weather.multi_source" in registry.names()
+            else "open_meteo.forecast"
+        )
         for day in plans:
             for stage in day.get("stages", []):
                 coordinates = stage["destination"].get("coordinates")
@@ -4147,7 +4250,7 @@ def build_planning_graph(
                 key = (coordinates["longitude"], coordinates["latitude"], forecast_days)
                 if key not in weather_cache:
                     result = await registry.execute(
-                        "open_meteo.forecast",
+                        weather_skill,
                         {
                             "latitude": coordinates["latitude"],
                             "longitude": coordinates["longitude"],
@@ -4161,6 +4264,31 @@ def build_planning_graph(
                         if result.success and isinstance(result.data, dict)
                         else None
                     )
+                    # The multi-source adapter already fans out to several
+                    # public providers. Keep one direct retry for a malformed
+                    # aggregate response so a transient wrapper/cache issue
+                    # cannot erase weather from every route card.
+                    if weather_cache[key] is None and weather_skill != "open_meteo.forecast":
+                        fallback_result = await registry.execute(
+                            "open_meteo.forecast",
+                            {
+                                "latitude": coordinates["latitude"],
+                                "longitude": coordinates["longitude"],
+                                "forecast_days": forecast_days,
+                                "timezone": "Asia/Shanghai",
+                            },
+                            SkillContext(trip_id=state["trip_id"]),
+                        )
+                        weather_cache[key] = (
+                            fallback_result.data
+                            if fallback_result.success
+                            and isinstance(fallback_result.data, dict)
+                            else None
+                        )
+                        weather_sources.extend(
+                            item.model_dump(mode="json")
+                            for item in fallback_result.sources
+                        )
                     weather_sources.extend(
                         item.model_dump(mode="json") for item in result.sources
                     )
@@ -4212,7 +4340,7 @@ def build_planning_graph(
             "阶段天气匹配完成",
             86,
             event="tool_completed",
-            tool="open_meteo.forecast",
+            tool=weather_skill,
         )
         return {
             "day_plans": plans,
@@ -4513,6 +4641,10 @@ def build_planning_graph(
                     for item in request.get("must_visit", [])
                     if isinstance(item, dict) and str(item.get("name") or "").strip()
                 },
+                max_distance_km=hotel_focus_radius_km(
+                    request.get("destination"),
+                    request,
+                ),
             )
             hotel_place = (hotel_base or {}).get("place") or request.get("destination")
             if hotel_place:
@@ -4580,8 +4712,7 @@ def build_planning_graph(
                             {
                                 "code": "REST_STOP_SCHEDULED",
                                 "message": (
-                                    f"continuity connector exceeds {connector_limit} minutes; "
-                                    "a driving rest stop is planned"
+                                    f"该接驳段超过 {connector_limit} 分钟，建议途中休息"
                                 ),
                                 "severity": "warning",
                                 "estimated": True,
@@ -4726,12 +4857,11 @@ def build_planning_graph(
                     if preferred_mode == "driving" and connector_minutes > connector_limit:
                         connector.setdefault("warnings", []).append(
                             {
-                                "code": "REST_STOP_SCHEDULED",
-                                "message": (
-                                    f"continuity connector exceeds {connector_limit} minutes; "
-                                    "a driving rest stop is planned"
-                                ),
-                                "severity": "warning",
+                            "code": "REST_STOP_SCHEDULED",
+                            "message": (
+                                f"该接驳段超过 {connector_limit} 分钟，建议途中休息"
+                            ),
+                            "severity": "warning",
                                 "estimated": True,
                             }
                         )
@@ -5203,10 +5333,9 @@ def build_planning_graph(
                     connector.setdefault("warnings", []).append(
                         {
                             "code": "REST_STOP_SCHEDULED",
-                            "message": (
-                                f"continuity connector exceeds {connector_limit} minutes; "
-                                "a driving rest stop is planned"
-                            ),
+                                "message": (
+                                    f"该接驳段超过 {connector_limit} 分钟，建议途中休息"
+                                ),
                             "severity": "warning",
                             "estimated": True,
                         }
@@ -5667,6 +5796,14 @@ async def _attach_scheduled_terminals(
     except (KeyError, TypeError, ValueError):
         return route
     distance_km = round(_haversine_km(origin_point, destination_point), 2)
+    if mode == "ferry":
+        # A ferry is not a road polyline. Keep terminal endpoints for the
+        # stage/card but intentionally omit geometry so the map never renders
+        # a misleading straight “highway” across the sea.
+        data["geometry"] = []
+        data["distance_km"] = distance_km
+        route["data"] = data
+        return route
     data["geometry"] = [
         {"longitude": origin_point.longitude, "latitude": origin_point.latitude},
         {"longitude": destination_point.longitude, "latitude": destination_point.latitude},
@@ -6348,6 +6485,175 @@ def _scheduled_route_result(
     }
 
 
+def _estimated_ferry_route(
+    origin: dict[str, Any],
+    destination: dict[str, Any],
+    *,
+    travel_date: date,
+    requested_departure: datetime | None = None,
+    arrival_deadline: datetime | None = None,
+) -> dict[str, Any]:
+    """Keep a ferry trip executable when no timetable source responds.
+
+    This is deliberately an *estimated transfer*, not a fabricated ticket:
+    there is no service number, price or claimed sailing time.  The route has
+    no road geometry, so the map shows the mainland/island endpoints without
+    drawing a misleading highway across the sea.  A visible warning asks the
+    traveller to confirm the actual port and sailing before departure.
+    """
+    origin_coordinates = origin.get("coordinates") or {}
+    destination_coordinates = destination.get("coordinates") or {}
+    try:
+        origin_point = RoutePoint(
+            longitude=float(origin_coordinates["longitude"]),
+            latitude=float(origin_coordinates["latitude"]),
+        )
+        destination_point = RoutePoint(
+            longitude=float(destination_coordinates["longitude"]),
+            latitude=float(destination_coordinates["latitude"]),
+        )
+        distance_km = round(_haversine_km(origin_point, destination_point), 2)
+    except (KeyError, TypeError, ValueError):
+        distance_km = 0.0
+    # Keep the estimate conservative for a short island crossing while
+    # avoiding an absurdly long duration when a region geocode is used.
+    duration_minutes = max(75, min(240, round(max(distance_km, 8.0) / 28.0 * 60) + 45))
+    departure = requested_departure
+    if departure is None and arrival_deadline is not None:
+        departure = arrival_deadline - timedelta(minutes=duration_minutes)
+    if departure is None:
+        departure = datetime.combine(
+            travel_date,
+            time(8, 0),
+            tzinfo=SHANGHAI,
+        )
+    if departure.tzinfo is None:
+        departure = departure.replace(tzinfo=SHANGHAI)
+    origin_name = str(origin.get("name") or "出发地").strip()
+    destination_name = str(destination.get("name") or "目的地").strip()
+    return {
+        "success": True,
+        "data": {
+            "selected_mode": "ferry",
+            "distance_km": distance_km,
+            "duration_minutes": duration_minutes,
+            "tolls_cny": 0,
+            "geometry": [],
+            "steps": [],
+            "transit_legs": [],
+            "traffic_summary": (
+                f"{origin_name}—{destination_name}轮渡班次暂未返回；"
+                "已保留码头接驳与岛上公共交通时间，请出发前确认实际港口、船班和车辆上岛规则"
+            ),
+            "estimated": True,
+            "service_status": "unavailable",
+            "departure_port": f"{origin_name}港口/码头（待确认）",
+            "arrival_port": f"{destination_name}港口/码头（待确认）",
+            "scheduled_departure_at": departure.isoformat(),
+            "scheduled_arrival_at": (departure + timedelta(minutes=duration_minutes)).isoformat(),
+            "service_number": None,
+            "ship_name": None,
+        },
+        "warnings": [
+            "轮渡班次源暂不可用，已保留估算轮渡阶段；请出发前确认具体船班与码头",
+        ],
+        "sources": [],
+    }
+
+
+def _estimated_scheduled_route(
+    origin: dict[str, Any],
+    destination: dict[str, Any],
+    *,
+    mode: str,
+    travel_date: date,
+    requested_departure: datetime | None = None,
+    arrival_deadline: datetime | None = None,
+) -> dict[str, Any]:
+    """Return a clearly-labelled transport estimate after all schedule fallbacks fail.
+
+    A missing ticket source should not erase the rest of a trip plan. This
+    record deliberately carries no service number/price and is marked
+    ``estimated``/``unavailable``; it only supplies a conservative clock
+    window for the planner. Rail and air use a geodesic connector for map
+    context, while ferry keeps an empty geometry in its dedicated helper.
+    """
+    origin_coordinates = origin.get("coordinates") or {}
+    destination_coordinates = destination.get("coordinates") or {}
+    try:
+        origin_point = RoutePoint(
+            longitude=float(origin_coordinates["longitude"]),
+            latitude=float(origin_coordinates["latitude"]),
+        )
+        destination_point = RoutePoint(
+            longitude=float(destination_coordinates["longitude"]),
+            latitude=float(destination_coordinates["latitude"]),
+        )
+        distance_km = round(_haversine_km(origin_point, destination_point), 2)
+    except (KeyError, TypeError, ValueError):
+        distance_km = 0.0
+        origin_point = destination_point = None
+    speed_kmh = {
+        "flight": 620.0,
+        "train": 210.0,
+        "ferry": 28.0,
+    }.get(mode, 80.0)
+    duration_minutes = max(45, round(max(distance_km, 1.0) / speed_kmh * 60) + 45)
+    departure = requested_departure
+    if departure is None and arrival_deadline is not None:
+        departure = arrival_deadline - timedelta(minutes=duration_minutes)
+    if departure is None:
+        departure = datetime.combine(travel_date, time(8, 0), tzinfo=SHANGHAI)
+    if departure.tzinfo is None:
+        departure = departure.replace(tzinfo=SHANGHAI)
+    origin_name = str(origin.get("name") or "出发地").strip()
+    destination_name = str(destination.get("name") or "目的地").strip()
+    label = {"flight": "航班", "train": "铁路班次", "ferry": "轮渡"}.get(mode, "交通班次")
+    terminal_fields = {
+        "flight": ("departure_airport", "arrival_airport", "机场"),
+        "train": ("departure_station", "arrival_station", "车站"),
+        "ferry": ("departure_port", "arrival_port", "码头"),
+    }
+    departure_field, arrival_field, terminal_suffix = terminal_fields.get(
+        mode,
+        ("departure_terminal", "arrival_terminal", "枢纽"),
+    )
+    geometry = []
+    if origin_point is not None and destination_point is not None and mode != "ferry":
+        geometry = [
+            {"longitude": origin_point.longitude, "latitude": origin_point.latitude},
+            {"longitude": destination_point.longitude, "latitude": destination_point.latitude},
+        ]
+    return {
+        "success": True,
+        "data": {
+            "selected_mode": mode,
+            "distance_km": distance_km,
+            "duration_minutes": duration_minutes,
+            "tolls_cny": 0,
+            "geometry": geometry,
+            "steps": [],
+            "traffic_summary": (
+                f"{label}数据源暂未返回可核对班次；已保留估算时间，"
+                f"请确认{origin_name}与{destination_name}的实际{terminal_suffix}和班次"
+            ),
+            "estimated": True,
+            "service_status": "unavailable",
+            departure_field: f"{origin_name}{terminal_suffix}待确认",
+            arrival_field: f"{destination_name}{terminal_suffix}待确认",
+            "scheduled_departure_at": departure.isoformat(),
+            "scheduled_arrival_at": (departure + timedelta(minutes=duration_minutes)).isoformat(),
+            "service_number": None,
+            "flight_number": None,
+            "train_number": None,
+        },
+        "warnings": [
+            f"{label}数据源暂不可用，已保留估算交通阶段；出发前请确认实际班次",
+        ],
+        "sources": [],
+    }
+
+
 async def _scheduled_route(
     registry: SkillRegistry,
     origin: dict[str, Any],
@@ -6374,6 +6680,8 @@ async def _scheduled_route(
     adapter_names = (
         ("flyai.flight", "sixapi.flight", "aviationstack.flight")
         if mode == "flight"
+        else ("flyai.train", "mcp12306.train", "freeapi.train")
+        if mode == "train"
         else (f"flyai.{mode}",)
     )
     results = await asyncio.gather(

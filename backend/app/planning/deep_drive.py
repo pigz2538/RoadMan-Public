@@ -6,6 +6,7 @@ from math import ceil, isfinite
 from typing import Any
 
 from ..domain.models import Activity, DayItemRef, EnergyEstimate, PlaceRef, PlanWarning
+from .metrics import walking_totals
 
 ELEVATED_ROUTE_THRESHOLD_M = 300.0
 # A long intercity drive is a calendar-spanning activity, not one oversized
@@ -418,11 +419,9 @@ def normalize_plan_calendar(plans: list[dict[str, Any]]) -> list[dict[str, Any]]
             for item in stages
             if item.get("mode") == "driving"
         )
-        day["total_walk_minutes"] = sum(
-            int(item.get("duration_minutes") or 0)
-            for item in stages
-            if item.get("mode") == "walking"
-        )
+        walk_minutes, walk_distance_km = walking_totals(stages)
+        day["total_walk_minutes"] = walk_minutes
+        day["total_walk_distance_km"] = walk_distance_km
     return plans
 
 

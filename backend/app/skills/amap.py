@@ -556,8 +556,26 @@ class AmapRouteAdapter(SkillAdapter):
         transfers: list[dict[str, Any]] = []
         transit_legs: list[dict[str, Any]] = []
         for segment in transit.get("segments", []):
-            for step in segment.get("walking", {}).get("steps", []):
+            walking = segment.get("walking") or {}
+            walking_steps = walking.get("steps") or []
+            for step in walking_steps:
                 geometry.extend(_polyline_points(step.get("polyline", "")))
+            walk_distance_m = float(walking.get("distance") or 0) or sum(
+                float(step.get("distance") or 0) for step in walking_steps
+            )
+            walk_duration_s = float(walking.get("duration") or 0) or sum(
+                float(step.get("duration") or 0) for step in walking_steps
+            )
+            if walk_distance_m > 0 or walk_duration_s > 0:
+                transit_legs.append(
+                    {
+                        "mode": "walk",
+                        "line_name": "步行接驳",
+                        "line_type": "walk",
+                        "duration_minutes": max(1, round(walk_duration_s / 60)),
+                        "distance_km": round(walk_distance_m / 1000, 2),
+                    }
+                )
             railway = segment.get("railway") or segment.get("rail") or {}
             for line in railway.get("spaces", []) if isinstance(railway, dict) else []:
                 transit_legs.append(

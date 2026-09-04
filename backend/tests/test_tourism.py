@@ -684,6 +684,91 @@ def test_primary_hotel_prefers_city_base_over_airport_or_station_property():
     assert selected["place"]["name"] == "维也纳国际酒店（宽窄巷子店）"
 
 
+def test_primary_hotel_rejects_far_property_for_scenic_anchor():
+    destination = {
+        "name": "九宫山",
+        "city": "通山县",
+        "destination_scope": "poi",
+        "coordinates": {"longitude": 114.57, "latitude": 29.39},
+    }
+    hotels = [
+        {
+            "place": {
+                "name": "城市远端舒适酒店",
+                "city": "咸宁市",
+                "coordinates": {"longitude": 114.30, "latitude": 29.85},
+            },
+            "rating": 4.8,
+        },
+    ]
+
+    selected = select_primary_hotel(
+        hotels,
+        destination,
+        [],
+        set(),
+        max_distance_km=50,
+    )
+
+    assert selected is None
+
+
+def test_scheduler_uses_destination_placeholder_when_scenic_hotels_are_far():
+    destination = {
+        "name": "九宫山",
+        "city": "通山县",
+        "destination_scope": "poi",
+        "coordinates": {"longitude": 114.57, "latitude": 29.39},
+    }
+    days = [
+        {
+            "id": "day_1",
+            "date": "2026-11-17",
+            "items": [],
+            "activities": [],
+            "stages": [],
+        },
+        {
+            "id": "day_2",
+            "date": "2026-11-18",
+            "items": [],
+            "activities": [],
+            "stages": [],
+        },
+    ]
+    candidates = {
+        "attractions": [],
+        "meals": [],
+        "hotels": [
+            {
+                "place": {
+                    "name": "机场附近舒适酒店",
+                    "city": "咸宁市",
+                    "coordinates": {"longitude": 114.30, "latitude": 29.85},
+                },
+                "rating": 4.8,
+            }
+        ],
+    }
+
+    scheduled = schedule_tourism_activities(
+        days,
+        candidates,
+        destination=destination,
+        trip_request={"destination_scope": "poi"},
+    )
+
+    hotel_names = [
+        item["place"]["name"]
+        for day in scheduled
+        for item in day["activities"]
+        if item["type"] == "hotel"
+    ]
+    assert hotel_names
+    assert all("机场附近" not in name for name in hotel_names)
+    assert all("九宫山" in name for name in hotel_names)
+
+
 def test_tourism_scheduler_never_places_destination_attraction_before_late_intercity_arrival():
     days = [
         {

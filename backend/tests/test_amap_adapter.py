@@ -67,7 +67,11 @@ def test_transit_path_keeps_lines_and_boarding_stops():
             "duration": "1800",
             "cost": "3",
             "segments": [{
-                "walking": {"steps": [{"polyline": "114.30,30.50;114.31,30.51"}]},
+                "walking": {
+                    "distance": "680",
+                    "duration": "540",
+                    "steps": [{"polyline": "114.30,30.50;114.31,30.51"}],
+                },
                 "bus": {"buslines": [{
                     "name": "2号线", "id": "line-2", "type": "地铁",
                     "departure_stop": {"name": "汉口站"},
@@ -80,9 +84,12 @@ def test_transit_path_keeps_lines_and_boarding_stops():
         },
         "/v3/direction/transit/integrated",
     )
-    assert result["transit_legs"][0]["line_name"] == "2号线"
-    assert result["transit_legs"][0]["departure_stop"] == "汉口站"
-    assert result["transit_legs"][0]["arrival_stop"] == "江汉路站"
+    assert result["transit_legs"][0]["mode"] == "walk"
+    assert result["transit_legs"][0]["duration_minutes"] == 9
+    assert result["transit_legs"][0]["distance_km"] == 0.68
+    assert result["transit_legs"][1]["line_name"] == "2号线"
+    assert result["transit_legs"][1]["departure_stop"] == "汉口站"
+    assert result["transit_legs"][1]["arrival_stop"] == "江汉路站"
     assert result["fare_cny"] == 3
 
 

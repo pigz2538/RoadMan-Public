@@ -466,6 +466,7 @@ class DayPlan(BaseModel):
     total_distance_km: float = Field(default=0, ge=0)
     total_drive_minutes: int = Field(default=0, ge=0)
     total_walk_minutes: int = Field(default=0, ge=0)
+    total_walk_distance_km: float = Field(default=0, ge=0)
     estimated_cost: MoneyRange | None = None
     weather_summary: str | None = None
     warnings: list[str] = Field(default_factory=list)

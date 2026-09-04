@@ -336,6 +336,16 @@ class RequirementExtractionAgent:
             "(today, tomorrow, the day after tomorrow, Monday, next Sunday/next week Sunday, this weekend) must also be "
             "resolved against Today. Phrases such as 今年暑假、最多三天、玩三天 are not "
             "calendar dates; leave both date fields null instead of inventing dates. "
+            "A named Chinese holiday is a concrete calendar anchor: 国庆节 means October 1 (National Day), "
+            "劳动节 means May 1, 元旦 means January 1. When the user says 国庆节假期 or 国庆假期, resolve the "
+            "official holiday window (October 1 through October 7) as start_date/end_date; do not ask for a date "
+            "that the holiday already determines. Lunar holidays such as 春节/中秋/端午/清明 must be resolved "
+            "from the lunar calendar for the current year; do not ask the user for their dates. "
+            "A duration bound such as 最多五天/玩三天/5 days is not a date pair by itself, but when combined "
+            "with a weekend or holiday it widens the window: 下个月找个周末去杭州，最多五天 means a Saturday "
+            "start with an end date five days later (Saturday through Wednesday), not a two-day weekend. "
+            "When the user names a weekend (周末/this weekend/next weekend) without a second weekday, "
+            "start_date is the Saturday and end_date is the Sunday unless a duration bound widens it. "
             "Normalize Chinese time phrases: 中午=12:00, 下午=14:00, 晚上=19:00. "
             "Understand relative weekdays and ranges as a pair: 周一出发、周五回来 means a Monday-to-Friday "
             "window in the same upcoming week; 周末 means Saturday through Sunday; do not return an end date "
@@ -393,9 +403,15 @@ class RequirementExtractionAgent:
             merged = _merge_extraction(structural, parsed)
             if isinstance(parsed, dict):
                 # Literal calendar tokens are hard user constraints. Do not
-                # let the Agent hallucinate another year.
+                # let the Agent hallucinate another year.  Dates inferred from
+                # a weekend/month/holiday phrase are drafts and must not
+                # override a semantic Agent answer.
+                draft_date_fields = set(structural.get("_inferred_date_fields") or [])
                 for date_field in ("start_date", "end_date"):
-                    if structural.get(date_field):
+                    if (
+                        structural.get(date_field)
+                        and date_field not in draft_date_fields
+                    ):
                         merged[date_field] = structural[date_field]
                 # Explicit clock windows are hard constraints just like
                 # literal calendar dates.  Do not let a partial/cloud Agent
@@ -527,6 +543,7 @@ class RequirementExtractionAgent:
                     merged["_intent_repair_attempted"] = True
                 if destination_adjudication_used:
                     merged["_destination_adjudication_used"] = True
+            merged.pop("_inferred_date_fields", None)
             merged["_source_raw_text"] = raw_text
             return merged
         except (httpx.HTTPError, ValueError, TypeError, json.JSONDecodeError):
@@ -1927,6 +1944,142 @@ def _chinese_weekday_date(match: re.Match[str], today: date) -> date:
     return candidate
 
 
+def _extract_duration_days(raw_text: str) -> int | None:
+    """Extract an explicit trip-length bound such as 最多五天/玩三天/5 days.
+
+    Returns the number of calendar days (inclusive) or None when the text
+    carries no duration.  Only unambiguous duration phrases are matched;
+    intent semantics stay with the Requirement Agent.
+    """
+    text = re.sub(r"\s+", " ", raw_text or "").strip()
+    if not text:
+        return None
+    patterns = (
+        r"(?:最多|至多|不超过|最多不超过|up\s+to|at\s+most|no\s+more\s+than)\s*"
+        r"(?P<num>\d{1,2}|[一二两三四五六七八九十]+)\s*(?:天|日|days?|nights?)",
+        r"(?:玩|待|游玩|旅行|行程|旅游|度假|stay|spend|trip|travel)\s*"
+        r"(?P<num>\d{1,2}|[一二两三四五六七八九十]+)\s*(?:天|日|days?|nights?)",
+        r"(?P<num>\d{1,2}|[一二两三四五六七八九十]+)\s*(?:天|日|days?|nights?)\s*(?:行程|旅行|旅游|度假|trip|travel|stay)",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if not match:
+            continue
+        raw_num = match.group("num")
+        if raw_num.isdigit():
+            days = int(raw_num)
+        else:
+            days = _chinese_numeral_to_int(raw_num)
+        if 1 <= days <= 30:
+            return days
+    return None
+
+
+def _chinese_numeral_to_int(value: str) -> int:
+    """Convert a small Chinese numeral (五/十/十五/二十) to an integer."""
+    digits = {
+        "一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5,
+        "六": 6, "七": 7, "八": 8, "九": 9,
+    }
+    if value == "十":
+        return 10
+    if value.startswith("十"):
+        return 10 + digits.get(value[1], 0)
+    if value.endswith("十"):
+        return digits.get(value[0], 0) * 10
+    total = 0
+    for char in value:
+        total += digits.get(char, 0)
+    return total
+
+
+# Fixed-date Chinese public holidays.  The Requirement Agent resolves the
+# actual travel window; this table only lets the deterministic fallback
+# answer ``国庆节`` when the Agent is unavailable.
+_CHINESE_FIXED_HOLIDAYS: dict[str, tuple[int, int]] = {
+    "元旦": (1, 1),
+    "劳动节": (5, 1),
+    "国庆节": (10, 1),
+    "国庆": (10, 1),
+    "建军节": (8, 1),
+    "儿童节": (6, 1),
+    "妇女节": (3, 8),
+    "植树节": (3, 12),
+    "教师节": (9, 10),
+    "圣诞节": (12, 25),
+    "情人节": (2, 14),
+    "万圣节": (10, 31),
+    "感恩节": (11, 1),
+}
+
+
+def _holiday_window(raw_text: str, today: date) -> list[date]:
+    """Resolve a named holiday to a concrete date window.
+
+    Fixed-date holidays map to their calendar date.  Lunar holidays
+    (春节/中秋/端午/清明) cannot be resolved without a lunar calendar and are
+    left to the Requirement Agent; the fallback returns nothing for them.
+    """
+    text = raw_text or ""
+    for name, (month, day) in _CHINESE_FIXED_HOLIDAYS.items():
+        if re.search(name, text):
+            year = today.year
+            try:
+                holiday = date(year, month, day)
+            except ValueError:
+                continue
+            if holiday < today:
+                holiday = date(year + 1, month, day)
+            return [holiday, holiday + timedelta(days=4)]
+    return []
+
+
+def _next_month_calendar_window(raw_text: str, today: date) -> list[date]:
+    """Resolve a prospective ``下个月/next month`` weekend or weekday pair.
+
+    ``周末`` on its own means the next upcoming weekend, but a phrase such as
+    ``下个月找个周末`` must not be silently rewritten to this week. This helper
+    only handles calendar structure; place and intent semantics remain with
+    the Requirement Agent. When no particular weekend is named, the first
+    Saturday/Sunday of the target month is a stable draft that can be changed
+    during confirmation.
+    """
+    text = raw_text or ""
+    month_match = re.search(r"下个月|下月|下個月|next\s+month", text, re.IGNORECASE)
+    if not month_match:
+        return []
+    year = today.year + (1 if today.month == 12 else 0)
+    month = 1 if today.month == 12 else today.month + 1
+    first = date(year, month, 1)
+    tail = text[month_match.end() :]
+    if re.search(r"周末|週末|本月末|weekend", tail, re.IGNORECASE):
+        saturday = first + timedelta(days=(5 - first.weekday()) % 7)
+        return [saturday, saturday + timedelta(days=1)]
+
+    # Handle ``下个月周三到周五`` and English ``next month Wednesday-Friday``
+    # without maintaining a city or destination vocabulary.
+    chinese_tokens = re.findall(r"(?:周|星期|禮拜)([一二三四五六日天])", tail)
+    english_tokens = re.findall(
+        r"\b(mon(?:day)?|tue(?:s(?:day)?)?|wed(?:nesday)?|thu(?:r(?:sday)?)?|"
+        r"fri(?:day)?|sat(?:urday)?|sun(?:day)?)\b",
+        tail,
+        re.IGNORECASE,
+    )
+    chinese_index = {"一": 0, "二": 1, "三": 2, "四": 3, "五": 4, "六": 5, "日": 6, "天": 6}
+    english_index = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6}
+    weekday_indexes: list[int] = [chinese_index[token] for token in chinese_tokens]
+    weekday_indexes.extend(english_index[token.casefold()[:3]] for token in english_tokens)
+    if not weekday_indexes:
+        return []
+    dates: list[date] = []
+    for weekday in weekday_indexes[:2]:
+        candidate = first + timedelta(days=(weekday - first.weekday()) % 7)
+        if dates and candidate <= dates[-1]:
+            candidate += timedelta(days=7)
+        dates.append(candidate)
+    return dates
+
+
 def extract_structural_constraints(raw_text: str, today: date) -> dict[str, Any]:
     """Extract only deterministic calendar structure for Agent fallback/validation.
 
@@ -2013,7 +2166,18 @@ def extract_structural_constraints(raw_text: str, today: date) -> dict[str, Any]
     weekend_requested = bool(
         re.search(r"周末|本周末|这个周末|this\s+weekend|weekend", raw_text, re.IGNORECASE)
     )
-    if weekend_requested:
+    duration_days = _extract_duration_days(raw_text)
+    # Dates derived from a weekend/month/holiday phrase are drafts, not hard
+    # user constraints: “下个月找个周末” does not pin a specific weekend and
+    # “国庆节假期” leaves the exact window to the Agent.  The Requirement
+    # Agent may resolve them differently; the caller skips the literal
+    # override for these fields.
+    draft_fields: set[str] = set()
+    month_dates = _next_month_calendar_window(raw_text, today)
+    if month_dates:
+        weekday_dates = month_dates
+        draft_fields.update({"start_date", "end_date"})
+    elif weekend_requested:
         monday = today - timedelta(days=today.weekday())
         saturday = monday + timedelta(days=5)
         if saturday < today:
@@ -2022,6 +2186,11 @@ def extract_structural_constraints(raw_text: str, today: date) -> dict[str, Any]
         # window over a second regex match for 周日 so it cannot become a
         # Sunday-to-next-Saturday range.
         weekday_dates = [saturday, saturday + timedelta(days=1)]
+        # A plain “this weekend” is already an explicit two-day calendar
+        # window.  It becomes an inferred draft only when a duration asks us
+        # to extend it beyond Sunday.
+        if duration_days:
+            draft_fields.update({"start_date", "end_date"})
     if weekday_dates:
         weekday_dates = weekday_dates[:2]
         had_numeric_start = "start_date" in result
@@ -2047,6 +2216,35 @@ def extract_structural_constraints(raw_text: str, today: date) -> dict[str, Any]
                 result["end_date"] = end_value.isoformat()
             except (TypeError, ValueError):
                 pass
+    # A duration bound such as “最多五天” widens an inferred weekend window
+    # (下个月找个周末，最多五天 → Saturday through the following Wednesday).
+    # It must never shrink an explicit date range, so it only applies when
+    # the start date came from the weekend/month inference above.
+    if (
+        duration_days
+        and "start_date" in result
+        and ("end_date" not in result or "start_date" in draft_fields)
+    ):
+        try:
+            start_value = date.fromisoformat(str(result["start_date"]))
+            result["end_date"] = (start_value + timedelta(days=duration_days - 1)).isoformat()
+            draft_fields.add("end_date")
+        except (TypeError, ValueError):
+            pass
+    # A named holiday such as 国庆节 is a concrete calendar anchor.  The
+    # Requirement Agent resolves the real travel window; this fallback only
+    # answers when the Agent is unavailable.  Lunar holidays (春节/中秋/端午)
+    # are left to the Agent because they cannot be resolved deterministically.
+    holiday_dates = _holiday_window(raw_text, today)
+    if holiday_dates and "start_date" not in result:
+        result["start_date"] = holiday_dates[0].isoformat()
+        draft_fields.add("start_date")
+        if "end_date" not in result:
+            result["end_date"] = holiday_dates[1].isoformat()
+            draft_fields.add("end_date")
+
+    if draft_fields:
+        result["_inferred_date_fields"] = sorted(draft_fields)
 
     return result
 

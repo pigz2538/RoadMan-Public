@@ -672,6 +672,64 @@ def _place_distance_km(left: dict[str, Any] | None, right: dict[str, Any] | None
         return None
 
 
+# A named scenic anchor is a local stay, not an invitation to book an
+# airport/railway hotel or a property in a different city.  Keep these
+# semantic radii in the tourism module as well as the route graph so direct
+# scheduler calls and the full graph make the same lodging decision.  The
+# values are deliberately generic; the destination scope and resolved
+# coordinates decide whether they apply.
+SCENIC_HOTEL_FOCUS_RADIUS_KM = 50.0
+EXPLICIT_LOCAL_HOTEL_FOCUS_RADIUS_KM = 35.0
+
+
+def hotel_focus_radius_km(
+    destination: dict[str, Any] | None,
+    trip_request: dict[str, Any] | None = None,
+) -> float | None:
+    """Return a semantic lodging radius for a local/scenic destination.
+
+    City/province/region trips intentionally keep a broad lodging search so
+    the base can sit between several famous landmarks.  A named POI (or an
+    explicit request to stay in one place) instead needs a nearby base; when
+    no verified hotel falls inside the radius the caller should use a visible
+    estimated placeholder at the destination rather than silently selecting
+    a far-away property.  No destination names are hard-coded here.
+    """
+    if not destination:
+        return None
+    request = trip_request or {}
+    if bool(request.get("stay_only_at_destination")) or bool(
+        destination.get("stay_only_at_destination")
+    ):
+        return EXPLICIT_LOCAL_HOTEL_FOCUS_RADIUS_KM
+    scope = str(
+        request.get("destination_scope")
+        or destination.get("destination_scope")
+        or "unknown"
+    ).strip().lower()
+    if scope == "poi":
+        return SCENIC_HOTEL_FOCUS_RADIUS_KM
+    level = str(destination.get("geocode_level") or "").strip().lower()
+    if level in {"poi", "兴趣点", "门址", "门牌", "street", "road"}:
+        return SCENIC_HOTEL_FOCUS_RADIUS_KM
+    # Some providers omit scope/level but return a named anchor whose
+    # administrative city differs from the label. Treat it as local while
+    # preserving broad city requests such as “成都”/“成都市”.
+    name = re.sub(
+        r"(?:特别行政区|自治区|自治州|地区|省|市|县|区|盟|旗)$",
+        "",
+        _attraction_name_key(destination.get("name")),
+    )
+    city = re.sub(
+        r"(?:特别行政区|自治区|自治州|地区|省|市|县|区|盟|旗)$",
+        "",
+        _attraction_name_key(destination.get("city")),
+    )
+    if name and city and name != city:
+        return SCENIC_HOTEL_FOCUS_RADIUS_KM
+    return None
+
+
 def _candidate_matches_route(
     candidate: dict[str, Any],
     stages: list[dict[str, Any]],
@@ -763,6 +821,8 @@ def select_primary_hotel(
     destination: dict[str, Any] | None,
     attractions: list[dict[str, Any]] | None = None,
     required_names: set[str] | None = None,
+    *,
+    max_distance_km: float | None = None,
 ) -> dict[str, Any] | None:
     """Choose a comfortable base hotel for the whole destination stay.
 
@@ -781,6 +841,31 @@ def select_primary_hotel(
     confirmed = [item for item in pool if item.get("user_confirmed")]
     if confirmed:
         pool = confirmed
+    if max_distance_km is not None and destination:
+        # A provider can return a perfectly valid hotel that is nevertheless
+        # useless for a named scenic stay.  Filter by the resolved destination
+        # coordinate before ranking; an explicitly confirmed/requested hotel
+        # is retained because it represents a deliberate user choice.
+        try:
+            focus_radius = max(1.0, float(max_distance_km))
+        except (TypeError, ValueError):
+            focus_radius = None
+        if focus_radius is not None:
+            nearby_pool = []
+            for item in pool:
+                if item.get("user_confirmed") or item.get("user_requested"):
+                    nearby_pool.append(item)
+                    continue
+                distance = _place_distance_km(item.get("place"), destination)
+                if distance is not None and distance <= focus_radius:
+                    nearby_pool.append(item)
+            # Do not choose an unlocated/far provider hit merely because it is
+            # the only record. Returning None lets the caller create an
+            # estimated lodging point exactly at the destination and expose a
+            # visible “需预订/待核验” reminder.
+            if not nearby_pool:
+                return None
+            pool = nearby_pool
     anchors: list[dict[str, Any]] = []
     if destination:
         anchors.append(destination)
@@ -903,6 +988,20 @@ def schedule_tourism_activities(
     # passes the resolved destination so a local estimated hotel can be used
     # instead of creating a midnight arrival or a map jump.
     if destination and hotels:
+        focus_radius = hotel_focus_radius_km(destination, trip_request)
+        if focus_radius is not None:
+            focused_hotels = []
+            for item in hotels:
+                if item.get("user_confirmed") or item.get("user_requested"):
+                    focused_hotels.append(item)
+                    continue
+                distance = _place_distance_km(item.get("place"), destination)
+                if distance is not None and distance <= focus_radius:
+                    focused_hotels.append(item)
+            # For a scenic/local anchor, an unlocated or distant record is
+            # not an acceptable daily base. An empty focused pool deliberately
+            # falls through to the destination-centred estimated placeholder.
+            hotels = focused_hotels
         nearest = min(
             (
                 _place_distance_km(item.get("place"), destination)
@@ -931,8 +1030,16 @@ def schedule_tourism_activities(
                 if fallback_place:
                     break
         if fallback_place.get("coordinates"):
+            focus_radius = hotel_focus_radius_km(destination, trip_request)
             fallback_name = str(
-                fallback_place.get("city") or fallback_place.get("name") or "目的地"
+                (
+                    fallback_place.get("name")
+                    if focus_radius is not None
+                    else fallback_place.get("city")
+                )
+                or fallback_place.get("city")
+                or fallback_place.get("name")
+                or "目的地"
             ).strip()
             hotels = [
                 {

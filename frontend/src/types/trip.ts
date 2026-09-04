@@ -155,6 +155,8 @@ export interface DayPlan {
   weather_summary?: string
   total_distance_km: number
   total_drive_minutes: number
+  total_walk_minutes?: number
+  total_walk_distance_km?: number
 }
 
 export interface Trip {

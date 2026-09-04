@@ -14,6 +14,7 @@ from .exclusions import (
     normalize_exclusion_name,
     remember_exclusion,
 )
+from .metrics import walking_totals
 from .tourism import activity_checks
 
 
@@ -688,9 +689,9 @@ async def recompute_and_verify_patch(
     day.total_drive_minutes = sum(
         item.duration_minutes for item in day.stages if item.mode == "driving"
     )
-    day.total_walk_minutes = sum(
-        item.duration_minutes for item in day.stages if item.mode == "walking"
-    )
+    walk_minutes, walk_distance_km = walking_totals(day.stages)
+    day.total_walk_minutes = walk_minutes
+    day.total_walk_distance_km = walk_distance_km
     day_dicts = [item.model_dump(mode="json") for item in trip.days]
     issues = [
         *verify_tourism_plan(day_dicts, state.get("tourism_candidates", {})),

@@ -1018,6 +1018,9 @@ watch(bottomPanelCollapsed, (collapsed) => window.localStorage.setItem(panelStor
           <div class="day-summary">
             <strong>{{ store.currentDay.title }}</strong>
             <span>{{ store.currentDay.total_distance_km }} km · {{ formatDuration(store.currentDay.total_drive_minutes) }}</span>
+            <span v-if="store.currentDay.total_walk_minutes || store.currentDay.total_walk_distance_km">
+              步行约 {{ store.currentDay.total_walk_distance_km || 0 }} km · {{ formatDuration(store.currentDay.total_walk_minutes || 0) }}
+            </span>
             <span>{{ forecastWeatherLabel(store.currentDay.weather_summary) }}</span>
           </div>
           <section class="day-timeline" aria-label="全天时间线">
