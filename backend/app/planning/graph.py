@@ -84,6 +84,28 @@ RETURN_DEADLINE_SILENT_TOLERANCE_MINUTES = 15
 PLACE_CONTINUITY_TOLERANCE_KM = 3.0
 
 
+def _best_effort_delivery_allowed(
+    issues: list[dict[str, Any]],
+    repair_attempts: int,
+    *,
+    verification_reached: bool = True,
+) -> bool:
+    """Decide whether unresolved checks can be delivered as reminders.
+
+    The planner owns timing/continuity/comfort repairs. Once that bounded
+    repair budget is exhausted, every issue reported by the verification node
+    is delivered as a reminder alongside the current draft. Missing required
+    fields are handled before this node; unexpected exceptions still abort
+    the run in the runner.
+    """
+    has_blocker = any(item.get("severity") == "blocker" for item in issues)
+    return bool(
+        has_blocker
+        and repair_attempts >= MAX_AUTO_REPAIR_ATTEMPTS
+        and verification_reached
+    )
+
+
 def _local_today() -> date:
     """Use the product timezone instead of the container's UTC calendar."""
     return datetime.now(SHANGHAI).date()
@@ -4959,14 +4981,30 @@ def build_planning_graph(
         # constraint instead of showing the first warning as the failure.
         issues.sort(key=lambda item: 0 if item.get("severity") == "blocker" else 1)
         repair_attempts = int(state.get("repair_attempts") or 0)
+        blockers = [item for item in issues if item.get("severity") == "blocker"]
+        # Once this verifier has run three repair passes, do not block delivery
+        # on an internal planning check. Keep every issue in the result so it
+        # is visible as an actionable reminder; missing required input is
+        # handled by the clarification branch before this node.
+        repair_exhausted = _best_effort_delivery_allowed(
+            issues,
+            repair_attempts,
+        )
+        # A draft that reached verification is useful even when a provider
+        # returned incomplete data. Deliver the current result and surface
+        # every unresolved check as a reminder instead of trapping the
+        # traveller in a failure dialog; unexpected code exceptions still
+        # bypass this node and are handled by the runner.
+        delivery_mode = "best_effort" if repair_exhausted else "verified"
         return {
             "day_plans": normalized_days,
             "verification_result": {
-                "passed": not any(item["severity"] == "blocker" for item in issues),
+                "passed": not blockers or repair_exhausted,
                 "issues": issues,
                 "auto_repair_attempts": repair_attempts,
-                "auto_repair_exhausted": bool(issues)
-                and repair_attempts >= MAX_AUTO_REPAIR_ATTEMPTS,
+                "auto_repair_exhausted": repair_exhausted,
+                "delivery_mode": delivery_mode,
+                "accepted_with_warnings": repair_exhausted,
                 "auto_repair_history": state.get("repair_history", []),
             },
             "progress": {"node": "verify_plan", "value": 95},
@@ -5361,7 +5399,13 @@ def build_planning_graph(
                     f"{activity.get('information_sources_count', 0)} 个来源",
                 ])
         if state.get("verification_result", {}).get("issues"):
-            lines.extend(["## 校验提示", ""])
+            verification = state.get("verification_result") or {}
+            heading = (
+                "## 出发前提醒（已自动复核三次后保留）"
+                if verification.get("delivery_mode") == "best_effort"
+                else "## 校验提示"
+            )
+            lines.extend([heading, ""])
             lines.extend(
                 f"- {item['description']}"
                 for item in state["verification_result"]["issues"]

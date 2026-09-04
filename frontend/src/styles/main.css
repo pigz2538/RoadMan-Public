@@ -650,6 +650,14 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .safety-boundary-banner strong { font-size: 13px; }
 .safety-boundary-banner small { color: #6b7f95; font-size: 11px; }
 .safety-boundary-banner span { max-width: 360px; padding: 5px 9px; border-radius: 999px; background: #fff2d9; color: #8b5e08; font-size: 11px; }
+.best-effort-banner { margin: 0 20px 12px; padding: 12px 14px; border: 1px solid #b9d8ce; border-radius: 14px; background: linear-gradient(135deg, rgba(244, 255, 250, .98), rgba(247, 250, 255, .98)); color: #315b53; box-shadow: 0 6px 18px rgba(56, 121, 105, .08); }
+.best-effort-heading { display: flex; align-items: flex-start; gap: 10px; }
+.best-effort-heading > div:last-child { display: grid; gap: 3px; min-width: 0; }
+.best-effort-heading strong { color: #1d6859; font-size: 13px; }
+.best-effort-heading small { color: #5f7e78; font-size: 11px; line-height: 1.55; }
+.best-effort-icon { flex: 0 0 22px; width: 22px; height: 22px; display: grid; place-items: center; border-radius: 50%; color: #fff; background: #27a887; font-size: 13px; font-weight: 800; }
+.best-effort-banner ul { display: grid; gap: 4px; margin: 9px 0 0 32px; padding: 0; color: #536e6a; font-size: 11px; line-height: 1.5; }
+.best-effort-banner li::marker { color: #27a887; }
 .page-state { min-height: 70vh; display: grid; place-items: center; color: var(--muted); }.page-state.error { color: #bd3c43; }
 
 .primary-button:disabled {

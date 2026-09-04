@@ -15,6 +15,10 @@ export interface PlanningSnapshot {
     issues: Array<{ code: string; severity?: 'blocker' | 'warning' | string; description: string }>
     auto_repair_attempts?: number
     auto_repair_exhausted?: boolean
+    /** The planner can deliver a materialised route with reminders after the
+     * bounded repair budget, instead of blocking the traveller. */
+    delivery_mode?: 'verified' | 'best_effort' | string
+    accepted_with_warnings?: boolean
     auto_repair_history?: Array<{
       attempt: number
       issue_codes: string[]

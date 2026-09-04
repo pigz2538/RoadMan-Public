@@ -26,6 +26,42 @@ _progress_floor: dict[str, int] = {}
 _planning_batches: dict[str, str] = {}
 
 
+def _append_verification_reminders(result: dict[str, Any]) -> bool:
+    """Promote unresolved post-repair checks into traveller-facing warnings.
+
+    A best-effort result is a completed draft, not a silent success: the
+    original verification issues remain in ``verification_result`` and are
+    also copied to the trip warning list so the API, exports and UI can show
+    them as reminders.  Keep existing warning records and de-duplicate by
+    code/message because repair passes may accumulate the same issue.
+    """
+    verification = result.get("verification_result") or {}
+    if verification.get("delivery_mode") != "best_effort":
+        return False
+    warnings = [item for item in (result.get("warnings") or []) if isinstance(item, dict)]
+    seen = {
+        (str(item.get("code") or ""), str(item.get("message") or ""))
+        for item in warnings
+    }
+    for issue in verification.get("issues") or []:
+        if not isinstance(issue, dict):
+            continue
+        issue_code = str(issue.get("code") or "PLANNER_CHECK")
+        message = str(issue.get("description") or "请在出发前复核该项安排")
+        warning = {
+            "code": f"PLANNER_REMINDER_{issue_code}",
+            "message": message,
+            "severity": "warning",
+            "estimated": False,
+        }
+        key = (warning["code"], warning["message"])
+        if key not in seen:
+            warnings.append(warning)
+            seen.add(key)
+    result["warnings"] = warnings
+    return True
+
+
 async def run_planning(
     trip_id: str,
     clarification_answer: str | None = None,
@@ -152,6 +188,7 @@ async def run_planning(
                 SourceRecord.model_validate(item)
                 for item in result.get("sources", [])
             ]
+            best_effort = _append_verification_reminders(result)
             trip.warnings = [
                 PlanWarning.model_validate(item)
                 for item in result.get("warnings", [])
@@ -177,7 +214,7 @@ async def run_planning(
                 result["progress"] = {
                     "node": "persist_trip",
                     "value": 100,
-                    "label": "规划完成",
+                    "label": "行程已生成（含复核提醒）" if best_effort else "规划完成",
                 }
                 await repo.save_planning_result(
                     trip,
@@ -188,7 +225,7 @@ async def run_planning(
                 await _publish_progress(
                     trip_id,
                     "persist_trip",
-                    "规划完成",
+                    "行程已生成（含复核提醒）" if best_effort else "规划完成",
                     100,
                     "planning_completed",
                     None,

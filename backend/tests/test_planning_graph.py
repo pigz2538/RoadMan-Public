@@ -21,6 +21,7 @@ from app.planning.graph import (
     _train_route_result,
     _return_stage_start,
     _return_deadline_issue,
+    _best_effort_delivery_allowed,
     _verify_comfort_timeline,
     build_planning_graph,
 )
@@ -31,7 +32,7 @@ from app.planning.llm import (
     extract_explicit_location_constraints,
     extract_structural_constraints,
 )
-from app.planning.runner import run_planning
+from app.planning.runner import _append_verification_reminders, run_planning
 from app.repositories import TripRepository, VehicleRepository
 from app.services.sse import sse_manager
 from app.skills.base import SkillAdapter, SkillContext
@@ -143,6 +144,53 @@ def test_return_deadline_allows_small_drift_and_half_day_grace():
     assert blocker is not None
     assert blocker["code"] == "RETURN_DEADLINE_UNACHIEVABLE"
     assert blocker["severity"] == "blocker"
+
+
+def test_best_effort_delivery_turns_all_verification_issues_into_reminders_after_three_repairs():
+    issue = [{
+        "code": "ROUTE_DISCONTINUITY",
+        "severity": "blocker",
+        "description": "阶段终点与下一阶段起点不连续",
+    }]
+
+    assert _best_effort_delivery_allowed(
+        issue,
+        3,
+        verification_reached=True,
+    ) is True
+    # Once the verifier has been reached, even a sparse/provider-degraded
+    # draft is delivered with reminders instead of a blocking dialog.
+    assert _best_effort_delivery_allowed(issue, 2, verification_reached=True) is False
+    assert _best_effort_delivery_allowed(issue, 3, verification_reached=False) is False
+
+
+def test_best_effort_result_copies_verification_issues_to_warnings():
+    result = {
+        "verification_result": {
+            "delivery_mode": "best_effort",
+            "issues": [
+                {
+                    "code": "ROUTE_NOT_CLOSED",
+                    "description": "行程终点未回到整体出发点",
+                    "severity": "blocker",
+                },
+                {
+                    "code": "ROUTE_NOT_CLOSED",
+                    "description": "行程终点未回到整体出发点",
+                    "severity": "blocker",
+                },
+            ],
+        },
+        "warnings": [],
+    }
+
+    assert _append_verification_reminders(result) is True
+    assert result["warnings"] == [{
+        "code": "PLANNER_REMINDER_ROUTE_NOT_CLOSED",
+        "message": "行程终点未回到整体出发点",
+        "severity": "warning",
+        "estimated": False,
+    }]
 
 
 def test_fresh_semantic_destination_replaces_stale_parent_without_losing_same_anchor_metadata():

@@ -152,6 +152,25 @@ const planningFailure = computed(() => {
     : '行程在最终复核中发现了尚未解决的问题。'
   return { description, details, hint, repairAttempts }
 })
+const bestEffortDelivery = computed(() => {
+  const verification = planningSnapshot.value?.verification_result
+  return Boolean(
+    planningComplete.value
+    && verification?.delivery_mode === 'best_effort'
+    && verification.accepted_with_warnings,
+  )
+})
+const planningReminders = computed(() => {
+  const issues = planningSnapshot.value?.verification_result?.issues ?? []
+  return [...new Set(
+    issues
+      .map((issue) => humanizePlanningIssue(issue))
+      .filter(Boolean),
+  )].slice(0, 8)
+})
+const bestEffortRepairAttempts = computed(() =>
+  planningSnapshot.value?.verification_result?.auto_repair_attempts ?? 3,
+)
 
 const filteredActivities = computed(() => {
   const typeMap: Record<string, string[]> = {
@@ -945,6 +964,18 @@ watch(bottomPanelCollapsed, (collapsed) => window.localStorage.setItem(panelStor
       <section class="safety-boundary-banner" aria-label="安全与降级状态">
         <div><strong>规划辅助，不连接或控制车辆</strong><small>实时导航、道路公告、运营方信息与驾驶员判断具有最终优先级</small></div>
         <span v-for="notice in degradationNotices" :key="notice">{{ notice }}</span>
+      </section>
+      <section v-if="bestEffortDelivery" class="best-effort-banner" aria-label="出发前复核提醒">
+        <div class="best-effort-heading">
+          <span class="best-effort-icon" aria-hidden="true">✓</span>
+          <div>
+            <strong>行程已生成，附带出发前复核提醒</strong>
+            <small>智能体已自动重排 {{ bestEffortRepairAttempts }} 次；当前路线已保留，可先查看完整安排，再按以下提醒核对时间、路况和休息点。</small>
+          </div>
+        </div>
+        <ul v-if="planningReminders.length">
+          <li v-for="reminder in planningReminders" :key="reminder">{{ reminder }}</li>
+        </ul>
       </section>
       <section v-if="!planningComplete" class="planning-live-strip glass-card">
         <span class="planning-pulse" />
