@@ -770,108 +770,39 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .planning-scene-copy { display: grid; justify-items: center; gap: 4px; }
 .planning-scene-copy > span { color: #3d78c9; font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
 .planning-map-animation { position: relative; width: 100%; height: 230px; overflow: hidden; border: 1px solid rgba(158,190,231,.58); border-radius: 20px; background: linear-gradient(145deg,rgba(246,251,255,.98),rgba(225,240,255,.86)); isolation: isolate; }
-.planning-map-grid { position: absolute; inset: -35px; opacity: .56; background-image: linear-gradient(rgba(104,149,204,.105) 1px,transparent 1px),linear-gradient(90deg,rgba(104,149,204,.105) 1px,transparent 1px); background-size: 34px 34px; transform: perspective(320px) rotateX(8deg) scale(1.07); animation: planning-map-drift 16s ease-in-out infinite alternate; }
 .planning-map-animation::before,.planning-map-animation::after { content: ''; position: absolute; border-radius: 50%; background: rgba(92,173,224,.09); border: 1px solid rgba(87,155,211,.13); }
 .planning-map-animation::before { width: 170px; height: 170px; left: -45px; top: 42px; animation: planning-lake-float 13s ease-in-out infinite; }
 .planning-map-animation::after { width: 125px; height: 125px; right: 42px; top: -39px; animation: planning-lake-float 15s ease-in-out -4s infinite reverse; }
 .planning-map-animation svg { position: absolute; z-index: 2; inset: 0; width: 100%; height: 100%; overflow: visible; shape-rendering: geometricPrecision; }
-.planning-ambient-road { position: absolute; z-index: 1; width: 62%; height: 9px; border: solid rgba(117,151,190,.14); border-width: 1px 0; border-radius: 50%; transform-origin: center; }
-.planning-ambient-road::after { content: ''; position: absolute; inset: 3px 0; border-top: 1px dashed rgba(117,151,190,.18); }
-.road-1 { left: -8%; top: 21%; transform: rotate(12deg); }.road-2 { right: -12%; top: 72%; transform: rotate(-17deg); }.road-3 { left: 18%; top: 52%; transform: rotate(4deg); }.road-4 { left: 5%; top: 84%; transform: rotate(-4deg); }.road-5 { right: -18%; top: 34%; transform: rotate(21deg); }
+.planning-map-grid { position: absolute; inset: -35px; opacity: .56; background-image: linear-gradient(rgba(104,149,204,.105) 1px,transparent 1px),linear-gradient(90deg,rgba(104,149,204,.105) 1px,transparent 1px); background-size: 34px 34px; transform: perspective(320px) rotateX(8deg) scale(1.07); animation: planning-map-drift 16s ease-in-out infinite alternate; }
 .planning-map-route { fill: none; stroke: #8aaed8; stroke-width: 3.2; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 7 8; stroke-dashoffset: 0; opacity: .26; vector-effect: non-scaling-stroke; animation: planning-route-flow 15s linear infinite; }
-.planning-map-route.route-shadow { stroke: rgba(255,255,255,.96); stroke-width: 9; stroke-dasharray: none; opacity: .82; }
-.planning-map-route.route-shadow-branch,.planning-map-route.route-shadow-return { stroke: rgba(255,255,255,.9); stroke-width: 7; stroke-dasharray: none; opacity: .74; }
-.planning-map-route.route-glow { stroke: rgba(34,161,225,.55); stroke-width: 9; stroke-dasharray: 2 30; stroke-linecap: round; opacity: .75; filter: drop-shadow(0 0 5px rgba(45,145,235,.42)); animation: planning-route-glow 5.5s linear infinite; }
-.planning-map-route.route-glow-branch { stroke: rgba(242,169,44,.6); animation-duration: 4.7s; animation-delay: -1.2s; }
-.planning-map-route.route-glow-return { stroke: rgba(31,177,148,.62); animation-duration: 6.1s; animation-delay: -2.4s; }
-.planning-map-flow-dot { fill: #fff; stroke: #2e83ef; stroke-width: 2; filter: drop-shadow(0 2px 5px rgba(36,100,188,.35)); opacity: .95; }
-.planning-map-flow-dot.flow-dot-two { fill: #7dd5f5; stroke: #2574df; opacity: .72; }
-.planning-map-flow-dot.flow-dot-branch { fill: #fff1b8; stroke: #f0a51d; opacity: .92; }
-.planning-map-flow-dot.flow-dot-return { fill: #b9f1e2; stroke: #1b9f8b; opacity: .9; }
-.planning-map-pin { position: absolute; z-index: 5; width: 17px; height: 17px; border: 3px solid #fff; border-radius: 50%; background: #b9cce4; box-shadow: 0 4px 11px rgba(38,91,151,.22); transform: scale(.72); opacity: .38; animation: planning-pin-idle 6s ease-in-out infinite; }
-.planning-map-pin i { position: absolute; inset: -7px; border: 1px solid rgba(42,128,225,.25); border-radius: 50%; opacity: 0; }
-.planning-map-pin.pin-1 { left: 5%; top: 76%; }.planning-map-pin.pin-2 { left: 34%; top: 43%; }.planning-map-pin.pin-3 { left: 59%; top: 31%; }.planning-map-pin.pin-4 { left: 68%; top: 49%; }.planning-map-pin.pin-5 { left: 84%; top: 24%; }.planning-map-pin.pin-6 { left: 94%; top: 23%; }
+.planning-map-route.route-return { opacity: .18; animation-duration: 19s; animation-direction: reverse; }
 .planning-map-origin,.planning-map-destination { position: absolute; z-index: 6; display: grid; place-items: center; width: 27px; height: 27px; border: 3px solid #fff; border-radius: 11px; color: #fff; background: #2b78ee; box-shadow: 0 5px 16px rgba(31,94,178,.26); font-size: 11px; font-weight: 900; opacity: .86; }
 .planning-map-origin { left: 3.7%; top: 73%; }.planning-map-destination { right: 2.5%; top: 20%; background: #20a18f; }
 .planning-map-traveller { position: absolute; z-index: 8; left: 0; top: 0; width: 31px; height: 17px; offset-path: path('M31 183 C90 180 112 84 181 105 S280 190 355 119 S442 39 493 63'); offset-rotate: auto; opacity: 0; filter: drop-shadow(0 5px 5px rgba(36,91,159,.2)); animation: planning-traveller 14s cubic-bezier(.37,.08,.24,1) infinite; }
 .planning-map-traveller i { position: absolute; inset: 1px 1px 5px; border-radius: 5px 8px 4px 4px; background: linear-gradient(135deg,#2e85f4,#36b8dc); border: 2px solid #fff; }
 .planning-map-traveller b,.planning-map-traveller::after { content: ''; position: absolute; bottom: 0; width: 7px; height: 7px; border: 2px solid #fff; border-radius: 50%; background: #37516f; }
 .planning-map-traveller b { left: 4px; }.planning-map-traveller::after { right: 3px; }
-.planning-map-route-pulse { position: absolute; z-index: 11; left: 0; top: 0; width: 24px; height: 24px; pointer-events: none; offset-rotate: auto; offset-path: path('M31 183 C90 180 112 84 181 105 S280 190 355 119 S442 39 493 63'); animation: planning-route-pulse 7.5s linear infinite; }
-.planning-map-route-pulse i { display: block; width: 10px; height: 10px; margin: 7px; border: 2px solid #fff; border-radius: 50%; background: #2c83f0; box-shadow: 0 0 0 4px rgba(44,131,240,.18), 0 0 18px rgba(44,131,240,.75); }
-.planning-map-route-pulse.pulse-branch { offset-path: path('M181 105 C213 49 273 45 315 79 C333 91 346 106 355 119'); animation-duration: 5.5s; animation-delay: -2.2s; }
-.planning-map-route-pulse.pulse-branch i { background: #f1a52a; box-shadow: 0 0 0 4px rgba(241,165,42,.18), 0 0 18px rgba(241,165,42,.7); }
-.planning-map-route-pulse.pulse-return { offset-path: path('M355 119 C319 161 249 191 188 171 C132 160 78 171 31 183'); animation-duration: 6.5s; animation-delay: -3.1s; }
-.planning-map-route-pulse.pulse-return i { background: #20a68e; box-shadow: 0 0 0 4px rgba(32,166,142,.18), 0 0 18px rgba(32,166,142,.7); }
-.planning-map-spark { position: absolute; z-index: 12; left: 0; top: 0; width: 22px; height: 22px; pointer-events: none; transform: translate(-50%,-50%); opacity: 0; animation: planning-spark-main 16s cubic-bezier(.42,0,.22,1) infinite; }
-.planning-map-spark i { display: block; width: 9px; height: 9px; margin: 6px; border: 2px solid #fff; border-radius: 50%; background: #2c83f0; box-shadow: 0 0 0 4px rgba(44,131,240,.2), 0 0 20px rgba(44,131,240,.9); }
-.planning-map-spark i::after { content: ''; position: absolute; left: -18px; top: 9px; width: 22px; height: 2px; border-radius: 9px; background: linear-gradient(90deg, transparent, rgba(44,131,240,.65)); transform: rotate(-18deg); transform-origin: right center; }
-.planning-map-spark.spark-main-2 { animation-delay: -5.3s; animation-duration: 17.5s; }
-.planning-map-spark.spark-main-3 { animation-delay: -10.4s; animation-duration: 15.2s; }
-.planning-map-spark.spark-branch-1 { animation-name: planning-spark-branch; animation-duration: 11.5s; animation-delay: -2.4s; }
-.planning-map-spark.spark-branch-2 { animation-name: planning-spark-branch; animation-duration: 12.7s; animation-delay: -7.1s; }
-.planning-map-spark.spark-branch i { background: #f1a52a; box-shadow: 0 0 0 4px rgba(241,165,42,.2), 0 0 20px rgba(241,165,42,.9); }
-.planning-map-spark.spark-branch i::after { background: linear-gradient(90deg, transparent, rgba(241,165,42,.7)); }
-.planning-map-bead { position: absolute; z-index: 12; left: 6%; top: 79%; width: 18px; height: 18px; pointer-events: none; opacity: 0; transform: translate(-50%,-50%) scale(.55); will-change: left, top, opacity, transform; animation: planning-bead-main 12s cubic-bezier(.32,.04,.2,1) infinite; }
-.planning-map-bead i { display: block; width: 7px; height: 7px; margin: 5px; border: 2px solid #fff; border-radius: 50%; background: #38a8ef; box-shadow: 0 0 0 4px rgba(56,168,239,.16), 0 0 15px rgba(56,168,239,.78); }
-.planning-map-bead.bead-main-2 { animation-delay: -4s; animation-duration: 13.5s; }.planning-map-bead.bead-main-3 { animation-delay: -8s; animation-duration: 11s; }
-.planning-map-bead.bead-return-1 { animation-name: planning-bead-return; animation-delay: -2.8s; animation-duration: 10.5s; }.planning-map-bead.bead-return-2 { animation-name: planning-bead-return; animation-delay: -7.2s; animation-duration: 12.5s; }
-.planning-map-bead.bead-return i { background: #25af9a; box-shadow: 0 0 0 4px rgba(37,175,154,.16), 0 0 15px rgba(37,175,154,.72); }
-.planning-map-sheen { position: absolute; z-index: 13; inset: -35% -30%; pointer-events: none; opacity: 0; background: linear-gradient(115deg, transparent 40%, rgba(255,255,255,.48) 49%, rgba(79,171,241,.16) 51%, transparent 60%); transform: translateX(-68%) rotate(3deg); animation: planning-map-sheen 12s ease-in-out infinite; }
-.planning-map-scan { position: absolute; z-index: 3; left: 0; right: 0; top: -16px; height: 18px; background: linear-gradient(180deg,transparent,rgba(42,151,232,.2),transparent); opacity: 0; }
-.planning-map-radar { position: absolute; z-index: 4; left: 50%; top: 50%; width: 120px; height: 120px; margin: -60px; border: 1px solid rgba(35,126,220,.2); border-radius: 50%; opacity: 0; }
-.planning-map-radar::before,.planning-map-radar::after,.planning-map-radar i { content: ''; position: absolute; border: 1px solid rgba(35,126,220,.18); border-radius: 50%; }.planning-map-radar::before { inset: 18px; }.planning-map-radar::after { inset: 37px; }.planning-map-radar i { inset: 55px; background: #2878ed; }.planning-map-radar b { position: absolute; left: 50%; top: 50%; width: 48%; height: 1px; transform-origin: left; background: linear-gradient(90deg,rgba(41,126,231,.5),transparent); }
-.planning-map-orbit { position: absolute; z-index: 9; left: 50%; top: 50%; width: 58px; height: 58px; margin: -29px; border: 1px solid rgba(52,134,230,.22); border-radius: 50%; opacity: .78; animation: planning-orbit-breathe 5.5s ease-in-out infinite; }
-.planning-map-orbit::before,.planning-map-orbit::after { content: ''; position: absolute; inset: 7px; border: 1px dashed rgba(50,131,225,.27); border-radius: 50%; }
-.planning-map-orbit::after { inset: 16px; border-style: solid; border-color: rgba(34,163,188,.25); }
-.planning-map-orbit i,.planning-map-orbit b,.planning-map-orbit em { position: absolute; display: block; width: 7px; height: 7px; border-radius: 50%; box-shadow: 0 0 0 4px rgba(255,255,255,.52),0 3px 8px rgba(38,102,178,.3); }
-.planning-map-orbit i { left: -3px; top: 26px; background: #2e83ef; animation: planning-orbit-one 4.8s linear infinite; }
-.planning-map-orbit b { right: -3px; top: 14px; background: #24b19c; animation: planning-orbit-two 6.5s linear -1.4s infinite; }
-.planning-map-orbit em { left: 25px; bottom: -3px; background: #f2a51a; animation: planning-orbit-three 5.6s linear -2.6s infinite; }
-.planning-map-cloud { position: absolute; z-index: 3; width: 42px; height: 13px; border-radius: 999px; background: rgba(255,255,255,.8); box-shadow: 13px -8px 0 -1px rgba(255,255,255,.8),27px -2px 0 -4px rgba(255,255,255,.8); opacity: 0; }.cloud-one { left: 9%; top: 20%; }.cloud-two { right: 18%; top: 69%; transform: scale(.72); }
-.planning-map-card { position: absolute; z-index: 7; display: flex; align-items: center; gap: 6px; padding: 5px 9px 5px 5px; border: 2px solid #fff; border-radius: 12px; color: #34506f; background: rgba(255,255,255,.94); font-size: 10px; font-weight: 800; box-shadow: 0 7px 18px rgba(43,94,154,.18); opacity: 0; transform: translateY(12px) scale(.88); }
-.planning-map-card b { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 8px; color: #fff; background: #735ee9; font-size: 11px; }.planning-map-card i { font-style: normal; white-space: nowrap; }
-.card-hotel { left: 39%; top: 66%; }.card-meal { left: 64%; top: 25%; }.card-meal b { background: #ef7859; }.card-weather { right: 4%; top: 62%; }.card-weather b { background: #24a5b5; }
-.planning-itinerary-stack { position: absolute; z-index: 7; left: 9%; top: 18%; display: grid; gap: 7px; width: 190px; opacity: 0; }.planning-itinerary-stack > i { display: flex; align-items: center; gap: 7px; height: 26px; padding: 0 10px; border: 1px solid rgba(139,174,216,.46); border-radius: 9px; background: rgba(255,255,255,.82); box-shadow: 0 5px 14px rgba(67,105,153,.08); transform: translateX(-18px); opacity: 0; }.planning-itinerary-stack b { display: grid; place-items: center; width: 15px; height: 15px; border-radius: 50%; background: #725ce6; color: #fff; font-size: 8px; }.planning-itinerary-stack em { width: 70%; height: 5px; border-radius: 9px; background: linear-gradient(90deg,#b8cae1,#e7eef7); }
-.planning-check-badge { position: absolute; z-index: 8; left: 50%; top: 50%; display: flex; align-items: center; gap: 8px; padding: 10px 14px; border: 2px solid #fff; border-radius: 15px; background: rgba(255,255,255,.94); color: #287166; box-shadow: 0 10px 25px rgba(32,121,108,.18); opacity: 0; transform: translate(-50%,-50%) scale(.7); }.planning-check-badge i { display: grid; place-items: center; width: 25px; height: 25px; border-radius: 50%; background: #25a08f; color: #fff; font-style: normal; }.planning-check-badge b { font-size: 12px; }
-.planning-stage-beacons { position: absolute; z-index: 10; left: 50%; bottom: 13px; display: flex; gap: 7px; transform: translateX(-50%); padding: 5px 9px; border: 1px solid rgba(140,177,219,.45); border-radius: 999px; background: rgba(255,255,255,.7); box-shadow: 0 5px 13px rgba(46,96,153,.12); }
-.planning-stage-beacons i { width: 7px; height: 7px; border-radius: 50%; background: #b8cce4; animation: planning-beacon-pulse 2.4s ease-in-out infinite; }
-.planning-stage-beacons i:nth-child(2) { animation-delay: .35s; }.planning-stage-beacons i:nth-child(3) { animation-delay: .7s; }
-.planning-map-animation[data-scene='understand'] .pin-1,.planning-map-animation[data-scene='understand'] .pin-6 { opacity: 1; transform: scale(1); background: #2876ef; animation: planning-pin-pulse 4.8s ease-in-out infinite; }
-.planning-map-animation[data-scene='understand'] .planning-map-radar { animation: planning-radar-breathe 12s ease-in-out infinite; }.planning-map-animation[data-scene='understand'] .planning-map-radar b { animation: planning-radar-sweep 7s linear infinite; }
 .planning-map-animation[data-scene='intercity'] .route-main { opacity: .95; stroke: #2876ef; stroke-dasharray: 620; stroke-dashoffset: 620; animation: planning-route-draw 12s cubic-bezier(.36,.06,.24,1) infinite; }
 .planning-map-animation[data-scene='intercity'] .planning-map-traveller { animation-duration: 12s; }
-.planning-map-animation[data-scene='discover'] .planning-map-radar { animation: planning-radar-breathe 10s ease-in-out infinite; }.planning-map-animation[data-scene='discover'] .planning-map-radar b { animation: planning-radar-sweep 6s linear infinite; }
-.planning-map-animation[data-scene='discover'] .planning-map-pin { background: #2579e9; animation: planning-pin-discovery 10s cubic-bezier(.2,.8,.2,1) infinite; animation-delay: calc((var(--pin-order, 1) - 1) * .65s); }
-.planning-map-animation[data-scene='discover'] .pin-1 { --pin-order: 1; }.planning-map-animation[data-scene='discover'] .pin-2 { --pin-order: 2; }.planning-map-animation[data-scene='discover'] .pin-3 { --pin-order: 3; }.planning-map-animation[data-scene='discover'] .pin-4 { --pin-order: 4; }.planning-map-animation[data-scene='discover'] .pin-5 { --pin-order: 5; }.planning-map-animation[data-scene='discover'] .pin-6 { --pin-order: 6; }
-.planning-map-animation[data-scene='discover'] .planning-map-pin i { animation: planning-ring 3.4s ease-out infinite; }
-.planning-map-animation[data-scene='connect'] .planning-map-route:not(.route-shadow) { opacity: .9; stroke: #21a6bd; stroke-dasharray: 620; stroke-dashoffset: 620; animation: planning-route-draw 13s ease-in-out infinite; }
-.planning-map-animation[data-scene='connect'] .route-branch { animation-delay: 1.1s; }.planning-map-animation[data-scene='connect'] .route-return { animation-delay: 2.2s; }
-.planning-map-animation[data-scene='connect'] .planning-map-pin { opacity: 1; transform: scale(.9); background: #21a6bd; }
+.planning-map-animation[data-scene='intercity'] .planning-map-route.route-return { opacity: .2; }
+.planning-map-animation[data-scene='connect'] .route-main { opacity: .9; stroke: #21a6bd; stroke-dasharray: 620; stroke-dashoffset: 620; animation: planning-route-draw 13s ease-in-out infinite; }
+.planning-map-animation[data-scene='connect'] .planning-map-route.route-return { opacity: .2; }
 .planning-map-animation[data-scene='context'] .planning-map-route { opacity: .65; stroke: #4d88d9; }
-.planning-map-animation[data-scene='context'] .planning-map-pin { opacity: .8; transform: scale(.9); background: #4d88d9; }
-.planning-map-animation[data-scene='context'] .planning-map-card { animation: planning-card-cycle 11s ease-in-out infinite; }.planning-map-animation[data-scene='context'] .card-meal { animation-delay: 1.2s; }.planning-map-animation[data-scene='context'] .card-weather { animation-delay: 2.4s; }.planning-map-animation[data-scene='context'] .planning-map-cloud { animation: planning-cloud-cross 14s linear infinite; }.planning-map-animation[data-scene='context'] .cloud-two { animation-delay: -6s; }
-.planning-map-animation[data-scene='schedule'] .planning-itinerary-stack { opacity: 1; }.planning-map-animation[data-scene='schedule'] .planning-itinerary-stack > i { animation: planning-list-build 12s ease-in-out infinite; }.planning-map-animation[data-scene='schedule'] .planning-itinerary-stack > i:nth-child(2) { animation-delay: 1s; }.planning-map-animation[data-scene='schedule'] .planning-itinerary-stack > i:nth-child(3) { animation-delay: 2s; }.planning-map-animation[data-scene='schedule'] .planning-itinerary-stack > i:nth-child(4) { animation-delay: 3s; }
-.planning-map-animation[data-scene='schedule'] .planning-map-route { opacity: .72; stroke: #725ce6; stroke-dasharray: none; }.planning-map-animation[data-scene='schedule'] .planning-map-pin { opacity: 1; transform: scale(.92); background: #725ce6; animation: planning-schedule-step 8s ease-in-out infinite; }
+.planning-map-animation[data-scene='schedule'] .planning-map-route { opacity: .72; stroke: #725ce6; stroke-dasharray: none; }
 .planning-map-animation[data-scene='verify'] .planning-map-route { opacity: 1; stroke: #229d91; stroke-dasharray: none; }
-.planning-map-animation[data-scene='verify'] .planning-map-pin { opacity: 1; transform: scale(.9); background: #229d91; }
-.planning-map-animation[data-scene='verify'] .planning-map-scan { opacity: 1; animation: planning-map-scan 9s ease-in-out infinite; }.planning-map-animation[data-scene='verify'] .planning-check-badge { animation: planning-check-in 9s ease-in-out infinite; }
+.planning-map-animation[data-scene='verify'] .planning-map-route.route-return { opacity: .5; }
 .planning-focus-visual { position: absolute; z-index: 24; inset: 0; pointer-events: none; }
 .planning-focus-panel { position: absolute; inset: 0; visibility: hidden; opacity: 0; transform: scale(.97); transition: opacity .7s ease, transform .7s ease, visibility .7s ease; }
 .planning-map-animation[data-scene='understand'] .focus-radar-panel,
 .planning-map-animation[data-scene='intercity'] .focus-search-panel,
 .planning-map-animation[data-scene='discover'] .focus-candidates-panel,
-.planning-map-animation[data-scene='connect'] .focus-agents-panel { visibility: visible; opacity: 1; transform: none; }
+.planning-map-animation[data-scene='connect'] .focus-agents-panel,
+.planning-map-animation[data-scene='context'] .focus-context-panel,
+.planning-map-animation[data-scene='schedule'] .focus-schedule-panel,
+.planning-map-animation[data-scene='verify'] .focus-verify-panel { visibility: visible; opacity: 1; transform: none; }
 
-/* The first four stages use one calm focal animation at a time.  The older
-   route particles remain available for the schedule/verification scenes, but
-   are intentionally hidden here so the meaning of each early stage is clear. */
-.planning-map-animation:is([data-scene='understand'], [data-scene='intercity'], [data-scene='connect']) > svg,
-.planning-map-animation:is([data-scene='understand'], [data-scene='intercity'], [data-scene='connect']) :is(.planning-ambient-road, .planning-map-route-pulse, .planning-map-spark, .planning-map-bead, .planning-map-sheen, .planning-map-pin, .planning-map-origin, .planning-map-destination, .planning-map-traveller, .planning-map-scan, .planning-map-radar, .planning-map-orbit, .planning-map-cloud, .planning-map-card, .planning-itinerary-stack, .planning-check-badge, .planning-stage-beacons) { opacity: 0 !important; animation: none !important; }
-.planning-map-animation:is([data-scene='understand'], [data-scene='intercity'], [data-scene='connect'])::before,
-.planning-map-animation:is([data-scene='understand'], [data-scene='intercity'], [data-scene='connect'])::after { opacity: 0; animation: none; }
-
-/* 1. 需求理解：a restrained radar sweep and three soft pings. */
+/* 1. 需求理解：雷达扫描 + 三个需求点脉冲 */
 .focus-radar-ring { position: absolute; left: 27%; top: 50%; border: 1px solid rgba(43,130,219,.22); border-radius: 50%; transform: translate(-50%,-50%); }
 .focus-radar-ring.ring-outer { width: 142px; height: 142px; }
 .focus-radar-ring.ring-middle { width: 98px; height: 98px; border-color: rgba(43,130,219,.28); }
@@ -885,127 +816,94 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .focus-radar-ping.ping-three { left: 17%; top: 65%; animation: focus-ping-in 8s ease-in-out -6.1s infinite; }
 .focus-radar-ping.ping-one::after { animation-delay: -1.2s; }.focus-radar-ping.ping-two::after { animation-delay: -4.2s; }.focus-radar-ping.ping-three::after { animation-delay: -6.1s; }
 
-/* 2. 地图搜索：one route, one scanning line and three restrained labels. */
-.focus-search-route { position: absolute; z-index: 1; inset: 0; width: 100%; height: 100%; overflow: visible; }
-.focus-search-route path { fill: none; stroke: #378ddd; stroke-width: 2.5; stroke-linecap: round; stroke-dasharray: 12 9; stroke-dashoffset: 130; opacity: .72; animation: focus-search-route-draw 9s ease-in-out infinite; }
-.focus-search-route circle { fill: #fff; stroke: #3489da; stroke-width: 2; opacity: 0; animation: focus-search-node 9s ease-in-out infinite; }
-.focus-search-route circle:nth-of-type(2) { animation-delay: .7s; }.focus-search-route circle:nth-of-type(3) { animation-delay: 1.4s; }
-.focus-search-crosshair { position: absolute; z-index: 3; left: 48%; top: 43%; width: 42px; height: 42px; border: 1px solid rgba(47,132,219,.4); border-radius: 50%; transform: translate(-50%,-50%); animation: focus-crosshair-breathe 5s ease-in-out infinite; }
-.focus-search-crosshair::before,.focus-search-crosshair::after { content: ''; position: absolute; background: rgba(47,132,219,.45); }
-.focus-search-crosshair::before { left: 50%; top: -8px; width: 1px; height: 58px; }.focus-search-crosshair::after { left: -8px; top: 50%; width: 58px; height: 1px; }
-.focus-search-crosshair i,.focus-search-crosshair b { position: absolute; display: block; width: 7px; height: 7px; border: 2px solid #fff; border-radius: 50%; background: #2f87dd; }
-.focus-search-crosshair i { left: -4px; top: 17px; }.focus-search-crosshair b { right: -4px; bottom: 7px; background: #27a69c; }
-.focus-search-scanline { position: absolute; z-index: 4; left: 8%; top: 19%; width: 84%; height: 1px; background: linear-gradient(90deg, transparent, rgba(45,143,228,.58), transparent); box-shadow: 0 0 12px rgba(45,143,228,.18); animation: focus-search-scan 7s ease-in-out infinite; }
+/* 2. 城际搜索：主路线从起点画到终点，小车随行，三个标签依次浮现 */
 .focus-search-tag { position: absolute; z-index: 5; padding: 4px 8px; border: 1px solid rgba(131,177,224,.6); border-radius: 999px; background: rgba(255,255,255,.86); color: #376087; font-size: 10px; font-weight: 800; opacity: 0; box-shadow: 0 5px 12px rgba(45,92,151,.08); animation: focus-tag-appear 9s ease-in-out infinite; }
 .focus-search-tag::before { content: ''; display: inline-block; width: 5px; height: 5px; margin: 0 5px 1px 0; border-radius: 50%; background: #3388dc; }
 .focus-search-tag.tag-origin { left: 5%; top: 70%; }.focus-search-tag.tag-destination { right: 7%; top: 16%; animation-delay: .9s; }.focus-search-tag.tag-transfer { left: 53%; top: 58%; animation-delay: 1.8s; }.focus-search-tag.tag-destination::before { background: #27a69c; }.focus-search-tag.tag-transfer::before { background: #efad38; }
 
-/* 3. 候选地点：three points are evaluated one by one instead of six glowing pins. */
+/* 3. 候选地点：三个候选点逐个亮起，配三根评分条 */
 .focus-candidate-dot { position: absolute; z-index: 2; width: 12px; height: 12px; border: 3px solid #fff; border-radius: 50%; background: #2f88de; box-shadow: 0 0 0 4px rgba(47,136,222,.13); opacity: 0; transform: scale(.45); animation: focus-candidate-dot 9s ease-in-out infinite; }
 .focus-candidate-dot i { position: absolute; inset: -8px; border: 1px solid rgba(47,136,222,.32); border-radius: 50%; opacity: 0; animation: focus-candidate-ring 9s ease-out infinite; }
 .focus-candidate-dot.candidate-one { left: 27%; top: 35%; }.focus-candidate-dot.candidate-two { left: 55%; top: 65%; animation-delay: 1.8s; }.focus-candidate-dot.candidate-three { left: 76%; top: 27%; animation-delay: 3.6s; }
 .focus-candidate-dot.candidate-two i { animation-delay: 1.8s; }.focus-candidate-dot.candidate-three i { animation-delay: 3.6s; }
 .focus-candidate-card { position: absolute; z-index: 4; display: flex; align-items: center; gap: 6px; padding: 5px 9px 5px 5px; border: 1px solid rgba(140,180,221,.58); border-radius: 10px; background: rgba(255,255,255,.9); color: #416281; font-size: 10px; font-weight: 800; box-shadow: 0 6px 14px rgba(46,94,148,.1); opacity: 0; transform: translateY(8px) scale(.94); animation: focus-candidate-card 9s ease-in-out infinite; }
 .focus-candidate-card b { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 6px; color: #fff; background: #2f88de; font-size: 10px; }.focus-candidate-card i { font-style: normal; white-space: nowrap; }.focus-candidate-card.candidate-card-one { left: 18%; top: 22%; }.focus-candidate-card.candidate-card-two { left: 47%; top: 73%; animation-delay: 1.8s; }.focus-candidate-card.candidate-card-three { right: 8%; top: 14%; animation-delay: 3.6s; }.focus-candidate-card.candidate-card-two b { background: #e58c55; }.focus-candidate-card.candidate-card-three b { background: #735edb; }
-.focus-candidate-stream { position: absolute; z-index: 3; left: 18%; right: 18%; bottom: 22%; display: grid; grid-template-columns: repeat(6, 1fr); gap: 5px; padding: 6px 8px; border: 1px solid rgba(132,174,222,.4); border-radius: 10px; background: rgba(247,252,255,.72); box-shadow: 0 6px 14px rgba(45,94,148,.08); }
-.focus-candidate-stream > i { display: flex; align-items: center; gap: 4px; min-width: 0; height: 8px; font-style: normal; opacity: .35; animation: focus-candidate-stream 5.4s ease-in-out infinite; }
-.focus-candidate-stream > i:nth-child(2) { animation-delay: .45s; }.focus-candidate-stream > i:nth-child(3) { animation-delay: .9s; }.focus-candidate-stream > i:nth-child(4) { animation-delay: 1.35s; }.focus-candidate-stream > i:nth-child(5) { animation-delay: 1.8s; }.focus-candidate-stream > i:nth-child(6) { animation-delay: 2.25s; }
-.focus-candidate-stream b { display: grid; place-items: center; flex: 0 0 12px; width: 12px; height: 12px; border-radius: 50%; color: #fff; background: #3c8dde; font-size: 7px; line-height: 1; }
-.focus-candidate-stream em { display: block; flex: 1; height: 4px; border-radius: 99px; background: linear-gradient(90deg,#8fc5ef 0 45%,#dcecf9 45%); transform-origin: left center; animation: focus-candidate-score 5.4s ease-in-out infinite; }
-.focus-candidate-verify { position: absolute; z-index: 5; right: 12%; bottom: 8%; display: flex; align-items: center; gap: 5px; padding: 4px 8px; border: 1px solid rgba(45,166,150,.32); border-radius: 999px; background: rgba(239,253,249,.86); color: #257b72; font-size: 9px; font-weight: 800; animation: focus-candidate-verify 5.4s ease-in-out infinite; }
-.focus-candidate-verify i { display: grid; place-items: center; width: 14px; height: 14px; border-radius: 50%; color: #fff; background: #28a693; font-style: normal; font-size: 9px; }
-.planning-map-animation[data-scene='discover'] .planning-map-grid { opacity: .46 !important; animation: planning-map-drift 8s ease-in-out infinite alternate !important; }
-.planning-map-animation[data-scene='discover'] .planning-map-route { opacity: .46 !important; animation: planning-route-flow 8s linear infinite !important; }
-.planning-map-animation[data-scene='discover'] .planning-map-pin { opacity: .82 !important; animation-duration: 5.6s !important; }
-.planning-map-animation[data-scene='discover'] .planning-map-pin i { animation-duration: 2.6s !important; }
-.planning-map-animation[data-scene='discover'] .planning-map-radar { opacity: .64 !important; animation-duration: 6.4s !important; }
-.planning-map-animation[data-scene='discover'] .planning-map-radar b { animation-duration: 3.2s !important; }
-.planning-map-animation[data-scene='discover'] .planning-map-scan { opacity: .58 !important; animation: planning-map-scan 5.8s ease-in-out infinite !important; }
-.planning-map-animation[data-scene='discover'] .planning-map-route-pulse { opacity: .75 !important; animation-duration: 5.2s !important; }
-.planning-map-animation[data-scene='discover'] .planning-map-spark,
-.planning-map-animation[data-scene='discover'] .planning-map-bead { opacity: .5 !important; animation-duration: 7.5s !important; }
-.planning-map-animation[data-scene='discover'] .focus-candidate-dot,
-.planning-map-animation[data-scene='discover'] .focus-candidate-dot i,
-.planning-map-animation[data-scene='discover'] .focus-candidate-card { animation-duration: 5.4s !important; }
+.focus-candidate-score { position: absolute; z-index: 3; left: 18%; right: 18%; bottom: 22%; display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; padding: 6px 8px; border: 1px solid rgba(132,174,222,.4); border-radius: 10px; background: rgba(247,252,255,.72); box-shadow: 0 6px 14px rgba(45,94,148,.08); }
+.focus-candidate-score > i { display: block; height: 8px; border-radius: 99px; background: linear-gradient(90deg,#8fc5ef 0 45%,#dcecf9 45%); transform-origin: left center; animation: focus-candidate-score 5.4s ease-in-out infinite; }
+.focus-candidate-score > i:nth-child(2) { animation-delay: 1.8s; }.focus-candidate-score > i:nth-child(3) { animation-delay: 3.6s; }
 
-/* 4. 智能体协作：a quiet hub-and-spoke diagram with a single moving signal. */
+/* 4. 智能体协作：hub 与三个节点连线，信号沿链路往返 */
 .focus-agent-link { position: absolute; z-index: 1; left: 30%; top: 49%; width: 40%; height: 1px; background: linear-gradient(90deg, rgba(48,133,219,.12), rgba(48,133,219,.48), rgba(48,133,219,.12)); transform-origin: left center; }
 .focus-agent-link.link-route { transform: rotate(-25deg); }.focus-agent-link.link-place { transform: rotate(0deg); }.focus-agent-link.link-weather { transform: rotate(25deg); }
-.focus-agent-link::after { content: ''; position: absolute; left: 0; top: -2px; width: 5px; height: 5px; border-radius: 50%; background: #37a4df; box-shadow: 0 0 0 3px rgba(55,164,223,.12); animation: focus-agent-signal 4.8s ease-in-out infinite; }
-.focus-agent-link.link-place::after { animation-delay: -1.6s; background: #29a79b; }.focus-agent-link.link-weather::after { animation-delay: -3.2s; background: #efa93a; }
+.focus-agent-link i { position: absolute; left: 0; top: -2px; width: 5px; height: 5px; border-radius: 50%; background: #37a4df; box-shadow: 0 0 0 3px rgba(55,164,223,.12); animation: focus-agent-signal 4.8s ease-in-out infinite; }
+.focus-agent-link.link-place i { animation-delay: -1.6s; background: #29a79b; }.focus-agent-link.link-weather i { animation-delay: -3.2s; background: #efa93a; }
 .focus-agent-node { position: absolute; z-index: 3; display: grid; justify-items: center; gap: 3px; color: #45627f; font-size: 10px; font-weight: 800; opacity: 0; animation: focus-agent-node 7.5s ease-in-out infinite; }
 .focus-agent-node i { display: grid; place-items: center; width: 32px; height: 32px; border: 2px solid #fff; border-radius: 11px; background: #347fda; color: #fff; font-size: 12px; font-style: normal; box-shadow: 0 5px 13px rgba(45,105,183,.18); }.focus-agent-node b { font-weight: 800; white-space: nowrap; }.focus-agent-node.agent-route { left: 16%; top: 20%; }.focus-agent-node.agent-place { left: 16%; top: 64%; animation-delay: .8s; }.focus-agent-node.agent-weather { right: 16%; top: 42%; animation-delay: 1.6s; }.focus-agent-node.agent-place i { background: #28a699; }.focus-agent-node.agent-weather i { background: #e5a23a; }
 .focus-agent-hub { position: absolute; z-index: 4; left: 50%; top: 49%; display: grid; justify-items: center; gap: 3px; transform: translate(-50%,-50%); color: #294f79; font-size: 10px; font-weight: 850; animation: focus-hub-breathe 4.8s ease-in-out infinite; }.focus-agent-hub i { display: grid; place-items: center; width: 48px; height: 48px; border: 3px solid #fff; border-radius: 16px; background: linear-gradient(145deg,#326dd6,#6b65dc); color: #fff; font-size: 14px; font-style: normal; box-shadow: 0 8px 22px rgba(65,83,189,.24); }.focus-agent-hub b { font-weight: 850; white-space: nowrap; }
 
-@keyframes focus-panel-in { from { opacity: 0; transform: scale(.96); } to { opacity: 1; transform: none; } }
+/* 5. 旅行上下文：住宿 / 餐饮 / 天气三张卡片轮换浮现，云朵缓缓飘过 */
+.focus-context-card { position: absolute; z-index: 4; display: flex; align-items: center; gap: 6px; padding: 5px 9px 5px 5px; border: 2px solid #fff; border-radius: 12px; color: #34506f; background: rgba(255,255,255,.94); font-size: 10px; font-weight: 800; box-shadow: 0 7px 18px rgba(43,94,154,.18); opacity: 0; transform: translateY(12px) scale(.88); animation: focus-context-card 11s ease-in-out infinite; }
+.focus-context-card b { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 8px; color: #fff; background: #735ee9; font-size: 11px; }.focus-context-card i { font-style: normal; white-space: nowrap; }
+.focus-context-card.card-hotel { left: 39%; top: 66%; }.focus-context-card.card-meal { left: 64%; top: 25%; animation-delay: 1.2s; }.focus-context-card.card-meal b { background: #ef7859; }.focus-context-card.card-weather { right: 4%; top: 62%; animation-delay: 2.4s; }.focus-context-card.card-weather b { background: #24a5b5; }
+.focus-context-cloud { position: absolute; z-index: 3; width: 42px; height: 13px; border-radius: 999px; background: rgba(255,255,255,.8); box-shadow: 13px -8px 0 -1px rgba(255,255,255,.8),27px -2px 0 -4px rgba(255,255,255,.8); opacity: 0; animation: focus-cloud-cross 14s linear infinite; }
+.focus-context-cloud.cloud-one { left: 9%; top: 20%; }.focus-context-cloud.cloud-two { right: 18%; top: 69%; transform: scale(.72); animation-delay: -6s; }
+
+/* 6. 日程编排：四张日程条目从左侧依次落位 */
+.focus-schedule-stack { position: absolute; z-index: 4; left: 9%; top: 18%; display: grid; gap: 7px; width: 190px; }
+.focus-schedule-stack > i { display: flex; align-items: center; gap: 7px; height: 26px; padding: 0 10px; border: 1px solid rgba(139,174,216,.46); border-radius: 9px; background: rgba(255,255,255,.82); box-shadow: 0 5px 14px rgba(67,105,153,.08); transform: translateX(-18px); opacity: 0; animation: focus-list-build 12s ease-in-out infinite; }
+.focus-schedule-stack b { display: grid; place-items: center; width: 15px; height: 15px; border-radius: 50%; background: #725ce6; color: #fff; font-size: 8px; }.focus-schedule-stack em { width: 70%; height: 5px; border-radius: 9px; background: linear-gradient(90deg,#b8cae1,#e7eef7); }
+.focus-schedule-stack > i:nth-child(2) { animation-delay: 1s; }.focus-schedule-stack > i:nth-child(3) { animation-delay: 2s; }.focus-schedule-stack > i:nth-child(4) { animation-delay: 3s; }
+
+/* 7. 最终复核：扫描线自上而下扫过，路线连续徽章浮现 */
+.focus-verify-scan { position: absolute; z-index: 3; left: 0; right: 0; top: -16px; height: 18px; background: linear-gradient(180deg,transparent,rgba(42,151,232,.2),transparent); opacity: 0; animation: focus-verify-scan 9s ease-in-out infinite; }
+.focus-verify-badge { position: absolute; z-index: 8; left: 50%; top: 50%; display: flex; align-items: center; gap: 8px; padding: 10px 14px; border: 2px solid #fff; border-radius: 15px; background: rgba(255,255,255,.94); color: #287166; box-shadow: 0 10px 25px rgba(32,121,108,.18); opacity: 0; transform: translate(-50%,-50%) scale(.7); animation: focus-verify-badge 9s ease-in-out infinite; }
+.focus-verify-badge i { display: grid; place-items: center; width: 25px; height: 25px; border-radius: 50%; background: #25a08f; color: #fff; font-style: normal; }.focus-verify-badge b { font-size: 12px; }
+
 @keyframes focus-radar-rotate { to { transform: rotate(360deg); } }
 @keyframes focus-center-breathe { 0%,100% { transform: translate(-50%,-50%) scale(.85); box-shadow: 0 0 0 4px rgba(46,132,232,.1), 0 0 14px rgba(46,132,232,.25); } 50% { transform: translate(-50%,-50%) scale(1.12); box-shadow: 0 0 0 9px rgba(46,132,232,.08), 0 0 24px rgba(46,132,232,.34); } }
 @keyframes focus-ping-in { 0%,12%,100% { opacity: 0; transform: scale(.25); } 26%,68% { opacity: 1; transform: scale(1); } 82% { opacity: .2; transform: scale(.82); } }
 @keyframes focus-ping-ring { 0%,22% { opacity: 0; transform: scale(.35); } 38% { opacity: .65; } 78%,100% { opacity: 0; transform: scale(1.8); } }
-@keyframes focus-search-route-draw { 0%,8% { stroke-dashoffset: 130; opacity: .05; } 42%,75% { stroke-dashoffset: 0; opacity: .78; } 94%,100% { stroke-dashoffset: -130; opacity: .08; } }
-@keyframes focus-search-node { 0%,18% { opacity: 0; transform: scale(.5); transform-origin: center; } 30%,76% { opacity: .95; transform: scale(1); } 92%,100% { opacity: 0; transform: scale(.7); } }
-@keyframes focus-crosshair-breathe { 0%,100% { transform: translate(-50%,-50%) scale(.9); opacity: .7; } 50% { transform: translate(-50%,-50%) scale(1.08); opacity: 1; } }
-@keyframes focus-search-scan { 0%,8% { transform: translateY(0); opacity: 0; } 20% { opacity: .85; } 76% { transform: translateY(133px); opacity: .65; } 94%,100% { transform: translateY(133px); opacity: 0; } }
 @keyframes focus-tag-appear { 0%,16% { opacity: 0; transform: translateY(5px); } 30%,76% { opacity: 1; transform: none; } 91%,100% { opacity: 0; transform: translateY(-4px); } }
 @keyframes focus-candidate-dot { 0%,12% { opacity: 0; transform: scale(.45); } 25%,76% { opacity: 1; transform: scale(1); } 91%,100% { opacity: 0; transform: scale(.72); } }
 @keyframes focus-candidate-ring { 0%,25% { opacity: 0; transform: scale(.35); } 40% { opacity: .64; } 82%,100% { opacity: 0; transform: scale(1.75); } }
 @keyframes focus-candidate-card { 0%,15% { opacity: 0; transform: translateY(8px) scale(.94); } 30%,74% { opacity: 1; transform: none; } 90%,100% { opacity: 0; transform: translateY(-4px) scale(.97); } }
-@keyframes focus-candidate-stream { 0%,8% { opacity: .24; transform: translateY(2px); } 24%,72% { opacity: 1; transform: translateY(0); } 90%,100% { opacity: .24; transform: translateY(-1px); } }
 @keyframes focus-candidate-score { 0%,12% { transform: scaleX(.28); opacity: .42; } 38%,72% { transform: scaleX(1); opacity: .9; } 92%,100% { transform: scaleX(.38); opacity: .34; } }
-@keyframes focus-candidate-verify { 0%,14% { opacity: 0; transform: translateY(5px) scale(.92); } 30%,76% { opacity: 1; transform: none; } 92%,100% { opacity: 0; transform: translateY(-3px) scale(.96); } }
-@keyframes focus-agent-signal { 0%,10% { left: 0; opacity: 0; } 20% { opacity: 1; } 80% { left: 100%; opacity: .8; } 92%,100% { left: 100%; opacity: 0; } }
+@keyframes focus-agent-signal { 0%,10% { transform: translateX(0); opacity: 0; } 20% { opacity: 1; } 80% { transform: translateX(190px); opacity: .8; } 92%,100% { transform: translateX(190px); opacity: 0; } }
 @keyframes focus-agent-node { 0%,12% { opacity: 0; transform: translateY(6px); } 28%,78% { opacity: 1; transform: none; } 93%,100% { opacity: 0; transform: translateY(-4px); } }
 @keyframes focus-hub-breathe { 0%,100% { transform: translate(-50%,-50%) scale(.94); } 50% { transform: translate(-50%,-50%) scale(1.04); } }
-.planning-overlay-meter { width: 100%; height: 8px; margin-top: 5px; overflow: hidden; border-radius: 999px; background: #e6eef9; }.planning-overlay-meter i { display: block; height: 100%; min-width: 3%; border-radius: inherit; background: linear-gradient(90deg,#1eb7e8,#7656f5); transition: width .7s ease; }
-.planning-overlay-enter-active, .planning-overlay-leave-active { transition: opacity .35s ease; }.planning-overlay-enter-active .planning-wait-dialog, .planning-overlay-leave-active .planning-wait-dialog { transition: transform .45s cubic-bezier(.22,.8,.28,1), opacity .3s ease; }.planning-overlay-enter-from, .planning-overlay-leave-to { opacity: 0; }.planning-overlay-enter-from .planning-wait-dialog, .planning-overlay-leave-to .planning-wait-dialog { transform: translateY(14px) scale(.98); opacity: 0; }
-@keyframes planning-overlay-spin { to { transform: rotate(360deg); } }
+@keyframes focus-context-card { 0%,12%,100% { opacity: 0; transform: translateY(12px) scale(.88); } 28%,74% { opacity: 1; transform: none; } 88% { opacity: 0; transform: translateY(-7px) scale(.94); } }
+@keyframes focus-cloud-cross { 0% { opacity: 0; transform: translateX(-30px); } 16%,80% { opacity: .82; } 100% { opacity: 0; transform: translateX(145px); } }
+@keyframes focus-list-build { 0%,10%,100% { opacity: 0; transform: translateX(-18px); } 24%,78% { opacity: 1; transform: none; } 90% { opacity: 0; transform: translateX(12px); } }
+@keyframes focus-verify-scan { 0%,8% { transform: translateY(0); opacity: 0; } 18% { opacity: 1; } 72% { transform: translateY(245px); opacity: 1; } 88%,100% { transform: translateY(245px); opacity: 0; } }
+@keyframes focus-verify-badge { 0%,54%,100% { opacity: 0; transform: translate(-50%,-50%) scale(.7); } 67%,88% { opacity: 1; transform: translate(-50%,-50%) scale(1); } }
 @keyframes planning-map-drift { 0% { transform: perspective(320px) rotateX(8deg) scale(1.07) translate3d(-8px,-4px,0); } 100% { transform: perspective(320px) rotateX(8deg) scale(1.1) translate3d(10px,7px,0); } }
 @keyframes planning-lake-float { 0%,100% { transform: translate3d(0,0,0) scale(1); } 50% { transform: translate3d(12px,-8px,0) scale(1.06); } }
 @keyframes planning-route-draw { 0%,8% { stroke-dashoffset: 620; } 58%,82% { stroke-dashoffset: 0; } 100% { stroke-dashoffset: -620; } }
 @keyframes planning-route-flow { 0%,100% { stroke-dashoffset: 0; } 50% { stroke-dashoffset: -30; } }
-@keyframes planning-route-glow { 0% { stroke-dashoffset: 0; opacity: .26; } 28% { opacity: .9; } 70% { opacity: .62; } 100% { stroke-dashoffset: -96; opacity: .26; } }
-@keyframes planning-pin-idle { 0%,100% { opacity: .38; transform: scale(.72); } 50% { opacity: .82; transform: scale(.86); } }
-@keyframes planning-pin-pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(40,118,239,0),0 3px 9px rgba(38,91,151,.22); } 45% { box-shadow: 0 0 0 12px rgba(40,118,239,.11),0 3px 9px rgba(38,91,151,.22); } }
-@keyframes planning-ring { 0% { opacity: .7; transform: scale(.35); } 80%,100% { opacity: 0; transform: scale(1.7); } }
 @keyframes planning-traveller { 0%,7% { offset-distance: 0%; opacity: 0; } 14% { opacity: 1; } 72%,84% { offset-distance: 100%; opacity: 1; } 100% { offset-distance: 100%; opacity: 0; } }
-@keyframes planning-route-pulse { 0%,4% { offset-distance: 0%; opacity: 0; transform: scale(.62); } 10% { opacity: 1; } 70%,84% { offset-distance: 100%; opacity: 1; transform: scale(1); } 100% { offset-distance: 100%; opacity: 0; transform: scale(.62); } }
-@keyframes planning-spark-main { 0%,4% { left: 6%; top: 79%; opacity: 0; transform: translate(-50%,-50%) scale(.45); } 10% { opacity: 1; } 24% { left: 20%; top: 39%; transform: translate(-50%,-50%) scale(1); } 40% { left: 35%; top: 46%; } 56% { left: 55%; top: 80%; } 72% { left: 69%; top: 51%; } 88% { left: 88%; top: 18%; opacity: 1; transform: translate(-50%,-50%) scale(.9); } 96%,100% { left: 95%; top: 27%; opacity: 0; transform: translate(-50%,-50%) scale(.35); } }
-@keyframes planning-spark-branch { 0%,5% { left: 35%; top: 46%; opacity: 0; transform: translate(-50%,-50%) scale(.4); } 15% { opacity: 1; } 34% { left: 42%; top: 21%; } 56% { left: 53%; top: 20%; transform: translate(-50%,-50%) scale(1.05); } 78% { left: 62%; top: 34%; } 94%,100% { left: 69%; top: 51%; opacity: 0; transform: translate(-50%,-50%) scale(.35); } }
-@keyframes planning-bead-main { 0%,5% { left: 6%; top: 79%; opacity: 0; transform: translate(-50%,-50%) scale(.45); } 10% { opacity: .95; } 25% { left: 20%; top: 39%; } 40% { left: 35%; top: 46%; } 57% { left: 55%; top: 80%; } 73% { left: 69%; top: 51%; } 89% { left: 88%; top: 18%; opacity: .95; } 97%,100% { left: 95%; top: 27%; opacity: 0; transform: translate(-50%,-50%) scale(.3); } }
-@keyframes planning-bead-return { 0%,6% { left: 69%; top: 51%; opacity: 0; transform: translate(-50%,-50%) scale(.4); } 15% { opacity: .9; } 34% { left: 58%; top: 68%; } 52% { left: 44%; top: 82%; } 70% { left: 28%; top: 73%; } 88% { left: 13%; top: 78%; opacity: .9; } 97%,100% { left: 6%; top: 79%; opacity: 0; transform: translate(-50%,-50%) scale(.3); } }
-@keyframes planning-map-sheen { 0%,20% { opacity: 0; transform: translateX(-68%) rotate(3deg); } 32%,58% { opacity: .75; } 72%,100% { opacity: 0; transform: translateX(68%) rotate(3deg); } }
-@keyframes planning-radar-breathe { 0%,100% { opacity: 0; transform: scale(.72); } 18%,78% { opacity: 1; transform: scale(1); } }
-@keyframes planning-radar-sweep { to { transform: rotate(360deg); } }
-@keyframes planning-orbit-breathe { 0%,100% { transform: scale(.88); opacity: .46; } 50% { transform: scale(1.12); opacity: .94; } }
-@keyframes planning-orbit-one { to { transform: rotate(360deg) translateX(27px) rotate(-360deg); } }
-@keyframes planning-orbit-two { to { transform: rotate(360deg) translateX(22px) rotate(-360deg); } }
-@keyframes planning-orbit-three { to { transform: rotate(360deg) translateX(18px) rotate(-360deg); } }
-@keyframes planning-beacon-pulse { 0%,100% { transform: scale(.72); opacity: .38; } 45%,65% { transform: scale(1.18); opacity: 1; background: #2e83ef; box-shadow: 0 0 0 4px rgba(46,131,239,.13); } }
-@keyframes planning-pin-discovery { 0%,8%,100% { opacity: 0; transform: translateY(12px) scale(.4); } 20%,78% { opacity: 1; transform: none; } 90% { opacity: 0; transform: translateY(-5px) scale(.8); } }
-@keyframes planning-card-cycle { 0%,12%,100% { opacity: 0; transform: translateY(12px) scale(.88); } 28%,74% { opacity: 1; transform: none; } 88% { opacity: 0; transform: translateY(-7px) scale(.94); } }
-@keyframes planning-cloud-cross { 0% { opacity: 0; transform: translateX(-30px); } 16%,80% { opacity: .82; } 100% { opacity: 0; transform: translateX(145px); } }
-@keyframes planning-list-build { 0%,10%,100% { opacity: 0; transform: translateX(-18px); } 24%,78% { opacity: 1; transform: none; } 90% { opacity: 0; transform: translateX(12px); } }
-@keyframes planning-schedule-step { 0%,100% { transform: scale(.86); background: #a4b8d1; } 42%,62% { transform: scale(1.08); background: #725ce6; } }
-@keyframes planning-map-scan { 0%,8% { transform: translateY(0); opacity: 0; } 18% { opacity: 1; } 72% { transform: translateY(245px); opacity: 1; } 88%,100% { transform: translateY(245px); opacity: 0; } }
-@keyframes planning-check-in { 0%,54%,100% { opacity: 0; transform: translate(-50%,-50%) scale(.7); } 67%,88% { opacity: 1; transform: translate(-50%,-50%) scale(1); } }
+.planning-overlay-meter { width: 100%; height: 8px; margin-top: 5px; overflow: hidden; border-radius: 999px; background: #e6eef9; }.planning-overlay-meter i { display: block; height: 100%; min-width: 3%; border-radius: inherit; background: linear-gradient(90deg,#1eb7e8,#7656f5); transition: width .7s ease; }
+.planning-overlay-enter-active, .planning-overlay-leave-active { transition: opacity .35s ease; }.planning-overlay-enter-active .planning-wait-dialog, .planning-overlay-leave-active .planning-wait-dialog { transition: transform .45s cubic-bezier(.22,.8,.28,1), opacity .3s ease; }.planning-overlay-enter-from, .planning-overlay-leave-to { opacity: 0; }.planning-overlay-enter-from .planning-wait-dialog, .planning-overlay-leave-to .planning-wait-dialog { transform: translateY(14px) scale(.98); opacity: 0; }
 
 @media (prefers-reduced-motion: reduce) {
-  /* Keep a calm, slow route pulse visible in the waiting state.  The dialog
-     remains informative even when the OS requests reduced motion; only the
-     faster ambient effects are toned down rather than freezing the map. */
+  /* 尊重系统减弱动态偏好：关闭所有循环动画，保留静态展示与场景切换过渡。 */
   .planning-map-animation .planning-map-grid,
   .planning-map-animation .planning-map-route,
-  .planning-map-animation .planning-map-route-pulse,
-  .planning-map-animation .planning-map-spark,
-  .planning-map-animation .planning-map-bead,
-  .planning-map-animation .planning-map-sheen { animation-duration: 18s !important; }
-  .planning-map-animation .planning-map-orbit,
-  .planning-map-animation .planning-map-radar,
-  .planning-map-animation .planning-map-scan,
-  .planning-map-animation .planning-map-card,
-  .planning-map-animation .planning-itinerary-stack > i { animation-duration: 18s !important; }
-  .planning-focus-panel :is(.focus-radar-sweep, .focus-radar-center, .focus-radar-ping, .focus-search-route path, .focus-search-route circle, .focus-search-crosshair, .focus-search-scanline, .focus-search-tag, .focus-candidate-dot, .focus-candidate-dot i, .focus-candidate-card, .focus-agent-node, .focus-agent-hub) { animation-duration: 18s !important; }
-  .planning-focus-panel .focus-radar-ping::after, .planning-focus-panel .focus-agent-link::after { animation-duration: 18s !important; }
+  .planning-map-animation .planning-map-traveller,
+  .planning-map-animation::before,
+  .planning-map-animation::after,
+  .planning-focus-panel :is(.focus-radar-sweep, .focus-radar-center, .focus-radar-ping, .focus-radar-ping::after, .focus-search-tag, .focus-candidate-dot, .focus-candidate-dot i, .focus-candidate-card, .focus-candidate-score > i, .focus-agent-link i, .focus-agent-node, .focus-agent-hub, .focus-context-card, .focus-context-cloud, .focus-schedule-stack > i, .focus-verify-scan, .focus-verify-badge) { animation: none !important; }
+  .planning-map-animation[data-scene='intercity'] .route-main,
+  .planning-map-animation[data-scene='connect'] .route-main { stroke-dasharray: none; stroke-dashoffset: 0; animation: none !important; }
+  .planning-map-animation[data-scene='intercity'] .planning-map-traveller,
+  .planning-map-animation[data-scene='connect'] .planning-map-traveller { opacity: 0; }
+  .planning-map-animation[data-scene='understand'] .focus-radar-ping,
+  .planning-map-animation[data-scene='discover'] .focus-candidate-dot,
+  .planning-map-animation[data-scene='discover'] .focus-candidate-card,
+  .planning-map-animation[data-scene='connect'] .focus-agent-node,
+  .planning-map-animation[data-scene='context'] .focus-context-card,
+  .planning-map-animation[data-scene='schedule'] .focus-schedule-stack > i,
+  .planning-map-animation[data-scene='verify'] .focus-verify-badge { opacity: 1; transform: none; }
+  .planning-map-animation[data-scene='verify'] .focus-verify-scan { opacity: 0; }
 }
 
 .visible-defaults {

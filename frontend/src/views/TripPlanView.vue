@@ -777,6 +777,14 @@ watch(bottomPanelCollapsed, (collapsed) => window.localStorage.setItem(panelStor
       <div v-if="planningBusy" class="planning-overlay" role="status" aria-live="polite">
         <section class="planning-wait-dialog glass-card">
           <div class="planning-map-animation" :data-scene="planningScene.key" aria-hidden="true">
+            <span class="planning-map-grid" />
+            <svg viewBox="0 0 520 230" preserveAspectRatio="none">
+              <path class="planning-map-route route-main" d="M31 183 C90 180 112 84 181 105 S280 190 355 119 S442 39 493 63" />
+              <path class="planning-map-route route-return" d="M355 119 C319 161 249 191 188 171 C132 160 78 171 31 183" />
+            </svg>
+            <span class="planning-map-origin">起</span>
+            <span class="planning-map-destination">终</span>
+            <span class="planning-map-traveller"><i /><b /></span>
             <div class="planning-focus-visual">
               <div class="planning-focus-panel focus-radar-panel">
                 <span class="focus-radar-ring ring-outer" />
@@ -789,14 +797,6 @@ watch(bottomPanelCollapsed, (collapsed) => window.localStorage.setItem(panelStor
                 <i class="focus-radar-ping ping-three" />
               </div>
               <div class="planning-focus-panel focus-search-panel">
-                <span class="focus-search-crosshair"><i /><b /></span>
-                <span class="focus-search-scanline" />
-                <svg class="focus-search-route" viewBox="0 0 520 230" preserveAspectRatio="none">
-                  <path d="M42 174 C126 154 146 74 248 91 S360 168 470 48" />
-                  <circle cx="42" cy="174" r="5" />
-                  <circle cx="248" cy="91" r="5" />
-                  <circle cx="470" cy="48" r="5" />
-                </svg>
                 <span class="focus-search-tag tag-origin">出发地</span>
                 <span class="focus-search-tag tag-destination">目的地</span>
                 <span class="focus-search-tag tag-transfer">接驳点</span>
@@ -808,72 +808,36 @@ watch(bottomPanelCollapsed, (collapsed) => window.localStorage.setItem(panelStor
                 <span class="focus-candidate-card candidate-card-one"><b>景</b><i>自然风景</i></span>
                 <span class="focus-candidate-card candidate-card-two"><b>餐</b><i>附近餐饮</i></span>
                 <span class="focus-candidate-card candidate-card-three"><b>住</b><i>舒适住宿</i></span>
-                <div class="focus-candidate-stream">
-                  <i v-for="index in 6" :key="`candidate-stream-${index}`">
-                    <b>{{ index }}</b><em />
-                  </i>
+                <div class="focus-candidate-score">
+                  <i><em /></i><i><em /></i><i><em /></i>
                 </div>
-                <span class="focus-candidate-verify"><i>✓</i><b>逐项核对中</b></span>
               </div>
               <div class="planning-focus-panel focus-agents-panel">
-                <span class="focus-agent-link link-route" />
-                <span class="focus-agent-link link-place" />
-                <span class="focus-agent-link link-weather" />
+                <span class="focus-agent-link link-route"><i /></span>
+                <span class="focus-agent-link link-place"><i /></span>
+                <span class="focus-agent-link link-weather"><i /></span>
                 <span class="focus-agent-node agent-route"><i>路</i><b>路线智能体</b></span>
                 <span class="focus-agent-node agent-place"><i>点</i><b>地点智能体</b></span>
                 <span class="focus-agent-node agent-weather"><i>天</i><b>天气智能体</b></span>
                 <span class="focus-agent-hub"><i>AI</i><b>协作中</b></span>
               </div>
+              <div class="planning-focus-panel focus-context-panel">
+                <span class="focus-context-card card-hotel"><b>住</b><i>住宿已匹配</i></span>
+                <span class="focus-context-card card-meal"><b>餐</b><i>餐饮已匹配</i></span>
+                <span class="focus-context-card card-weather"><b>晴</b><i>天气已复核</i></span>
+                <span class="focus-context-cloud cloud-one" />
+                <span class="focus-context-cloud cloud-two" />
+              </div>
+              <div class="planning-focus-panel focus-schedule-panel">
+                <div class="focus-schedule-stack">
+                  <i v-for="index in 4" :key="`step-${index}`"><b>{{ index }}</b><em /></i>
+                </div>
+              </div>
+              <div class="planning-focus-panel focus-verify-panel">
+                <span class="focus-verify-scan" />
+                <span class="focus-verify-badge"><i>✓</i><b>路线连续</b></span>
+              </div>
             </div>
-            <span class="planning-map-grid" />
-            <span v-for="index in 5" :key="`road-${index}`" :class="`planning-ambient-road road-${index}`" />
-            <svg viewBox="0 0 520 230" preserveAspectRatio="none">
-              <path class="planning-map-route route-shadow" d="M31 183 C90 180 112 84 181 105 S280 190 355 119 S442 39 493 63" />
-              <path id="planning-route-path" class="planning-map-route route-main" d="M31 183 C90 180 112 84 181 105 S280 190 355 119 S442 39 493 63" />
-              <path class="planning-map-route route-shadow route-shadow-branch" d="M181 105 C213 49 273 45 315 79 C333 91 346 106 355 119" />
-              <path class="planning-map-route route-shadow route-shadow-return" d="M355 119 C319 161 249 191 188 171 C132 160 78 171 31 183" />
-              <path class="planning-map-route route-glow" d="M31 183 C90 180 112 84 181 105 S280 190 355 119 S442 39 493 63" />
-              <path class="planning-map-route route-glow route-glow-branch" d="M181 105 C213 49 273 45 315 79 C333 91 346 106 355 119" />
-              <path class="planning-map-route route-glow route-glow-return" d="M355 119 C319 161 249 191 188 171 C132 160 78 171 31 183" />
-              <path class="planning-map-route route-branch" d="M181 105 C213 49 273 45 315 79 C333 91 346 106 355 119" />
-              <path class="planning-map-route route-return" d="M355 119 C319 161 249 191 188 171 C132 160 78 171 31 183" />
-              <circle class="planning-map-flow-dot flow-dot-one" r="4">
-                <animateMotion dur="12s" begin="-2s" repeatCount="indefinite" rotate="auto" path="M31 183 C90 180 112 84 181 105 S280 190 355 119 S442 39 493 63" />
-              </circle>
-              <circle class="planning-map-flow-dot flow-dot-two" r="3">
-                <animateMotion dur="12s" begin="-7s" repeatCount="indefinite" rotate="auto" path="M31 183 C90 180 112 84 181 105 S280 190 355 119 S442 39 493 63" />
-              </circle>
-              <circle class="planning-map-flow-dot flow-dot-branch" r="3.5">
-                <animateMotion dur="9s" begin="-4s" repeatCount="indefinite" rotate="auto" path="M181 105 C213 49 273 45 315 79 C333 91 346 106 355 119" />
-              </circle>
-              <circle class="planning-map-flow-dot flow-dot-return" r="3">
-                <animateMotion dur="10s" begin="-6s" repeatCount="indefinite" rotate="auto" path="M355 119 C319 161 249 191 188 171 C132 160 78 171 31 183" />
-              </circle>
-            </svg>
-            <span class="planning-map-route-pulse pulse-main"><i /></span>
-            <span class="planning-map-route-pulse pulse-branch"><i /></span>
-            <span class="planning-map-route-pulse pulse-return"><i /></span>
-            <span v-for="index in 3" :key="`spark-main-${index}`" :class="`planning-map-spark spark-main-${index}`"><i /></span>
-            <span v-for="index in 2" :key="`spark-branch-${index}`" :class="`planning-map-spark spark-branch-${index}`"><i /></span>
-            <span v-for="index in 3" :key="`bead-main-${index}`" :class="`planning-map-bead bead-main-${index}`"><i /></span>
-            <span v-for="index in 2" :key="`bead-return-${index}`" :class="`planning-map-bead bead-return-${index}`"><i /></span>
-            <span class="planning-map-sheen" />
-            <span v-for="index in 6" :key="index" :class="`planning-map-pin pin-${index}`"><i /></span>
-            <span class="planning-map-origin">起</span>
-            <span class="planning-map-destination">终</span>
-            <span class="planning-map-traveller"><i /><b /></span>
-            <span class="planning-map-scan" />
-            <span class="planning-map-radar"><i /><b /></span>
-            <span class="planning-map-orbit"><i /><b /><em /></span>
-            <span class="planning-map-cloud cloud-one" /><span class="planning-map-cloud cloud-two" />
-            <span class="planning-map-card card-hotel"><b>住</b><i>住宿已匹配</i></span>
-            <span class="planning-map-card card-meal"><b>餐</b><i>餐饮已匹配</i></span>
-            <span class="planning-map-card card-weather"><b>晴</b><i>天气已复核</i></span>
-            <span class="planning-itinerary-stack">
-              <i v-for="index in 4" :key="`step-${index}`"><b>{{ index }}</b><em /></i>
-            </span>
-            <span class="planning-check-badge"><i>✓</i><b>路线连续</b></span>
-            <span class="planning-stage-beacons"><i /><i /><i /></span>
           </div>
           <div class="planning-scene-copy">
             <span>{{ planningScene.index }}/{{ planningScenes.length }} · {{ planningAgentName(store.planningEvent || {}) }}</span>
