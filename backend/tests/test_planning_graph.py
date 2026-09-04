@@ -193,6 +193,46 @@ def test_best_effort_result_copies_verification_issues_to_warnings():
     }]
 
 
+@pytest.mark.asyncio
+async def test_graph_delivers_current_plan_after_three_unresolved_repairs(monkeypatch):
+    def unresolved_closure(_day_plans):
+        return [{
+            "code": "ROUTE_NOT_CLOSED",
+            "severity": "blocker",
+            "description": "行程终点未回到整体出发点",
+        }]
+
+    monkeypatch.setattr("app.planning.graph._verify_route_closure", unresolved_closure)
+    graph = build_planning_graph(
+        fake_registry(),
+        Settings(load_local_skill_credentials=False, enable_llm_requirement_extraction=False),
+    )
+    result = await graph.ainvoke(
+        {
+            "trip_id": "trip_best_effort_delivery",
+            "raw_input": "周六从武汉自驾去庐山，两天一夜",
+            "trip_request": {
+                "raw_text": "周六从武汉自驾去庐山，两天一夜",
+                "origin": {"name": "武汉"},
+                "destination": {"name": "庐山"},
+                "start_date": "2026-08-08",
+                "end_date": "2026-08-09",
+                "transport_modes": ["driving"],
+                "max_days": 2,
+            },
+            "clarification_round": 0,
+        }
+    )
+
+    verification = result["verification_result"]
+    assert verification["auto_repair_attempts"] == 3
+    assert verification["auto_repair_exhausted"] is True
+    assert verification["delivery_mode"] == "best_effort"
+    assert verification["accepted_with_warnings"] is True
+    assert verification["passed"] is True
+    assert "出发前提醒" in result["plan_markdown"]
+
+
 def test_fresh_semantic_destination_replaces_stale_parent_without_losing_same_anchor_metadata():
     stale = {
         "name": "河南",

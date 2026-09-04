@@ -658,6 +658,7 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .best-effort-icon { flex: 0 0 22px; width: 22px; height: 22px; display: grid; place-items: center; border-radius: 50%; color: #fff; background: #27a887; font-size: 13px; font-weight: 800; }
 .best-effort-banner ul { display: grid; gap: 4px; margin: 9px 0 0 32px; padding: 0; color: #536e6a; font-size: 11px; line-height: 1.5; }
 .best-effort-banner li::marker { color: #27a887; }
+.best-effort-banner-standalone { margin: 12px 0 16px; text-align: left; }
 .page-state { min-height: 70vh; display: grid; place-items: center; color: var(--muted); }.page-state.error { color: #bd3c43; }
 
 .primary-button:disabled {

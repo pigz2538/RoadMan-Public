@@ -225,8 +225,8 @@
     <div class="head"><span class="brand">RoadMan / Semifinal Direct Answers</span><span class="section">复赛四项意见 · 直接回复</span></div>
     <h2>四项意见的修改结果、数据和限制</h2>
     <div class="front-intro">
-      <p>截至提交 <code>240795b</code>，下列修改均已进入仓库，可在公网 Demo、本地容器或评测文件中核对。后续页面给出计算方法、系统结构、产品比较和安全记录。</p>
-      <span class="baseline">统计冻结：2026-09-02 · 初赛后 49 次提交</span>
+      <p>截至提交 <code>eadf8e8</code>，下列修改均已进入仓库，可在公网 Demo、本地容器或评测文件中核对。后续页面给出计算方法、系统结构、产品比较、安全记录和真实 CI/CD 流程。</p>
+      <span class="baseline">统计冻结：2026-09-04 · 初赛后 60 次提交</span>
     </div>
     <div class="priority-grid">
       <article class="priority-card">
@@ -286,11 +286,11 @@
     <div class="head"><span class="brand">RoadMan / Improvements Since 2026-08-16</span><span class="section">初赛后更新 · 全景摘要</span></div>
     <h2>2026 年 8 月 16 日之后完成的主要修改</h2>
     <div class="front-intro">
-      <p>初赛提交时间为 2026-08-16。此页按 Git 基线 <code>240795b</code> 汇总 08.17-09.02 的 49 次提交，并按用户可见结果归类。</p>
-      <span class="baseline">49 commits · 6 组修改</span>
+      <p>初赛提交时间为 2026-08-16。此页按 Git 基线 <code>eadf8e8</code> 汇总 08.17-09.04 的 60 次提交，并按用户可见结果归类。</p>
+      <span class="baseline">60 commits · 6 组修改</span>
     </div>
     <div class="snapshot-metrics">
-      <div><strong>49</strong><span>初赛后提交</span></div>
+      <div><strong>60</strong><span>初赛后提交</span></div>
       <div><strong>146 + 1</strong><span>后端基线 passed + skipped</span></div>
       <div><strong>10 / 10</strong><span>复杂口语预检</span></div>
       <div><strong>7 / 7</strong><span>完整规划与导出</span></div>
@@ -303,7 +303,7 @@
       <article class="update-card"><header><h3>03 · 续航、天气与安全降级</h3><span>08.20-09.02</span></header><ul><li>SOC 从固定重置改为按实测补能量或“桩功率 x 时间 x 效率”连续计算。</li><li>建立 12 条模拟回放误差基线和 12 个异常场景矩阵，坏值封顶、忽略或显式降级。</li><li>首页并发查询 Open-Meteo、wttr.in、MET Norway 和 7Timer；高德只负责把坐标转成地点名。</li><li>行程逐时天气使用 Open-Meteo，并结合路线时刻与景点适配；来源全部失败时不生成天气数据。</li></ul></article>
       <article class="update-card"><header><h3>04 · 地图、编辑与交互体验</h3><span>08.19-09.02</span></header><ul><li>地图标记按近邻和类别去重，一个地点只保留一份标签与类别徽标。</li><li>左侧日程、右侧 Agent、底部阶段详情可独立折叠；规划等待画面改为单焦点叙事。</li><li>自然语言/地图加点、删点、替换先给影响预览；确认后全局重排，失败可回滚。</li><li>首页新增运行监控入口；天气卡使用浏览器授权位置，失败仅回退本机上次坐标。</li></ul></article>
       <article class="update-card"><header><h3>05 · 多源数据与模型可配置</h3><span>08.29-09.02</span></header><ul><li>车型主目录缺少具体版本时并行补查多类公开数据源，保留来源、缺失和估算标记。</li><li>新能源、混动、燃油车型统一承载续航、能耗、电池、充电、座位和尺寸字段。</li><li>语义 Agent 迁移并支持可配置模型提供方、模型名、推理强度、思考开关、Token 和超时。</li><li>交通、POI、酒店、天气、油价、车型等 Skill 统一记录来源、延迟、缓存和降级状态。</li></ul></article>
-      <article class="update-card"><header><h3>06 · 工程复现、观测与交付</h3><span>08.17-09.02</span></header><ul><li>Docker Compose 运行五个服务；后台任务、SSE 进度、数据库状态和工具审计可互相核对。</li><li>补齐复杂输入、完整旅程、连续 SOC、异常降级、附件清理与 E01-E10 编辑回归。</li><li>Markdown / HTML / PDF / PPTX / 长图共享冻结快照；修改未完成时禁止导出旧结果。</li><li>中英 README、四份复赛专项文档、数据合规说明、高清截图和指标看板已归档。</li></ul></article>
+      <article class="update-card"><header><h3>06 · 工程复现、观测与交付</h3><span>08.17-09.04</span></header><ul><li>Docker Compose 运行五个服务；后台任务、SSE 进度、数据库状态和工具审计可互相核对。</li><li>补齐复杂输入、完整旅程、连续 SOC、异常降级、附件清理与 E01-E10 编辑回归。</li><li>Markdown / HTML / PDF / PPTX / 长图共享冻结快照；修改未完成时禁止导出旧结果。</li><li>落地真实 CI/CD：容器化验证链 + 一键部署流水线（见第 10 页）。</li></ul></article>
     </div>
     <div class="commit-timeline">
       <div><time>08.17</time><b>稳定基线</b><span>发布审计、运行核验与问题清单。</span></div>
@@ -312,12 +312,13 @@
       <div><time>08.28-31</time><b>评测与回归</b><span>连续 SOC、误差基线、安全矩阵、运行观测、端到端验收与双语材料。</span></div>
       <div><time>09.01</time><b>路线质量</b><span>动态车型、真实快捷入口、位置天气、路线感知候选与返程检查。</span></div>
       <div><time>09.02</time><b>入口与配置</b><span>监控入口、模型提供方参数和首页四源天气。</span></div>
+      <div><time>09.03-04</time><b>CI/CD 落地</b><span>验证链 + 一键部署流水线，提交后自动完成测试与上线的全部步骤。</span></div>
     </div>
-    <div class="footer"><span>统计口径：2026-08-17 至基线 240795b；未提交文件不计入</span><span>02 / 10</span></div>
+    <div class="footer"><span>统计口径：2026-08-17 至基线 eadf8e8；未提交文件不计入</span><span>02 / 10</span></div>
   </section>
 
   <section class="page cover">
-    <div class="head" style="border-color:#425069"><span class="brand">RoadMan / GOAI Boundless Agents / 复赛报告</span><span class="section">2026-09-02</span></div>
+    <div class="head" style="border-color:#425069"><span class="brand">RoadMan / GOAI Boundless Agents / 复赛报告</span><span class="section">2026-09-04</span></div>
     <div class="cover-layout">
       <div>
         <p class="eyebrow">多智能体自驾与中短途旅行规划工作台</p>
@@ -331,7 +332,7 @@
       </div>
     </div>
     <div class="cover-metrics">
-      <div class="cover-metric"><strong>49</strong><span>2026-08-16 后 Git 提交 / 基线 240795b</span></div>
+      <div class="cover-metric"><strong>60</strong><span>2026-08-16 后 Git 提交 / 基线 eadf8e8</span></div>
       <div class="cover-metric"><strong>8.442%</strong><span>能耗 MAPE，模拟回放</span></div>
       <div class="cover-metric"><strong>2.799pp</strong><span>到达 SOC MAE</span></div>
       <div class="cover-metric"><strong>12 / 12</strong><span>异常与降级场景通过</span></div>
@@ -530,7 +531,7 @@
         <p class="caption">地图聚焦态完整画面：左右栏与底部详情可折叠，只保留两侧展开入口和阶段切换；真实路线与地点保持可见。</p>
       </div>
     </div>
-    <div class="footer"><span>统计口径：2026-08-17 至基线 240795b，共 49 次提交；未提交改动不计入</span><span>08 / 10</span></div>
+    <div class="footer"><span>统计口径：2026-08-17 至基线 eadf8e8，共 60 次提交；未提交改动不计入</span><span>08 / 10</span></div>
   </section>
 
   <section class="page soft">
@@ -552,7 +553,7 @@
           <div class="metric"><strong>5</strong><span>一致导出格式</span></div>
           <div class="metric"><strong>5</strong><span>核心运行服务</span></div>
           <div class="metric"><strong>10 / 10</strong><span>编辑重排验收</span></div>
-          <div class="metric"><strong>49</strong><span>初赛后提交 / 基线 240795b</span></div>
+          <div class="metric"><strong>60</strong><span>初赛后提交 / 基线 eadf8e8</span></div>
         </div>
       </div>
       <div>
@@ -581,47 +582,34 @@
   </section>
 
   <section class="page dark">
-    <div class="head"><span class="brand">Conclusion / Evidence Index</span><span class="section">结论与证据索引</span></div>
-    <h2>答辩时可直接核对的四组结果</h2>
-    <div class="grid-4" style="margin-bottom:5mm">
-      <div class="panel"><span class="pill">续航</span><h3 style="margin-top:2mm">连续计算</h3><p>实际补能优先，功率估算次之，缺失时保守降级；12 条回放量化误差并明确非实车。</p></div>
-      <div class="panel"><span class="pill green">复现</span><h3 style="margin-top:2mm">可运行版本</h3><p>五服务启动、多智能体与校验分工、一键检查、完整旅程和编辑回归。</p></div>
-      <div class="panel"><span class="pill orange">价值</span><h3 style="margin-top:2mm">编排层定位</h3><p>连接内容与导航，聚焦高约束多日旅程；B2C 订阅与车企/租车白标并行。</p></div>
-      <div class="panel"><span class="pill red">安全</span><h3 style="margin-top:2mm">不伪造事实</h3><p>外部服务失败时公开降级；不接车辆控制；数据最小化并支持行程级联硬删除。</p></div>
+    <div class="head"><span class="brand">Engineering / Real CI/CD Pipeline</span><span class="section">真实 CI/CD 流程</span></div>
+    <h2>从提交到上线的真实流水线：容器化验证 + 一键部署</h2>
+    <p class="lead" style="margin-bottom:4mm">本项目不依赖录屏演示：每次代码提交都会跑通一整套可复现的验证，再通过部署脚本把新版本推到本地容器、服务器和公网隧道。下面两条链路都是仓库里的真实脚本，不是演示截图。</p>
+    <div class="process" style="grid-template-columns:repeat(5, 1fr)">
+      <div class="step"><strong>1 · 构建镜像</strong><span>docker compose build backend / worker / frontend</span></div>
+      <div class="step"><strong>2 · 后端测试</strong><span>容器内 pytest：146 passed、1 skipped、0 failed</span></div>
+      <div class="step"><strong>3 · 专项评测</strong><span>续航 12 回放阈值 + 12 异常降级场景</span></div>
+      <div class="step"><strong>4 · 前端验证</strong><span>npm run test（单测）</span></div>
+      <div class="step"><strong>5 · 生产构建</strong><span>npm run build 产物可运行</span></div>
     </div>
-    <div class="grid-2" style="grid-template-columns:1.08fr .92fr">
+    <div class="grid-2" style="grid-template-columns:1.06fr .94fr;margin-top:5mm">
       <div>
-        <h3>建议 4 分钟答辩顺序</h3>
-        <table>
-          <thead><tr><th style="width:21mm">时间</th><th style="width:36mm">画面</th><th>要讲清楚的结论</th></tr></thead>
-          <tbody>
-            <tr><td>0:00-0:35</td><td>首页需求输入</td><td>目标用户是高约束旅行者；系统先澄清，再启动后台规划。</td></tr>
-            <tr><td>0:35-1:20</td><td>规划工作台</td><td>地图、日程、住宿、餐饮、补能和协作消息来自同一状态，后台渐进生成。</td></tr>
-            <tr><td>1:20-2:05</td><td>续航阶段与评测</td><td>SOC 连续传递，实际补能优先。指标来自 12 条模拟回放，不能当作实车承诺。</td></tr>
-            <tr><td>2:05-2:45</td><td>编辑预览与重排</td><td>修改先预览再确认；路线、时间、酒店和 SOC 全局重算；失败不污染原版本。</td></tr>
-            <tr><td>2:45-3:25</td><td>异常降级</td><td>补能服务中断时路线降为需确认；天气和班次缺失不伪造实时事实。</td></tr>
-            <tr><td>3:25-4:00</td><td>指标与商业价值</td><td>与地图/攻略的差异是“执行编排层”；说明目标用户、订阅/白标路径和安全边界。</td></tr>
-          </tbody>
-        </table>
-        <div class="note" style="margin-top:4mm"><strong>不要回避的事实：</strong>模拟续航基线仍需真实车辆校准；公网多用户治理尚未完全补齐。诚实披露短板，比用“100% 可执行”掩盖风险更有说服力。</div>
+        <h3>CI · 容器化验证链 <code style="font-size:7pt">deploy/semifinal-check.ps1</code></h3>
+        <div class="role-row"><strong>离线一键</strong><span>构建三个镜像，容器内运行全部后端测试与复赛专项评测；前端单测与生产构建随后执行</span><em>pytest + npm</em></div>
+        <div class="role-row"><strong>运行验收</strong><span>-Live 启动五服务后，跑 API 冒烟、完整用户旅程和编辑重排验收</span><em>api_smoke / full_journey / edit_replan</em></div>
+        <div class="role-row"><strong>证据固化</strong><span>每次运行保存 Git SHA、运行环境、JSON 结果和人类可读摘要；结果进仓库可回查</span><em>readiness JSON</em></div>
+        <h3 style="margin-top:4mm">CD · 一键部署流水线 <code style="font-size:7pt">deploy/cd-deploy.ps1</code></h3>
+        <div class="role-row"><strong>提交推送</strong><span>git 提交并推送到 GitHub 双远端（RoadMan + RoadMan-Public）</span><em>git push</em></div>
+        <div class="role-row"><strong>本地上线</strong><span>docker compose 重建本地容器并健康检查前端 8080 与 API 8000</span><em>docker</em></div>
+        <div class="role-row"><strong>服务器上线</strong><span>打包代码 scp 到服务器，容器重建后先内网验证，再验证外网隧道；隧道异常自动检查并重启 frpc，等待旧会话过期后重试</span><em>server-deploy.sh</em></div>
       </div>
       <div>
-        <h3>最小证据索引</h3>
-        <div class="evidence-list" style="grid-template-columns:1fr">
-          <div class="evidence"><b>01</b><span>续航误差基线：预测能耗、等效续航、到达 SOC 与逐样本误差</span></div>
-          <div class="evidence"><b>02</b><span>安全场景基线：12 个异常输入、预期行为和路线可执行性</span></div>
-          <div class="evidence"><b>03</b><span>复赛 readiness：Git SHA、运行环境、阈值、必需文件与总体结果</span></div>
-          <div class="evidence"><b>04</b><span>真实回归报告：复杂输入 10/10、完整规划 7/7、编辑 E01-E10</span></div>
-          <div class="evidence"><b>05</b><span>截图清单：5 张 2560 x 1440 产品/指标证据图及来源</span></div>
-          <div class="evidence"><b>06</b><span>四份专项文档：续航、复现、差异化、安全与数据边界</span></div>
-        </div>
-        <div class="panel" style="margin-top:4mm;border-color:#53617a">
-          <h3>下一阶段优先级</h3>
-          <ol><li>按统一字段采集至少 30 个脱敏实车有效路段，校准低温、高速、拥堵和山路误差。</li><li>完成 8-12 名目标用户对照测试，报告时间、遗漏项、修改次数和信心。</li><li>公网多人使用前补账号、资源授权、租户隔离、隐私流程、限流和安全运维。</li></ol>
-        </div>
+        <div class="panel" style="border-top:1mm solid var(--blue)"><span class="pill">真实运行记录</span><h3 style="margin-top:2mm">近期已跑通</h3><ul><li>流水线于 9 月引入（<code>1700b45</code>），最新版本 <code>eadf8e8</code> 已由 CD 部署到本地与服务器。</li><li>本地与服务器容器均为最新版本，外网隧道 HTTPS 可访问。</li><li>流水线曾在隧道失效时自动拉起 frpc 并恢复外网访问。</li></ul></div>
+        <div class="panel" style="margin-top:3mm;border-top:1mm solid var(--green)"><span class="pill green">为什么可复现</span><h3 style="margin-top:2mm">验证与部署都是脚本</h3><ul><li>不需要人工点页面：测试与部署命令固定，结果可重跑、可对比。</li><li>每次上线后内网、外网两层检查，失败会显式报告，不静默通过。</li><li>密钥不入仓库：环境变量与服务器 sudo 密码在运行时注入。</li></ul></div>
+        <div class="note" style="margin-top:3mm"><strong>当前边界：</strong>CI/CD 由本地脚本驱动，尚未接 GitHub Actions 托管触发；多用户治理仍未完成，公网 Demo 仍为受控评审环境。</div>
       </div>
     </div>
-    <div class="footer"><span>RoadMan：可执行、可修改、可验证的多智能体旅行规划工作台</span><span>10 / 10</span></div>
+    <div class="footer"><span>证据：deploy/cd-deploy.ps1、deploy/semifinal-check.ps1、deploy/server-deploy.sh、deploy/*_acceptance.py</span><span>10 / 10</span></div>
   </section>
 </body>
 </html>

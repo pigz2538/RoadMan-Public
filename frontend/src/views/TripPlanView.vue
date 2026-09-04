@@ -122,6 +122,9 @@ function humanizePlanningIssue(issue: { code: string; description: string }) {
     RETURN_DEADLINE_UNACHIEVABLE: description,
     DRIVING_STAGE_CALENDAR_MISMATCH: `一段移动跨出了当天可用时间：${description}`,
     EMPTY_DAY_STAGES: `有一天没有形成可执行路线：${description}`,
+    EMPTY_PLAN: '当前还没有完整的移动路线，相关数据恢复后请在出发前重新核对。',
+    GEOCODE_UNAVAILABLE: '起终点坐标暂未取得，地图与导航距离需要出发前重新查询。',
+    ROUTE_UNAVAILABLE: '路线服务暂未返回可执行道路，出发前请重新查询实时路线。',
   }
   return messages[issue.code] || description || '规划结果仍有一项未解决的约束。'
 }
@@ -922,6 +925,18 @@ watch(bottomPanelCollapsed, (collapsed) => window.localStorage.setItem(panelStor
       <section class="planning-state glass-card">
       <span class="eyebrow">RoadMan 智能体正在协作</span>
       <h2>{{ planningSnapshot.status === 'failed' ? '这次行程需要调整后再规划' : planningSnapshot.clarification_question || '正在把行程一项一项加入详情页' }}</h2>
+      <div v-if="bestEffortDelivery" class="best-effort-banner best-effort-banner-standalone" aria-label="出发前复核提醒">
+        <div class="best-effort-heading">
+          <span class="best-effort-icon" aria-hidden="true">✓</span>
+          <div>
+            <strong>行程已生成，附带出发前复核提醒</strong>
+            <small>智能体已自动重排 {{ bestEffortRepairAttempts }} 次；以下检查项不会阻塞你查看当前草案。</small>
+          </div>
+        </div>
+        <ul v-if="planningReminders.length">
+          <li v-for="reminder in planningReminders" :key="reminder">{{ reminder }}</li>
+        </ul>
+      </div>
       <TransitionGroup v-if="planningSnapshot.status !== 'failed' && visiblePlanningEvents.length" name="planning-event" tag="div" class="planning-event-list">
         <article v-for="(event, index) in visiblePlanningEvents" :key="planningEventKey(event)">
           <i :class="{ active: index === visiblePlanningEvents.length - 1 }" />

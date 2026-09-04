@@ -87,7 +87,7 @@
 
 所有导出只在行程状态为 `completed` 时开放，否则返回 `409 PLANNING_NOT_COMPLETED`；快照尚未生成时返回 `409 ROADBOOK_NOT_READY`。
 
-规划图在最终校验发现可修复问题时，会自动执行最多 3 轮 `verify_plan ⇄ repair_plan` 闭环并逐轮通过 SSE 展示重排进度。只有验证通过才会发送 100%；`verification_result.auto_repair_exhausted=true` 表示三轮自动修复仍未解决，此时才向用户展示人工调整入口与可读的冲突摘要。
+规划图在最终校验发现问题时，会自动执行最多 3 轮 `verify_plan ⇄ repair_plan` 闭环并逐轮通过 SSE 展示重排进度。三轮后仍未消解的校验项不再阻塞交付：快照以 `status=completed`、`verification_result.delivery_mode=best_effort` 和 `accepted_with_warnings=true` 返回，`verification_result.issues` 与 Trip `warnings` 同时保留可读的出发前提醒。必填信息缺失仍走 `clarification_required`；代码/任务异常仍发送 `planning_failed`。
 
 ### SSE 事件协议
 

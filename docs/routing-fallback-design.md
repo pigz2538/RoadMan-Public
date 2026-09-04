@@ -47,7 +47,7 @@ RoadMan 只把第三方返回的真实道路/步行/骑行/公交 geometry 当�
 
 ## 自动复核修复
 
-复核不是 LLM 协作协议，而是图内确定的 verify ⇄ repair 确定性循环（`backend/app/planning/graph.py`）。`verify_plan` 汇总三类校验：`verify_deep_drive_plan`（能耗、驾驶休息、天气、阶段计时、步行/骑行上限、三餐覆盖）、`verify_tourism_plan`（景点/住宿/餐饮与时间窗）与 `_verify_route_closure`（返程闭环）。只要存在 `blocker` 级别问题且自动修复次数 `repair_attempts` 未达到上限 `MAX_AUTO_REPAIR_ATTEMPTS=3`，就走 `repair_plan`：重跑 `schedule_tourism_activities`、`review_daily_schedule` 与时间重叠规整 `_repair_activity_stage_overlaps`，然后回到 `verify_plan` 再次校验。最多迭代 3 轮；3 轮后仍有 blocker 则记为 `auto_repair_exhausted`，交前端展示可执行约束。
+复核不是 LLM 协作协议，而是图内确定的 verify ⇄ repair 确定性循环（`backend/app/planning/graph.py`）。`verify_plan` 汇总三类校验：`verify_deep_drive_plan`（能耗、驾驶休息、天气、阶段计时、步行/骑行上限、三餐覆盖）、`verify_tourism_plan`（景点/住宿/餐饮与时间窗）与 `_verify_route_closure`（返程闭环）。只要存在 `blocker` 级别问题且自动修复次数 `repair_attempts` 未达到上限 `MAX_AUTO_REPAIR_ATTEMPTS=3`，就走 `repair_plan`：重跑 `schedule_tourism_activities`、`review_daily_schedule` 与时间重叠规整 `_repair_activity_stage_overlaps`，然后回到 `verify_plan` 再次校验。最多迭代 3 轮；3 轮后仍有任意校验项则记为 `auto_repair_exhausted`，以 `delivery_mode=best_effort` 完成交付，所有未消解项同时进入快照、Trip warnings 和导出中的“出发前提醒”，不弹阻断式失败对话。必填信息缺失或代码异常仍按原流程暂停/失败。
 
 景区型目的地（需求智能体返回 `destination_scope=poi`，或地理编码显示为兴趣点）采用 50 km 的目的地聚焦半径；明确说“几天都在这里/不去其他地方”时收紧到 35 km。城市、省域和多目的地请求不套用该边界，仍由目的地研究智能体覆盖全域知名地标。候选进入路线前会合并同一景区的入口、停车场、游客中心等变体，保留胜出候选的来源与别名；随后按用户必去、研究优先级、适配评分和相邻转场距离选择，而不是只按热度或直线距离。普通城市日原则上安排不超过两个主要景点，研究证据与时间窗充分时才放宽到三个；锚点型目的地每天保留一个从容停留，普通景点预留约 180-240 分钟，只有来源明确的紧凑场馆才缩短。
 
