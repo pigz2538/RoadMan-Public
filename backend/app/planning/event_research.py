@@ -10,10 +10,26 @@ from __future__ import annotations
 
 import html
 import re
+from datetime import date
 from typing import Any, Awaitable, Callable
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
 import httpx
+
+
+_CHINESE_DATE_RANGE = re.compile(
+    r"(?:(?P<year>20\d{2})\s*年\s*)?"
+    r"(?P<month>1[0-2]|0?[1-9])\s*月\s*"
+    r"(?P<day>3[01]|[12]\d|0?[1-9])\s*日?\s*"
+    r"(?:至|到|[-—–~～])\s*"
+    r"(?:(?P<end_month>1[0-2]|0?[1-9])\s*月\s*)?"
+    r"(?P<end_day>3[01]|[12]\d|0?[1-9])\s*日"
+)
+_CHINESE_SINGLE_DATE = re.compile(
+    r"(?:(?P<year>20\d{2})\s*年\s*)?"
+    r"(?P<month>1[0-2]|0?[1-9])\s*月\s*"
+    r"(?P<day>3[01]|[12]\d|0?[1-9])\s*日"
+)
 
 
 def _clean_text(value: str) -> str:
@@ -97,13 +113,20 @@ async def research_special_events(
                         break
                 if item["sources"]:
                     item["status"] = "researched"
+                    facts: dict[str, Any] = {}
                     if fact_agent:
                         try:
                             facts = await fact_agent(event, year, item["sources"])
                         except Exception:  # source search must remain non-blocking
                             facts = {}
-                        if facts:
-                            item["facts"] = facts
+                    # The model is the primary evidence interpreter.  A
+                    # conservative parser fills only dates/numbers literally
+                    # present in search excerpts, so a transient model failure
+                    # never turns a useful result into “已找到资料” with no
+                    # details.  It does not infer astronomical facts.
+                    facts = _merge_explicit_source_facts(facts, year, item["sources"])
+                    if facts:
+                        item["facts"] = facts
             except (httpx.HTTPError, ValueError):
                 item["status"] = "needs_review"
             item["search_url"] = f"https://duckduckgo.com/?q={quote(query)}"
@@ -120,6 +143,83 @@ def _normalize_result_url(value: str) -> str:
         if target:
             return unquote(target)
     return url
+
+
+def _merge_explicit_source_facts(
+    agent_facts: dict[str, Any] | None,
+    year: int,
+    sources: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Fill missing event fields using only literal source-excerpt evidence."""
+    facts = dict(agent_facts or {})
+    matched_indexes: list[int] = []
+    matched_ranges: list[tuple[str, str]] = []
+    zhr_values: list[tuple[int, int]] = []
+
+    for index, source in enumerate(sources):
+        text = _clean_text(f"{source.get('title') or ''} {source.get('snippet') or ''}")
+        if not text:
+            continue
+        date_range = _explicit_date_range(text, year)
+        if date_range:
+            matched_ranges.append(date_range)
+            matched_indexes.append(index)
+        zhr_match = re.search(r"(?:ZHR\s*[:：约为可达]*|每小时[^0-9]{0,10})(\d{1,4})", text, re.I)
+        if zhr_match:
+            zhr_values.append((index, int(zhr_match.group(1))))
+
+    if matched_ranges:
+        # Prefer the range corroborated by the greatest number of excerpts.
+        best_range = max(set(matched_ranges), key=matched_ranges.count)
+        facts.setdefault("peak_start_date", best_range[0])
+        facts.setdefault("peak_end_date", best_range[1])
+    if "zhr" not in facts and zhr_values:
+        facts["zhr"] = zhr_values[0][1]
+        matched_indexes.append(zhr_values[0][0])
+
+    evidence = facts.get("evidence_source_indexes")
+    if matched_indexes and (not isinstance(evidence, list) or not evidence):
+        facts["evidence_source_indexes"] = list(dict.fromkeys(matched_indexes))[:8]
+    if facts.get("peak_start_date") and not facts.get("summary"):
+        end = facts.get("peak_end_date")
+        date_text = str(facts["peak_start_date"])
+        if end and end != facts["peak_start_date"]:
+            date_text += f" 至 {end}"
+        facts["summary"] = f"公开资料明确给出的核心日期窗口为 {date_text}；具体时刻及现场可见性仍需临近出发复核。"
+    if facts and not facts.get("confidence"):
+        corroborations = matched_ranges.count(max(set(matched_ranges), key=matched_ranges.count)) if matched_ranges else 0
+        facts["confidence"] = "medium" if corroborations >= 2 else "low"
+    return facts
+
+
+def _explicit_date_range(text: str, expected_year: int) -> tuple[str, str] | None:
+    match = _CHINESE_DATE_RANGE.search(text)
+    if match:
+        parsed_year = int(match.group("year") or expected_year)
+        if parsed_year != expected_year:
+            return None
+        month = int(match.group("month"))
+        end_month = int(match.group("end_month") or month)
+        try:
+            start = date(parsed_year, month, int(match.group("day")))
+            end = date(parsed_year, end_month, int(match.group("end_day")))
+        except ValueError:
+            return None
+        if end < start:
+            return None
+        return start.isoformat(), end.isoformat()
+
+    match = _CHINESE_SINGLE_DATE.search(text)
+    if match:
+        parsed_year = int(match.group("year") or expected_year)
+        if parsed_year != expected_year:
+            return None
+        try:
+            value = date(parsed_year, int(match.group("month")), int(match.group("day")))
+        except ValueError:
+            return None
+        return value.isoformat(), value.isoformat()
+    return None
 
 
 def event_research_summary(item: dict[str, Any]) -> str:

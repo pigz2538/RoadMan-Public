@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   Activity, Bell, ChevronDown, CircleUserRound, CloudSun, Grid2X2, Paperclip,
@@ -14,6 +14,7 @@ import {
   reverseGeocodeLocation,
   startPlanning as startPlanningRequest,
   type PreflightResult,
+  type SpecialEventResearch,
 } from '../api/trips'
 import {
   createVehicle,
@@ -31,6 +32,13 @@ const router = useRouter()
 const PROMPT_STORAGE_KEY = 'roadman:last-trip-prompt'
 const promptSuggestion = '周六早上从武汉出发，去庐山两天一夜，周日晚八点前回来，喜欢自然景观'
 const prompt = ref('')
+const promptInput = ref<HTMLTextAreaElement | null>(null)
+function autoResizePrompt() {
+  const el = promptInput.value
+  if (!el) return
+  el.style.height = 'auto'
+  el.style.height = `${el.scrollHeight}px`
+}
 const historyOpen = ref(false)
 const historyTrips = ref<Trip[]>([])
 const historyDeletingId = ref<string | null>(null)
@@ -199,6 +207,7 @@ function useQuickPrompt(value: string) {
 
 onMounted(() => {
   prompt.value = window.sessionStorage.getItem(PROMPT_STORAGE_KEY) || ''
+  nextTick(autoResizePrompt)
   isFirefox.value = /firefox/i.test(navigator.userAgent)
   void loadHistory()
   void loadVehicles()
@@ -658,6 +667,39 @@ function issueKey(issue: PreflightResult['issues'][number]) {
   return `${issue.code}:${issue.field || ''}`
 }
 
+function formatEventDate(value?: string): string {
+  const match = value?.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  return match ? `${match[1]} 年 ${Number(match[2])} 月 ${Number(match[3])} 日` : (value || '')
+}
+
+function eventWindowText(item: SpecialEventResearch): string {
+  const facts = item.facts
+  if (facts?.peak_start_date) {
+    const start = formatEventDate(facts.peak_start_date)
+    const end = facts.peak_end_date && facts.peak_end_date !== facts.peak_start_date
+      ? formatEventDate(facts.peak_end_date)
+      : ''
+    return end ? `${start} 至 ${end}` : start
+  }
+  return facts?.active_period || facts?.observation_window_local || ''
+}
+
+function eventEvidenceSources(item: SpecialEventResearch) {
+  const sources = item.sources || []
+  const evidenceIndexes = item.facts?.evidence_source_indexes || []
+  const prioritized = [
+    ...evidenceIndexes.map((index) => sources[index]).filter(Boolean),
+    ...sources,
+  ]
+  return prioritized.filter((source): source is NonNullable<typeof source> => Boolean(source)).filter((source, index, all) =>
+    all.findIndex((candidate) => (candidate.url || candidate.title) === (source.url || source.title)) === index,
+  ).slice(0, 3)
+}
+
+function eventConfidenceLabel(value?: string): string {
+  return value === 'high' ? '多来源高度一致' : value === 'medium' ? '来源基本一致' : '单一来源，建议复核'
+}
+
 function resetPreflight() {
   preflight.value = null
   clarificationAnswers.value = {}
@@ -988,17 +1030,33 @@ function activate(label: string) {
             </div>
           </template>
           <section v-if="preflight.special_event_research?.length" class="preflight-event-research" aria-label="特殊活动检索结果">
-            <header><strong>智能体已核对特殊活动</strong><small>请根据来源中的窗口选择日期</small></header>
+            <header><strong>智能体已核对特殊活动</strong><small>以下时间来自公开资料，可据此补充行程日期</small></header>
             <article v-for="item in preflight.special_event_research" :key="item.event">
-              <strong>{{ item.event }}</strong>
-              <span v-if="item.facts?.peak_start_date">极大期：{{ item.facts.peak_start_date }}{{ item.facts.peak_end_date && item.facts.peak_end_date !== item.facts.peak_start_date ? ` 至 ${item.facts.peak_end_date}` : '' }}</span>
-              <span v-if="item.facts?.peak_time_local">北京时间 {{ item.facts.peak_time_local }}</span>
-              <span v-else-if="item.facts?.peak_time_utc">UTC {{ item.facts.peak_time_utc }}</span>
-              <span v-else-if="item.facts?.peak_time_label">来源时间：{{ item.facts.peak_time_label }}</span>
-              <p>{{ item.facts?.summary || '已找到公开资料，出发前仍需复核天气与现场可见性。' }}</p>
-              <nav v-if="item.sources?.length">
-                <a v-for="(source, index) in item.sources.slice(0, 2)" :key="source.url || index" :href="source.url" target="_blank" rel="noreferrer">{{ source.title || `来源 ${index + 1}` }}</a>
-              </nav>
+              <div class="event-title-row">
+                <strong>{{ item.event }}</strong>
+                <small v-if="item.facts?.confidence">{{ eventConfidenceLabel(item.facts.confidence) }}</small>
+              </div>
+              <div class="event-window" :class="{ unavailable: !eventWindowText(item) }">
+                <small>{{ eventWindowText(item) ? '资料给出的核心日期窗口' : '尚无可核验的具体日期' }}</small>
+                <b>{{ eventWindowText(item) || '当前来源只有活动介绍，请打开下方来源确认时间' }}</b>
+              </div>
+              <div class="event-fact-tags">
+                <span v-if="item.facts?.peak_time_local">极大时刻：北京时间 {{ item.facts.peak_time_local }}</span>
+                <span v-else-if="item.facts?.peak_time_utc">极大时刻：UTC {{ item.facts.peak_time_utc }}</span>
+                <span v-else-if="item.facts?.peak_time_label">来源时间：{{ item.facts.peak_time_label }}</span>
+                <span v-if="item.facts?.observation_window_local">建议观测：{{ item.facts.observation_window_local }}</span>
+                <span v-if="item.facts?.zhr != null">参考天顶流量：每小时约 {{ item.facts.zhr }} 颗</span>
+              </div>
+              <p v-if="item.facts?.summary" class="event-summary">{{ item.facts.summary }}</p>
+              <p v-else class="event-summary">暂未从摘要中提取出足够明确的时间；下面展示检索原文，不再只显示“已找到资料”。</p>
+              <div v-if="eventEvidenceSources(item).length" class="event-source-list">
+                <div v-for="(source, index) in eventEvidenceSources(item)" :key="source.url || source.title || index" class="event-source">
+                  <a v-if="source.url" :href="source.url" target="_blank" rel="noreferrer">{{ source.title || `公开来源 ${index + 1}` }}</a>
+                  <strong v-else>{{ source.title || `公开来源 ${index + 1}` }}</strong>
+                  <p v-if="source.snippet">{{ source.snippet }}</p>
+                </div>
+              </div>
+              <a v-if="item.search_url" class="event-search-link" :href="item.search_url" target="_blank" rel="noreferrer">查看完整检索结果</a>
             </article>
           </section>
        </section>
@@ -1007,13 +1065,15 @@ function activate(label: string) {
         <div class="prompt-wrap">
           <label for="trip-prompt">告诉我您想去哪里</label>
           <div class="prompt-composer">
-            <input
+            <textarea
               id="trip-prompt"
+              ref="promptInput"
               v-model="prompt"
-              @input="resetPreflight"
-              @keyup.enter="startPlanning"
+              rows="1"
+              @input="resetPreflight; autoResizePrompt()"
+              @keydown.enter.exact.prevent="startPlanning"
               aria-label="旅行需求"
-            />
+            ></textarea>
             <div class="composer-actions">
               <button class="composer-icon" aria-label="添加附件" title="添加附件（预留）">
                 <Paperclip />

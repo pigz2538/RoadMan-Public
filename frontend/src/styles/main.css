@@ -207,9 +207,15 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .prompt-composer:focus-within {
   border-color: #76adff; box-shadow: 0 0 0 4px rgba(70, 132, 246, .1);
 }
-.prompt-composer input {
+.prompt-composer input,
+.prompt-composer textarea {
   min-width: 0; flex: 1; border: 0; background: transparent; outline: 0;
   padding: 10px 0; color: #30415d; font-size: 17px;
+}
+.prompt-composer textarea {
+  resize: none; overflow: hidden; line-height: 1.5; min-height: 24px;
+  max-height: 180px; overflow-y: auto; display: block; width: 100%;
+  font-family: inherit;
 }
 .prompt-suggestion {
   display: flex; align-items: center; flex-wrap: wrap; gap: 7px 10px;
@@ -681,15 +687,26 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .preflight-summary dt { margin-bottom: 3px; color: #6b80a0; font-size: 12px; }
 .preflight-summary dd { margin: 0; color: #153b69; font-size: 15px; font-weight: 700; overflow-wrap: anywhere; }
 .preflight-summary div:last-child:nth-child(4) { grid-column: 1 / -1; }
-.preflight-event-research { margin-top: 14px; padding: 14px 16px; border: 1px solid #c9ddf7; border-radius: 14px; background: #f7fbff; }
-.preflight-event-research > header { display: flex; justify-content: space-between; gap: 12px; color: #1c5eae; }
-.preflight-event-research > header small { color: #7185a1; }
-.preflight-event-research article { margin-top: 10px; padding-top: 10px; border-top: 1px solid #dbe8f7; }
-.preflight-event-research article > strong { font-size: 15px; }
-.preflight-event-research article > span { display: inline-block; margin: 4px 12px 0 0; color: #315378; font-size: 13px; font-weight: 700; }
-.preflight-event-research article p { margin: 5px 0; font-size: 13px; }
-.preflight-event-research nav { display: flex; flex-wrap: wrap; gap: 10px; }
-.preflight-event-research a { color: #286cf6; font-size: 12px; }
+.preflight-event-research { margin-top: 14px; padding: 15px 16px; border: 1px solid #c9ddf7; border-radius: 14px; background: #f7fbff; }
+.preflight-event-research > header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; color: #1c5eae; }
+.preflight-event-research > header small { color: #7185a1; text-align: right; }
+.preflight-event-research article { margin-top: 11px; padding-top: 12px; border-top: 1px solid #dbe8f7; }
+.event-title-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.event-title-row > strong { color: #173f70; font-size: 16px; }
+.event-title-row > small { padding: 3px 8px; border-radius: 999px; color: #37705c; background: #e5f7ee; font-size: 11px; white-space: nowrap; }
+.event-window { display: grid; gap: 3px; margin: 9px 0 7px; padding: 11px 13px; border: 1px solid #b8d4fb; border-radius: 11px; background: linear-gradient(135deg, #eaf4ff, #f1edff); }
+.event-window small { color: #5b7698; font-size: 11px; }
+.event-window b { color: #155cb7; font-size: 17px; line-height: 1.4; }
+.event-window.unavailable { border-color: #ead7ac; background: #fffaf0; }
+.event-window.unavailable b { color: #8a6122; font-size: 14px; }
+.event-fact-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.event-fact-tags span { padding: 4px 8px; border-radius: 8px; color: #315378; background: #eaf1f9; font-size: 12px; font-weight: 700; }
+.preflight-event-research .event-summary { margin: 8px 0; color: #506b8c; font-size: 13px; line-height: 1.55; }
+.event-source-list { display: grid; gap: 7px; margin-top: 8px; }
+.event-source { padding: 8px 10px; border: 1px solid #d8e5f4; border-radius: 9px; background: rgba(255, 255, 255, .82); }
+.event-source a, .event-source > strong { display: block; color: #286cf6; font-size: 12px; font-weight: 750; line-height: 1.45; }
+.event-source p { display: -webkit-box; margin: 4px 0 0; overflow: hidden; color: #637893; font-size: 12px; line-height: 1.45; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.preflight-event-research .event-search-link { display: inline-block; margin-top: 9px; color: #286cf6; font-size: 12px; font-weight: 700; }
 
 .planning-state {
   width: min(760px, calc(100% - 40px));
