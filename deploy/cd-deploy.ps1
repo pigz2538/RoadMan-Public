@@ -9,7 +9,7 @@ param(
   [switch]$SkipServer
 )
 
-$ErrorActionPreference = 'Stop'
+$ErrorActionPreference = 'Continue'
 $Root = Split-Path -Parent $PSScriptRoot
 $Server = '10.10.51.136'
 $ServerUser = 'z2538'

@@ -43,17 +43,20 @@ EXT_CODE=$(check_ext)
 echo "外网 $EXT_URL: $EXT_CODE"
 
 if [ "$EXT_CODE" != "200" ]; then
-  echo "[server] 外网不通，重启 frpc 隧道"
-  pkill -f "$FRPC_BIN" 2>/dev/null || true
-  sleep 2
-  nohup "$FRPC_BIN" -c "$FRPC_INI" > /tmp/frpc.log 2>&1 &
-  sleep 8
-  echo "[server] frpc 进程:"
-  ps aux | grep "$FRPC_BIN" | grep -v grep || echo "frpc 未运行!"
-  echo "[server] frpc 日志:"
-  tail -5 /tmp/frpc.log 2>/dev/null || true
-  echo "[server] 等待 30s 让旧会话过期后重试"
-  sleep 30
+  echo "[server] 外网不通，检查 frpc 是否在运行"
+  if ! pgrep -f "$FRPC_BIN" > /dev/null 2>&1; then
+    echo "[server] frpc 未运行，以普通用户身份启动（frpc 不需要 root，日志写用户目录）"
+    nohup "$FRPC_BIN" -c "$FRPC_INI" > /home/z2538/chmlfrp/frpc.log 2>&1 &
+    sleep 8
+    echo "[server] frpc 进程:"
+    ps aux | grep "$FRPC_BIN" | grep -v grep || echo "frpc 未运行!"
+    echo "[server] frpc 日志:"
+    tail -5 /home/z2538/chmlfrp/frpc.log 2>/dev/null || true
+  else
+    echo "[server] frpc 已在运行（PID $(pgrep -f "$FRPC_BIN" | head -1)），不重复重启"
+  fi
+  echo "[server] 等待 60s 让 frp 服务器端旧会话过期后重试"
+  sleep 60
   EXT_CODE=$(check_ext)
   echo "外网重试 $EXT_URL: $EXT_CODE"
 fi
