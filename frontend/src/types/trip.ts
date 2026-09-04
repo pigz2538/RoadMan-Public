@@ -163,6 +163,8 @@ export interface Trip {
   status: string
   days: DayPlan[]
   warnings: Array<{ code: string; message: string }>
+  created_at?: string
+  updated_at?: string
   request?: {
     raw_text: string
     defaults_applied: string[]

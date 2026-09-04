@@ -390,7 +390,12 @@ async function loadHistory() {
     const trips = await listTrips()
     historyTrips.value = trips
       .filter((trip) => trip.id !== 'trip_wuhan_lushan_demo')
-      .sort((left, right) => right.id.localeCompare(left.id))
+      .sort((left, right) => {
+        const leftTime = left.created_at ? Date.parse(left.created_at) : NaN
+        const rightTime = right.created_at ? Date.parse(right.created_at) : NaN
+        if (Number.isFinite(leftTime) && Number.isFinite(rightTime)) return rightTime - leftTime
+        return right.id.localeCompare(left.id)
+      })
     historySelectedIds.value = historySelectedIds.value.filter((id) => historyTrips.value.some((trip) => trip.id === id))
   } catch {
     historyTrips.value = []
