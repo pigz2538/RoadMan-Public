@@ -40,7 +40,8 @@ if (-not $SkipPush) {
 if (-not $SkipPush) {
   Step "2/6 推送双远端"
   git push origin main 2>&1 | Out-Null
-  if ($LASTEXITCODE -eq 0) { Ok "已推送 RoadMan + RoadMan-Public (main)" } else { throw "git push 失败" }
+  $pushExit = $LASTEXITCODE
+  if ($pushExit -eq 0) { Ok "已推送 RoadMan + RoadMan-Public (main)" } else { throw "git push 失败 (exit $pushExit)" }
 }
 
 # ---------- 3. 本地 docker 重建 ----------
