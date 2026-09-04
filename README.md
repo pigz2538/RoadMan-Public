@@ -8,15 +8,11 @@
 
 </div>
 
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/) [![LangGraph](https://img.shields.io/badge/LangGraph-1.0-1C3C3C?style=flat-square&logo=langchain&logoColor=white)](https://langchain-ai.github.io/langgraph/) [![Vue](https://img.shields.io/badge/Vue-3.5-4FC08D?style=flat-square&logo=vuedotjs&logoColor=white)](https://vuejs.org/) [![AMap JSAPI](https://img.shields.io/badge/AMap%20JSAPI-2.0-2899F5?style=flat-square)](https://lbs.amap.com/api/javascript-api-v2/summary) [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-17-4169E1?style=flat-square&logo=postgresql&logoColor=white)](https://www.postgresql.org/) [![Redis](https://img.shields.io/badge/Redis-7.4-DC382D?style=flat-square&logo=redis&logoColor=white)](https://redis.io/) [![Docker Compose](https://img.shields.io/badge/Docker%20Compose-2.x-2496ED?style=flat-square&logo=docker&logoColor=white)](https://docs.docker.com/compose/) [![LLM](https://img.shields.io/badge/LLM-OpenAI%20compatible-4D6BFE?style=flat-square)](#配置项) [![Open-Meteo](https://img.shields.io/badge/Open--Meteo-Free-14A0A5?style=flat-square&logo=sun&logoColor=white)](https://open-meteo.com/) [![FlyAI](https://img.shields.io/badge/FlyAI-Travel-FF5A5F?style=flat-square)](https://www.flyai.com/) [![pytest](https://img.shields.io/badge/pytest-8.3-0A9EDC?style=flat-square&logo=pytest&logoColor=white)](https://docs.pytest.org/) [![Playwright](https://img.shields.io/badge/Playwright-1.62-2EAD33?style=flat-square&logo=playwright&logoColor=white)](https://playwright.dev/)
+
 ---
 
 **🌐 语言 / Language：** [**English**](README.en.md) | **中文**
-
----
-
-## 技术栈
-
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/) [![LangGraph](https://img.shields.io/badge/LangGraph-1.0-1C3C3C?style=flat-square&logo=langchain&logoColor=white)](https://langchain-ai.github.io/langgraph/) [![Vue](https://img.shields.io/badge/Vue-3.5-4FC08D?style=flat-square&logo=vuedotjs&logoColor=white)](https://vuejs.org/) [![AMap JSAPI](https://img.shields.io/badge/AMap%20JSAPI-2.0-2899F5?style=flat-square)](https://lbs.amap.com/api/javascript-api-v2/summary) [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-17-4169E1?style=flat-square&logo=postgresql&logoColor=white)](https://www.postgresql.org/) [![Redis](https://img.shields.io/badge/Redis-7.4-DC382D?style=flat-square&logo=redis&logoColor=white)](https://redis.io/) [![Docker Compose](https://img.shields.io/badge/Docker%20Compose-2.x-2496ED?style=flat-square&logo=docker&logoColor=white)](https://docs.docker.com/compose/) [![LLM](https://img.shields.io/badge/LLM-OpenAI%20compatible-4D6BFE?style=flat-square)](#配置项) [![Open-Meteo](https://img.shields.io/badge/Open--Meteo-Free-14A0A5?style=flat-square&logo=sun&logoColor=white)](https://open-meteo.com/) [![FlyAI](https://img.shields.io/badge/FlyAI-Travel-FF5A5F?style=flat-square)](https://www.flyai.com/) [![pytest](https://img.shields.io/badge/pytest-8.3-0A9EDC?style=flat-square&logo=pytest&logoColor=white)](https://docs.pytest.org/) [![Playwright](https://img.shields.io/badge/Playwright-1.62-2EAD33?style=flat-square&logo=playwright&logoColor=white)](https://playwright.dev/)
 
 ---
 
