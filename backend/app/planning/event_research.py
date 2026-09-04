@@ -9,6 +9,7 @@ review note so a trip is never blocked merely because a source is unavailable.
 from __future__ import annotations
 
 import html
+import io
 import re
 from datetime import date
 from typing import Any, Awaitable, Callable
@@ -30,10 +31,125 @@ _CHINESE_SINGLE_DATE = re.compile(
     r"(?P<month>1[0-2]|0?[1-9])\s*月\s*"
     r"(?P<day>3[01]|[12]\d|0?[1-9])\s*日"
 )
+_ENGLISH_MONTHS = {
+    "january": 1,
+    "february": 2,
+    "march": 3,
+    "april": 4,
+    "may": 5,
+    "june": 6,
+    "july": 7,
+    "august": 8,
+    "september": 9,
+    "october": 10,
+    "november": 11,
+    "december": 12,
+}
+_ENGLISH_DATE_RANGE = re.compile(
+    r"(?:(?P<year>20\d{2})\s+)?(?P<month>January|February|March|April|May|June|July|August|"
+    r"September|October|November|December)\s+(?P<day>3[01]|[12]\d|0?[1-9])\s*"
+    r"(?:[-—–~]|to)\s*(?:(?P<end_month>January|February|March|April|May|June|July|August|"
+    r"September|October|November|December)\s+)?(?P<end_day>3[01]|[12]\d|0?[1-9])"
+    r"(?:,?\s*(?P<end_year>20\d{2}))?",
+    re.I,
+)
+_ENGLISH_SINGLE_DATE = re.compile(
+    r"(?:(?P<year>20\d{2})\s+)?(?P<month>January|February|March|April|May|June|July|August|"
+    r"September|October|November|December)\s+(?P<day>3[01]|[12]\d|0?[1-9])"
+    r"(?:,?\s*(?P<end_year>20\d{2}))?",
+    re.I,
+)
+
+# Common names are only used to locate the matching row in the public IMO
+# calendar.  The calendar remains the source of truth; no event date is
+# embedded here.
+_METEOR_SHOWER_ALIASES = (
+    ("象限仪座", "Quadrantids", "QUA"),
+    ("天琴座", "Lyrids", "LYR"),
+    ("宝瓶座", "Aquariids", "ETA"),
+    ("英仙座", "Perseids", "PER"),
+    ("猎户座", "Orionids", "ORI"),
+    ("狮子座", "Leonids", "LEO"),
+    ("双子座", "Geminids", "GEM"),
+    ("天龙座", "Draconids", "DRA"),
+    ("金牛座", "Taurids", "STA"),
+    ("小熊座", "Ursids", "URS"),
+)
 
 
 def _clean_text(value: str) -> str:
     return re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", value))).strip()
+
+
+async def _imo_calendar_source(
+    client: httpx.AsyncClient,
+    event: str,
+    year: int,
+) -> dict[str, Any] | None:
+    """Return a source excerpt from the IMO annual calendar when applicable.
+
+    This is deliberately best-effort.  It enriches (rather than replaces) web
+    search, and all facts still go through the source-constrained Event Agent
+    and the conservative parser below.
+    """
+    event_text = event.lower()
+    if "流星雨" not in event_text and "meteor" not in event_text:
+        return None
+    alias_entry = next(
+        ((english, code) for chinese, english, code in _METEOR_SHOWER_ALIASES if chinese in event),
+        None,
+    )
+    alias = alias_entry[0] if alias_entry else None
+    shower_code = alias_entry[1] if alias_entry else None
+    if not alias and "meteor" in event_text:
+        alias = event
+    if not alias:
+        return None
+    url = f"https://www.imo.net/files/meteor-shower/cal{year}.pdf"
+    try:
+        response = await client.get(url)
+        response.raise_for_status()
+        content = response.content
+        if not content:
+            return None
+        from pypdf import PdfReader
+
+        text = "\n".join(page.extract_text() or "" for page in PdfReader(io.BytesIO(content)).pages)
+    except Exception:  # the normal web search must remain available on PDF failure
+        return None
+    # Match the formal IMO heading (name + IAU number) first.  A plain name
+    # search can accidentally select a related shower such as “o-Leonids”
+    # before it reaches the actual “Leonids (013 LEO)” section.
+    heading_pattern = (
+        rf"{re.escape(alias)}\s*\(\d{{3}}\s+{re.escape(shower_code)}\)"
+        if shower_code
+        else rf"{re.escape(alias)}\s*\(\d{{3}}\s+[A-Z]{{3}}\)"
+    )
+    matches = list(re.finditer(heading_pattern, text, flags=re.IGNORECASE))
+    if not matches:
+        matches = list(re.finditer(re.escape(alias), text, flags=re.IGNORECASE))
+    if not matches:
+        return None
+    chosen = None
+    for match in matches:
+        window = text[match.start() : match.start() + 1800]
+        # A formal name can also be mentioned in the calendar introduction.
+        # The actual entry starts with an “Active:” or “Maximum:” field right
+        # after the numbered heading; require that close-by marker.
+        if re.search(r"(?:Active|Maximum)\s*:", window[:260], flags=re.IGNORECASE):
+            chosen = window
+            break
+    if chosen is None:
+        chosen = text[matches[-1].start() : matches[-1].start() + 1800]
+    excerpt = _clean_text(chosen or text[matches[0].start() : matches[0].start() + 900])
+    if not excerpt:
+        return None
+    return {
+        "provider": "International Meteor Organization",
+        "title": f"IMO {year} 流星雨日历（{alias}）",
+        "url": url,
+        "snippet": excerpt[:1800],
+    }
 
 
 async def research_special_events(
@@ -72,6 +188,10 @@ async def research_special_events(
             }
             try:
                 seen_sources: set[str] = set()
+                official_source = await _imo_calendar_source(client, event, year)
+                if official_source:
+                    item["sources"].append(official_source)
+                    seen_sources.add(official_source["url"])
                 for search_query in item["search_queries"]:
                     try:
                         response = await client.get(
@@ -155,6 +275,11 @@ def _merge_explicit_source_facts(
     matched_indexes: list[int] = []
     matched_ranges: list[tuple[str, str]] = []
     zhr_values: list[tuple[int, int]] = []
+    utc_times: list[tuple[int, str]] = []
+    official_utc_times: list[tuple[int, str]] = []
+    active_periods: list[tuple[int, str]] = []
+    official_active_periods: list[tuple[int, str]] = []
+    official_zhr_values: list[tuple[int, int]] = []
 
     for index, source in enumerate(sources):
         text = _clean_text(f"{source.get('title') or ''} {source.get('snippet') or ''}")
@@ -164,9 +289,31 @@ def _merge_explicit_source_facts(
         if date_range:
             matched_ranges.append(date_range)
             matched_indexes.append(index)
-        zhr_match = re.search(r"(?:ZHR\s*[:：约为可达]*|每小时[^0-9]{0,10})(\d{1,4})", text, re.I)
+        zhr_match = re.search(r"(?:ZHR|每小时)[^0-9]{0,10}(\d{1,4})", text, re.I)
         if zhr_match:
             zhr_values.append((index, int(zhr_match.group(1))))
+            if source.get("provider") == "International Meteor Organization":
+                official_zhr_values.append((index, int(zhr_match.group(1))))
+        utc_match = re.search(
+            r"(?:Maximum|极大期|极大时刻).{0,160}?(?P<h>\d{1,2})\s*h"
+            r"(?:\s*(?P<m>\d{1,2})\s*m)?\s*UT\b",
+            text,
+            re.I,
+        )
+        if utc_match:
+            value = f"{int(utc_match.group('h')):02d}:{int(utc_match.group('m') or 0):02d}"
+            utc_times.append((index, value))
+            if source.get("provider") == "International Meteor Organization":
+                official_utc_times.append((index, value))
+        active_match = re.search(
+            r"(?:Active|活动期)\s*[:：]\s*([^.;。]{3,80})",
+            text,
+            re.I,
+        )
+        if active_match:
+            active_periods.append((index, active_match.group(1).strip()))
+            if source.get("provider") == "International Meteor Organization":
+                official_active_periods.append((index, active_match.group(1).strip()))
 
     if matched_ranges:
         # Prefer the range corroborated by the greatest number of excerpts.
@@ -176,6 +323,23 @@ def _merge_explicit_source_facts(
     if "zhr" not in facts and zhr_values:
         facts["zhr"] = zhr_values[0][1]
         matched_indexes.append(zhr_values[0][0])
+    if official_zhr_values:
+        facts["zhr"] = official_zhr_values[0][1]
+        matched_indexes.append(official_zhr_values[0][0])
+    if "peak_time_utc" not in facts and utc_times:
+        facts["peak_time_utc"] = utc_times[0][1]
+        matched_indexes.append(utc_times[0][0])
+    if official_utc_times:
+        # The official calendar's explicit UTC clock is preferred over a
+        # model conversion that may accidentally use a local timezone.
+        facts["peak_time_utc"] = official_utc_times[0][1]
+        matched_indexes.append(official_utc_times[0][0])
+    if "active_period" not in facts and active_periods:
+        facts["active_period"] = active_periods[0][1]
+        matched_indexes.append(active_periods[0][0])
+    if official_active_periods:
+        facts["active_period"] = official_active_periods[0][1]
+        matched_indexes.append(official_active_periods[0][0])
 
     evidence = facts.get("evidence_source_indexes")
     if matched_indexes and (not isinstance(evidence, list) or not evidence):
@@ -193,6 +357,17 @@ def _merge_explicit_source_facts(
 
 
 def _explicit_date_range(text: str, expected_year: int) -> tuple[str, str] | None:
+    # A source excerpt can list an activity range before its peak date (for
+    # example “Active: November 6–30; Maximum: November 17”).  Prefer the
+    # date attached to the peak label when one is present.
+    peak_hint = re.search(r"(?:Maximum|极大期|极大时刻|峰值)[^.;。]{0,160}", text, re.I)
+    if peak_hint and re.search(
+        r"(?:20\d{2}\s*年\s*)?(?:\d{1,2}\s*月\s*\d{1,2}\s*日|"
+        r"January|February|March|April|May|June|July|August|September|October|November|December)\s*\d{1,2}",
+        peak_hint.group(0),
+        re.I,
+    ):
+        text = peak_hint.group(0)
     match = _CHINESE_DATE_RANGE.search(text)
     if match:
         parsed_year = int(match.group("year") or expected_year)
@@ -209,6 +384,22 @@ def _explicit_date_range(text: str, expected_year: int) -> tuple[str, str] | Non
             return None
         return start.isoformat(), end.isoformat()
 
+    match = _ENGLISH_DATE_RANGE.search(text)
+    if match:
+        parsed_year = int(match.group("year") or match.group("end_year") or expected_year)
+        if parsed_year != expected_year:
+            return None
+        month = _ENGLISH_MONTHS[match.group("month").lower()]
+        end_month = _ENGLISH_MONTHS[(match.group("end_month") or match.group("month")).lower()]
+        try:
+            start = date(parsed_year, month, int(match.group("day")))
+            end = date(parsed_year, end_month, int(match.group("end_day")))
+        except ValueError:
+            return None
+        if end < start:
+            return None
+        return start.isoformat(), end.isoformat()
+
     match = _CHINESE_SINGLE_DATE.search(text)
     if match:
         parsed_year = int(match.group("year") or expected_year)
@@ -216,6 +407,21 @@ def _explicit_date_range(text: str, expected_year: int) -> tuple[str, str] | Non
             return None
         try:
             value = date(parsed_year, int(match.group("month")), int(match.group("day")))
+        except ValueError:
+            return None
+        return value.isoformat(), value.isoformat()
+
+    match = _ENGLISH_SINGLE_DATE.search(text)
+    if match:
+        parsed_year = int(match.group("year") or match.group("end_year") or expected_year)
+        if parsed_year != expected_year:
+            return None
+        try:
+            value = date(
+                parsed_year,
+                _ENGLISH_MONTHS[match.group("month").lower()],
+                int(match.group("day")),
+            )
         except ValueError:
             return None
         return value.isoformat(), value.isoformat()

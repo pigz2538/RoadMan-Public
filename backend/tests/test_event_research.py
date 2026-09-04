@@ -122,3 +122,48 @@ async def test_event_research_does_not_invent_window_from_generic_source(monkeyp
 
     assert "facts" not in result[0]
     assert "请关注天气" in event_research_summary(result[0])
+
+
+@pytest.mark.asyncio
+async def test_event_research_uses_official_meteor_calendar_for_exact_utc_time(monkeypatch):
+    async def official_source(*_args):
+        return {
+            "provider": "International Meteor Organization",
+            "title": "IMO 2026 流星雨日历（Leonids）",
+            "url": "https://www.imo.net/files/meteor-shower/cal2026.pdf",
+            "snippet": (
+                "Leonids (013 LEO) Active: November 6–30; Maximum: November 17, "
+                "23 h45m UT; ZHR ≈ 15"
+            ),
+        }
+
+    class FakeResponse:
+        text = ""
+
+        def raise_for_status(self):
+            return None
+
+    class FakeClient:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return None
+
+        async def get(self, *_args, **_kwargs):
+            return FakeResponse()
+
+    monkeypatch.setattr("app.planning.event_research._imo_calendar_source", official_source)
+    monkeypatch.setattr("app.planning.event_research.httpx.AsyncClient", FakeClient)
+
+    result = await research_special_events(["狮子座流星雨"], year=2026, fact_agent=None)
+
+    facts = result[0]["facts"]
+    assert facts["peak_start_date"] == "2026-11-17"
+    assert facts["peak_end_date"] == "2026-11-17"
+    assert facts["peak_time_utc"] == "23:45"
+    assert facts["zhr"] == 15
+    assert "November 6" in facts["active_period"]

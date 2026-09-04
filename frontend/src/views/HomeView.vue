@@ -1041,6 +1041,7 @@ function activate(label: string) {
                 <b>{{ eventWindowText(item) || '当前来源只有活动介绍，请打开下方来源确认时间' }}</b>
               </div>
               <div class="event-fact-tags">
+                <span v-if="item.facts?.active_period">活动期：{{ item.facts.active_period }}</span>
                 <span v-if="item.facts?.peak_time_local">极大时刻：北京时间 {{ item.facts.peak_time_local }}</span>
                 <span v-else-if="item.facts?.peak_time_utc">极大时刻：UTC {{ item.facts.peak_time_utc }}</span>
                 <span v-else-if="item.facts?.peak_time_label">来源时间：{{ item.facts.peak_time_label }}</span>
