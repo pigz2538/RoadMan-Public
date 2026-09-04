@@ -2228,7 +2228,12 @@ def extract_structural_constraints(raw_text: str, today: date) -> dict[str, Any]
         try:
             start_value = date.fromisoformat(str(result["start_date"]))
             result["end_date"] = (start_value + timedelta(days=duration_days - 1)).isoformat()
-            draft_fields.add("end_date")
+            # A duration following an explicit weekday (下周三玩三天) is an
+            # authoritative calendar constraint and must replace stale dates
+            # from a previous preflight.  It is only a draft when the start
+            # itself came from a vague weekend/month choice.
+            if "start_date" in draft_fields:
+                draft_fields.add("end_date")
         except (TypeError, ValueError):
             pass
     # A named holiday such as 国庆节 is a concrete calendar anchor.  The
