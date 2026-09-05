@@ -262,6 +262,23 @@
       "default": null,
       "title": "Return Time"
     },
+    "departure_period": {
+      "anyOf": [
+        {
+          "enum": [
+            "morning",
+            "afternoon",
+            "evening"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Departure Period"
+    },
     "return_before": {
       "anyOf": [
         {
@@ -312,7 +329,7 @@
     "max_days": {
       "anyOf": [
         {
-          "maximum": 30,
+          "maximum": 20,
           "minimum": 1,
           "type": "integer"
         },

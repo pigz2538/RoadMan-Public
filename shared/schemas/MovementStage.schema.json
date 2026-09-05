@@ -54,7 +54,6 @@
         "consumed_percent": {
           "anyOf": [
             {
-              "maximum": 100,
               "minimum": 0,
               "type": "number"
             },

@@ -1,4 +1,29 @@
 {
+  "$defs": {
+    "VehicleSpecification": {
+      "description": "One verified specification label/value returned by the vehicle Skill.",
+      "properties": {
+        "name": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "value": {
+          "maxLength": 300,
+          "minLength": 1,
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "value"
+      ],
+      "title": "VehicleSpecification",
+      "type": "object"
+    }
+  },
   "properties": {
     "id": {
       "title": "Id",
@@ -105,6 +130,19 @@
       "default": null,
       "title": "Max Charge Kw"
     },
+    "dc_charge_time_hours": {
+      "anyOf": [
+        {
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Dc Charge Time Hours"
+    },
     "height_m": {
       "anyOf": [
         {
@@ -171,6 +209,76 @@
       "minimum": 5,
       "title": "Safe Energy Reserve Percent",
       "type": "number"
+    },
+    "source_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Source Id"
+    },
+    "source_url": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Source Url"
+    },
+    "detail_source_url": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Detail Source Url"
+    },
+    "price_min_cny": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Price Min Cny"
+    },
+    "price_max_cny": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Price Max Cny"
+    },
+    "specifications": {
+      "items": {
+        "$ref": "#/$defs/VehicleSpecification"
+      },
+      "maxItems": 160,
+      "title": "Specifications",
+      "type": "array"
     }
   },
   "required": [

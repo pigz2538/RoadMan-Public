@@ -441,6 +441,12 @@
           "title": "Total Walk Minutes",
           "type": "integer"
         },
+        "total_walk_distance_km": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Total Walk Distance Km",
+          "type": "number"
+        },
         "estimated_cost": {
           "anyOf": [
             {
@@ -512,7 +518,6 @@
         "consumed_percent": {
           "anyOf": [
             {
-              "maximum": 100,
               "minimum": 0,
               "type": "number"
             },
@@ -1631,6 +1636,23 @@
           "default": null,
           "title": "Return Time"
         },
+        "departure_period": {
+          "anyOf": [
+            {
+              "enum": [
+                "morning",
+                "afternoon",
+                "evening"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Departure Period"
+        },
         "return_before": {
           "anyOf": [
             {
@@ -1681,7 +1703,7 @@
         "max_days": {
           "anyOf": [
             {
-              "maximum": 30,
+              "maximum": 20,
               "minimum": 1,
               "type": "integer"
             },

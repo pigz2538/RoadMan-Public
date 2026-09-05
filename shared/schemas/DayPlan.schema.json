@@ -414,7 +414,6 @@
         "consumed_percent": {
           "anyOf": [
             {
-              "maximum": 100,
               "minimum": 0,
               "type": "number"
             },
@@ -1583,6 +1582,12 @@
       "minimum": 0,
       "title": "Total Walk Minutes",
       "type": "integer"
+    },
+    "total_walk_distance_km": {
+      "default": 0,
+      "minimum": 0,
+      "title": "Total Walk Distance Km",
+      "type": "number"
     },
     "estimated_cost": {
       "anyOf": [

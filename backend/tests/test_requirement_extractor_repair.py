@@ -5,6 +5,36 @@ from app.planning.llm import DeepSeekRequirementExtractor
 
 
 @pytest.mark.asyncio
+async def test_requirement_agent_preserves_unusually_long_duration_for_policy_guard(monkeypatch):
+    async def fake_complete(settings, prompt, *, timeout=None, json_output=True, agent_name=""):
+        assert agent_name == "requirement_extractor"
+        assert "277天" in prompt
+        return (
+            '{"origin_name":"北京","destination_name":"上海",'
+            '"destination_names":["上海"],"destination_scope":"city",'
+            '"travel_intents":[],"start_date":null,"end_date":null,'
+            '"departure_time":null,"return_time":null,"departure_period":null,'
+            '"travelers":null,"max_days":277,"preferences":[],'
+            '"transport_modes":["driving"],"special_events":[],'
+            '"cross_sea_required":false,"cross_sea_mode":null,'
+            '"past_return_requested":false,"time_window_minutes":null,'
+            '"stay_only_at_destination":false,"must_visit_names":[]}'
+        )
+
+    monkeypatch.setattr("app.planning.llm.deepseek_complete", fake_complete)
+    result = await DeepSeekRequirementExtractor(
+        Settings(deepseek_api_key="test-key", deepseek_thinking=False)
+    ).extract(
+        "北京—上海277天自驾",
+        today=__import__("datetime").date(2026, 9, 5),
+    )
+
+    assert result["origin_name"] == "北京"
+    assert result["destination_name"] == "上海"
+    assert result["max_days"] == 277
+
+
+@pytest.mark.asyncio
 async def test_requirement_agent_retries_missing_origin_semantically(monkeypatch):
     """A partial model response must trigger an LLM repair, never a POI fallback."""
 

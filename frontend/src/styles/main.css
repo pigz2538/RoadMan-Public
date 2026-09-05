@@ -696,6 +696,9 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .preflight-summary dt { margin-bottom: 3px; color: #6b80a0; font-size: 12px; }
 .preflight-summary dd { margin: 0; color: #153b69; font-size: 15px; font-weight: 700; overflow-wrap: anywhere; }
 .preflight-summary div:last-child:nth-child(4) { grid-column: 1 / -1; }
+.preflight-notices { margin-top: 12px; padding: 11px 13px; border: 1px solid #f2cf8f; border-radius: 11px; color: #795517; background: #fff8e8; }
+.preflight-notices strong { font-size: 13px; }
+.preflight-notices p { margin: 4px 0 0; color: #795517; font-size: 13px; }
 .preflight-event-research { margin-top: 14px; padding: 15px 16px; border: 1px solid #c9ddf7; border-radius: 14px; background: #f7fbff; }
 .preflight-event-research > header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; color: #1c5eae; }
 .preflight-event-research > header small { color: #7185a1; text-align: right; }

@@ -12,7 +12,7 @@ from app.domain.models import SSEEvent
 from app.repositories import TripRepository
 from app.repositories.skill_calls import record_agent_call
 from app.services.sse import sse_manager
-from app.api.trips import _semantic_guard_issue_is_actionable
+from app.api.trips import _is_domestic_geocode, _semantic_guard_issue_is_actionable
 
 
 @pytest.mark.asyncio
@@ -499,6 +499,102 @@ async def test_preflight_replaces_stale_end_date_for_relative_duration(client):
     assert body["extracted"]["start_date"] == expected_start.isoformat()
     assert body["extracted"]["end_date"] == (expected_start + timedelta(days=2)).isoformat()
     assert "INVALID_DATE_ORDER" not in {item["code"] for item in body["issues"]}
+
+
+@pytest.mark.asyncio
+async def test_preflight_blocks_agent_extracted_trip_over_twenty_days(client):
+    raw_text = "北京到上海277天自驾"
+    response = await client.post(
+        "/api/v1/trips/preflight",
+        json={
+            "raw_text": raw_text,
+            "previous_extracted": {
+                "origin_name": "北京",
+                "destination_name": "上海",
+                "start_date": "2026-10-01",
+                "end_date": "2027-07-04",
+                "max_days": 277,
+                "transport_modes": ["driving"],
+                "_intent_status": "ok",
+                "_source_raw_text": raw_text,
+            },
+            "semantic_checked": True,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    issue = next(item for item in body["issues"] if item["code"] == "TRIP_DURATION_LIMIT")
+    assert body["ready"] is False
+    assert issue["field"] == "max_days"
+    assert "277" in issue["message"]
+    assert "20" in issue["message"]
+
+
+@pytest.mark.asyncio
+async def test_preflight_warns_but_allows_seven_to_twenty_days(client):
+    raw_text = "国庆从武汉到杭州玩7天"
+    response = await client.post(
+        "/api/v1/trips/preflight",
+        json={
+            "raw_text": raw_text,
+            "previous_extracted": {
+                "origin_name": "武汉",
+                "destination_name": "杭州",
+                "start_date": "2026-10-01",
+                "end_date": "2026-10-07",
+                "max_days": 7,
+                "_intent_status": "ok",
+                "_source_raw_text": raw_text,
+            },
+            "semantic_checked": True,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["issues"] == []
+    assert body["confirmation_required"] is True
+    assert any("生成时间可能更长" in warning for warning in body["warnings"])
+
+
+@pytest.mark.asyncio
+async def test_duration_limit_answer_replaces_agent_extracted_long_duration(client):
+    raw_text = "北京到上海277天自驾"
+    response = await client.post(
+        "/api/v1/trips/preflight",
+        json={
+            "raw_text": raw_text,
+            "previous_extracted": {
+                "origin_name": "北京",
+                "destination_name": "上海",
+                "start_date": "2026-10-01",
+                "end_date": "2027-07-04",
+                "max_days": 277,
+                "_intent_status": "ok",
+                "_source_raw_text": raw_text,
+            },
+            "answers": {"TRIP_DURATION_LIMIT:max_days": "10"},
+            "semantic_checked": True,
+        },
+    )
+
+    body = response.json()
+    assert body["issues"] == []
+    assert body["extracted"]["max_days"] == 10
+    assert body["extracted"]["end_date"] == "2026-10-10"
+    assert body["warnings"]
+
+
+def test_domestic_geocode_requires_chinese_adcode_and_supported_coordinates():
+    assert _is_domestic_geocode(
+        {"adcode": "110000"},
+        {"longitude": 116.4074, "latitude": 39.9042},
+    )
+    assert not _is_domestic_geocode(
+        {"adcode": ""},
+        {"longitude": -74.006, "latitude": 40.7128},
+    )
 
 
 def test_semantic_guard_does_not_reopen_complete_duration_request():

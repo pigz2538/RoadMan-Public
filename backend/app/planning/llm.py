@@ -346,6 +346,9 @@ class RequirementExtractionAgent:
             "start with an end date five days later (Saturday through Wednesday), not a two-day weekend. "
             "When the user names a weekend (周末/this weekend/next weekend) without a second weekday, "
             "start_date is the Saturday and end_date is the Sunday unless a duration bound widens it. "
+            "Always preserve the duration the user actually requested in max_days even when it is unusually long "
+            "(for example 277天 must return max_days=277). Do not clamp it or silently discard it; a later policy "
+            "guard decides whether the product supports that duration. "
             "Normalize Chinese time phrases: 中午=12:00, 下午=14:00, 晚上=19:00. "
             "Understand relative weekdays and ranges as a pair: 周一出发、周五回来 means a Monday-to-Friday "
             "window in the same upcoming week; 周末 means Saturday through Sunday; do not return an end date "
@@ -490,7 +493,7 @@ class RequirementExtractionAgent:
                 merged["transport_modes"] = _normalize_transport_modes(
                     merged.get("transport_modes")
                 )
-                max_days = _coerce_positive_int(merged.get("max_days"), maximum=30)
+                max_days = _coerce_positive_int(merged.get("max_days"), maximum=3650)
                 if max_days is None:
                     merged.pop("max_days", None)
                 else:

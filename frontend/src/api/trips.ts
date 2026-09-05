@@ -86,6 +86,7 @@ export interface PreflightResult {
     clarifications?: string[]
   }
   special_event_research?: SpecialEventResearch[]
+  warnings?: string[]
 }
 
 export interface RecommendationCandidate {

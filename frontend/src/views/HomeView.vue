@@ -1008,6 +1008,10 @@ function activate(label: string) {
               <dt>已确认</dt><dd>{{ preflight.summary.clarifications.join('；') }}</dd>
             </div>
           </dl>
+          <div v-if="preflight.warnings?.length" class="preflight-notices" role="status">
+            <strong>规划耗时提示</strong>
+            <p v-for="warning in preflight.warnings" :key="warning">{{ warning }}</p>
+          </div>
           <div class="preflight-actions">
             <button class="secondary-button" @click="resetPreflight">返回修改</button>
             <button class="primary-button" :disabled="preflightChecking || planning" @click="confirmAndPlan">

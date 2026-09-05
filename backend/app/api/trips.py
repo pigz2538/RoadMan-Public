@@ -2,6 +2,7 @@ import asyncio
 import json
 from datetime import date, datetime, timedelta
 from pathlib import Path
+from typing import Any
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Header, Query, Response, status
@@ -59,9 +60,16 @@ from ..services.job_queue import enqueue_job
 from ..services.exports import ReportAgent
 from ..services.sse import sse_manager
 from ..skills.base import SkillContext
+from ..skills.amap import RoutePoint, _haversine_km
 from ..skills.registry import SkillRegistry
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
+# 行程合理性护栏：超过 20 天直接拦截；7 天及以上提醒生成会变慢；
+# 单程自驾超过 6000 公里视为超出合理范围。
+MAX_TRIP_DAYS = 20
+LONG_TRIP_NOTICE_DAYS = 7
+MAX_ROUTE_DISTANCE_KM = 6000.0
+MAX_STRAIGHT_LINE_DISTANCE_KM = 5000.0
 
 # Source-compatible names for clients/tests that imported the old provider
 # labels.  They point to the provider-neutral implementations above.
@@ -186,12 +194,19 @@ def _edit_agent_context(trip: Trip, state: dict[str, object], payload: EditInten
     }
 
 
-async def _estimate_driving_minutes(
+async def _estimate_driving_route(
     registry: SkillRegistry,
     origin_name: str,
     destination_name: str,
-) -> int | None:
+) -> dict[str, Any] | None:
+    """Estimate driving duration/distance and collect geocoded provinces.
+
+    Returns None when geocoding or routing is unavailable so callers can
+    skip distance/overseas guards instead of blocking on a provider outage.
+    """
     coordinates: list[dict[str, float]] = []
+    places: list[dict[str, object]] = []
+    provinces: list[str] = []
     for place_name in (origin_name, destination_name):
         result = await registry.execute(
             "amap.geocode",
@@ -208,6 +223,10 @@ async def _estimate_driving_minutes(
             )
         except (TypeError, ValueError):
             return None
+        places.append(result.data)
+        province = str(result.data.get("province") or "").strip()
+        if province:
+            provinces.append(province)
 
     route = await registry.execute(
         "amap.route",
@@ -219,12 +238,71 @@ async def _estimate_driving_minutes(
         },
         SkillContext(metadata={"purpose": "trip_preflight"}),
     )
-    if not route.success or not isinstance(route.data, dict):
-        return None
+    route_data = route.data if route.success and isinstance(route.data, dict) else {}
     try:
-        return int(route.data.get("duration_minutes") or 0) or None
+        minutes = int(route_data.get("duration_minutes") or 0) or None
     except (TypeError, ValueError):
-        return None
+        minutes = None
+    try:
+        distance_km = float(route_data.get("distance_km") or 0) or None
+    except (TypeError, ValueError):
+        distance_km = None
+    return {
+        "duration_minutes": minutes,
+        "distance_km": distance_km,
+        "provinces": provinces,
+        "domestic": [
+            _is_domestic_geocode(place, point)
+            for place, point in zip(places, coordinates, strict=True)
+        ],
+        "straight_line_km": round(
+            _haversine_km(RoutePoint(**coordinates[0]), RoutePoint(**coordinates[1])),
+            1,
+        ),
+    }
+
+
+async def _estimate_driving_minutes(
+    registry: SkillRegistry,
+    origin_name: str,
+    destination_name: str,
+) -> int | None:
+    estimate = await _estimate_driving_route(registry, origin_name, destination_name)
+    return (estimate or {}).get("duration_minutes")
+
+
+def _is_domestic_geocode(data: dict[str, object], coordinates: dict[str, float]) -> bool:
+    """Accept only provider-backed locations inside China's supported extent."""
+    adcode = str(data.get("adcode") or "").strip()
+    longitude = coordinates["longitude"]
+    latitude = coordinates["latitude"]
+    return (
+        adcode.isdigit()
+        and len(adcode) == 6
+        and 72.0 <= longitude <= 136.0
+        and 16.0 <= latitude <= 55.0
+    )
+
+
+def _requested_trip_days(
+    extracted: dict[str, object],
+    answers: dict[str, str],
+) -> int | None:
+    override = answers.get("TRIP_DURATION_LIMIT:max_days", "").strip()
+    values: list[int] = []
+    if override.isdigit():
+        values.append(int(override))
+    try:
+        max_days = int(extracted.get("max_days") or 0)
+    except (TypeError, ValueError):
+        max_days = 0
+    if max_days:
+        values.append(max_days)
+    start = _safe_date(extracted.get("start_date"))
+    end = _safe_date(extracted.get("end_date"))
+    if start and end and end >= start:
+        values.append((end - start).days + 1)
+    return max(values) if values else None
 
 
 @router.post("", response_model=Trip, status_code=status.HTTP_201_CREATED)
@@ -314,6 +392,15 @@ async def preflight_trip(
             parsed = _safe_date(value)
             if parsed:
                 extracted[field] = parsed.isoformat()
+        elif field == "max_days" and value.isdigit():
+            requested_days = int(value)
+            if 1 <= requested_days <= MAX_TRIP_DAYS:
+                extracted["max_days"] = requested_days
+                start_for_duration = _safe_date(extracted.get("start_date"))
+                if start_for_duration:
+                    extracted["end_date"] = (
+                        start_for_duration + timedelta(days=requested_days - 1)
+                    ).isoformat()
         elif field == "time_window":
             # The user is answering a safety question about an impossible
             # same-leg window.  Treat any explicit answer as a decision to
@@ -378,6 +465,7 @@ async def preflight_trip(
         )
 
     issues: list[PreflightIssue] = []
+    warnings: list[str] = []
     intent_status = str(extracted.get("_intent_status") or "")
     if intent_status in {"unavailable", "invalid"} and not payload.previous_extracted:
         issues.append(
@@ -455,6 +543,66 @@ async def preflight_trip(
             )
         )
 
+    requested_days = _requested_trip_days(extracted, payload.answers)
+    if requested_days and requested_days > MAX_TRIP_DAYS:
+        issues.append(
+            PreflightIssue(
+                code="TRIP_DURATION_LIMIT",
+                field="max_days",
+                severity="error",
+                message=(
+                    f"需求理解智能体识别到约 {requested_days} 天，单次行程最多支持 {MAX_TRIP_DAYS} 天。"
+                    f"请输入 1–{MAX_TRIP_DAYS} 天以内的时长。"
+                ),
+                answer_type="text",
+            )
+        )
+    elif requested_days and requested_days >= LONG_TRIP_NOTICE_DAYS:
+        warnings.append(
+            f"本次行程约 {requested_days} 天，景点、住宿和逐段路线较多，生成时间可能更长。"
+        )
+
+    route_metrics: dict[str, object] | None = None
+    if extracted.get("origin_name") and extracted.get("destination_name"):
+        route_metrics = await _estimate_driving_route(
+            registry,
+            str(extracted["origin_name"]),
+            str(extracted["destination_name"]),
+        )
+    if route_metrics:
+        domestic = list(route_metrics.get("domestic") or [])
+        if domestic and not all(domestic):
+            outside_index = domestic.index(False)
+            issues.append(
+                PreflightIssue(
+                    code="OUTSIDE_SUPPORTED_REGION",
+                    field="origin_name" if outside_index == 0 else "destination_name",
+                    severity="error",
+                    message="地图核验发现地点不在中国境内；当前版本仅支持境内行程，请更换地点。",
+                    answer_type="text",
+                )
+            )
+        route_distance = route_metrics.get("distance_km")
+        straight_distance = float(route_metrics.get("straight_line_km") or 0)
+        too_far = (
+            isinstance(route_distance, (int, float))
+            and route_distance > MAX_ROUTE_DISTANCE_KM
+        ) or straight_distance > MAX_STRAIGHT_LINE_DISTANCE_KM
+        if too_far:
+            displayed_distance = float(route_distance or straight_distance)
+            issues.append(
+                PreflightIssue(
+                    code="TRIP_DISTANCE_LIMIT",
+                    field="destination_name",
+                    severity="error",
+                    message=(
+                        f"地图核验的起终点距离约 {displayed_distance:.0f} 公里，超过单次行程支持范围。"
+                        "请缩短路线或拆成多段行程。"
+                    ),
+                    answer_type="text",
+                )
+            )
+
     # A geography such as 海南/舟山 is not enough to infer a cross-sea
     # requirement: the Requirement Guard Agent owns that semantic decision.
     # Keep only the user's explicit structural phrase as an offline safety
@@ -502,11 +650,15 @@ async def preflight_trip(
             and extracted.get("origin_name")
             and extracted.get("destination_name")
         ):
-            estimated_minutes = await _estimate_driving_minutes(
-                registry,
-                str(extracted["origin_name"]),
-                str(extracted["destination_name"]),
-            )
+            estimated_minutes = (
+                int(route_metrics.get("duration_minutes") or 0)
+                if route_metrics
+                else await _estimate_driving_minutes(
+                    registry,
+                    str(extracted["origin_name"]),
+                    str(extracted["destination_name"]),
+                )
+            ) or None
         if window <= 60 or (estimated_minutes and window < estimated_minutes):
             estimate_text = (
                 f"，高德当前估算驾车约需 {estimated_minutes} 分钟"
@@ -584,6 +736,7 @@ async def preflight_trip(
         extracted=extracted,
         summary=summary,
         special_event_research=special_event_research,
+        warnings=warnings,
     )
 
 

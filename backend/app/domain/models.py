@@ -251,7 +251,7 @@ class TripRequest(BaseModel):
     # schedule modes (train/flight/ferry) as well as AMap local modes.
     transport_modes: list[str] = Field(default_factory=list)
     special_events: list[str] = Field(default_factory=list)
-    max_days: int | None = Field(default=None, ge=1, le=30)
+    max_days: int | None = Field(default=None, ge=1, le=20)
     must_visit: list[PlaceRef] = Field(default_factory=list)
     # Keep a semantic edit such as “三天只在九宫山” from reusing stale
     # candidates from another city or nearby region.
@@ -290,6 +290,7 @@ class PreflightResponse(BaseModel):
     extracted: dict[str, Any] = Field(default_factory=dict)
     summary: dict[str, Any] = Field(default_factory=dict)
     special_event_research: list[dict[str, Any]] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
 
 
 class RouteSegment(BaseModel):
