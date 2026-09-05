@@ -1947,6 +1947,53 @@ def _chinese_weekday_date(match: re.Match[str], today: date) -> date:
     return candidate
 
 
+def _duration_constraint_status(raw_text: str) -> tuple[str, int | None]:
+    """Classify an explicit duration without deriving calendar dates.
+
+    ``valid`` is the small range supported by the deterministic calendar
+    fallback. ``invalid`` and ``out_of_fallback`` are deliberately kept
+    separate from ``none`` so values such as 0 or 31 cannot become a normal
+    weekend when the semantic agent is unavailable.
+    """
+    text = re.sub(r"\s+", " ", raw_text or "").strip()
+    if not text:
+        return "none", None
+
+    # This parser only recognizes an explicit number and a day/night unit. It
+    # never identifies a place, intent, or transport mode. Unicode escapes
+    # keep it readable in terminals with a non-UTF-8 locale.
+    chinese_num = r"[\u4e00\u4e8c\u4e24\u4e09\u56db\u4e94\u516d\u4e03\u516b\u4e5d\u5341\u767e\u5343\u4e07]+"
+    number = rf"(?P<num>\d+|{chinese_num})"
+    unit = r"(?:\u5929|\u65e5|days?|nights?)"
+    patterns = (
+        rf"(?:\u6700\u591a|\u81f3\u591a|\u4e0d\u8d85\u8fc7|\u6700\u591a\u4e0d\u8d85\u8fc7|"
+        rf"up\s+to|at\s+most|no\s+more\s+than)\s*{number}\s*{unit}",
+        rf"(?:\u73a9|\u5f85|\u6e38\u73a9|\u65c5\u884c|\u884c\u7a0b|\u65c5\u6e38|\u5ea6\u5047|stay|spend|trip|travel)\s*"
+        rf"{number}\s*{unit}",
+        rf"{number}\s*{unit}\s*(?:\u884c\u7a0b|\u65c5\u884c|\u65c5\u6e38|\u5ea6\u5047|trip|travel|stay)",
+    )
+    classifications: list[tuple[str, int]] = []
+    for pattern in patterns:
+        for match in re.finditer(pattern, text, re.IGNORECASE):
+            raw_num = match.group("num")
+            days = int(raw_num) if raw_num.isdigit() else _chinese_numeral_to_int(raw_num)
+            if days <= 0:
+                classifications.append(("invalid", days))
+            elif days > 30:
+                classifications.append(("out_of_fallback", days))
+            else:
+                classifications.append(("valid", days))
+    if not classifications:
+        return "none", None
+    # Invalid/out-of-range values win over a valid value in contradictory text
+    # so the fallback cannot silently select a weekend.
+    for status in ("invalid", "out_of_fallback", "valid"):
+        for candidate, days in classifications:
+            if candidate == status:
+                return status, days
+    return "none", None
+
+
 def _extract_duration_days(raw_text: str) -> int | None:
     """Extract an explicit trip-length bound such as 最多五天/玩三天/5 days.
 
@@ -1954,46 +2001,37 @@ def _extract_duration_days(raw_text: str) -> int | None:
     carries no duration.  Only unambiguous duration phrases are matched;
     intent semantics stay with the Requirement Agent.
     """
-    text = re.sub(r"\s+", " ", raw_text or "").strip()
-    if not text:
-        return None
-    patterns = (
-        r"(?:最多|至多|不超过|最多不超过|up\s+to|at\s+most|no\s+more\s+than)\s*"
-        r"(?P<num>\d{1,2}|[一二两三四五六七八九十]+)\s*(?:天|日|days?|nights?)",
-        r"(?:玩|待|游玩|旅行|行程|旅游|度假|stay|spend|trip|travel)\s*"
-        r"(?P<num>\d{1,2}|[一二两三四五六七八九十]+)\s*(?:天|日|days?|nights?)",
-        r"(?P<num>\d{1,2}|[一二两三四五六七八九十]+)\s*(?:天|日|days?|nights?)\s*(?:行程|旅行|旅游|度假|trip|travel|stay)",
-    )
-    for pattern in patterns:
-        match = re.search(pattern, text, re.IGNORECASE)
-        if not match:
-            continue
-        raw_num = match.group("num")
-        if raw_num.isdigit():
-            days = int(raw_num)
-        else:
-            days = _chinese_numeral_to_int(raw_num)
-        if 1 <= days <= 30:
-            return days
-    return None
+    status, days = _duration_constraint_status(raw_text)
+    return days if status == "valid" else None
 
 
 def _chinese_numeral_to_int(value: str) -> int:
-    """Convert a small Chinese numeral (五/十/十五/二十) to an integer."""
+    """Convert common Chinese numerals (一/十/二十一/两百七十七)."""
     digits = {
         "一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5,
         "六": 6, "七": 7, "八": 8, "九": 9,
     }
-    if value == "十":
-        return 10
-    if value.startswith("十"):
-        return 10 + digits.get(value[1], 0)
-    if value.endswith("十"):
-        return digits.get(value[0], 0) * 10
+    if not value:
+        return 0
     total = 0
+    section = 0
+    number = 0
+    units = {"十": 10, "百": 100, "千": 1000, "万": 10000}
     for char in value:
-        total += digits.get(char, 0)
-    return total
+        if char in digits:
+            number = digits[char]
+            continue
+        unit = units.get(char)
+        if unit is None:
+            continue
+        if unit == 10000:
+            section = (section + number) * unit
+            total += section
+            section = 0
+        else:
+            section += (number or 1) * unit
+        number = 0
+    return total + section + number
 
 
 # Fixed-date Chinese public holidays.  The Requirement Agent resolves the
@@ -2169,7 +2207,14 @@ def extract_structural_constraints(raw_text: str, today: date) -> dict[str, Any]
     weekend_requested = bool(
         re.search(r"周末|本周末|这个周末|this\s+weekend|weekend", raw_text, re.IGNORECASE)
     )
+    duration_status, _ = _duration_constraint_status(raw_text)
     duration_days = _extract_duration_days(raw_text)
+    # A value that is explicit but invalid or outside the fallback parser's
+    # safe range must not be silently converted into the default weekend. The
+    # cloud Requirement Agent can still return the exact value (for example
+    # 277); this marker only protects the provider-unavailable path.
+    if duration_status in {"invalid", "out_of_fallback"}:
+        result["_duration_constraint_error"] = duration_status
     # Dates derived from a weekend/month/holiday phrase are drafts, not hard
     # user constraints: “下个月找个周末” does not pin a specific weekend and
     # “国庆节假期” leaves the exact window to the Agent.  The Requirement
@@ -2177,7 +2222,11 @@ def extract_structural_constraints(raw_text: str, today: date) -> dict[str, Any]
     # override for these fields.
     draft_fields: set[str] = set()
     month_dates = _next_month_calendar_window(raw_text, today)
-    if month_dates:
+    if duration_status in {"invalid", "out_of_fallback"}:
+        # Keep any literal dates already extracted above, but do not invent a
+        # weekend/month window around an invalid duration.
+        pass
+    elif month_dates:
         weekday_dates = month_dates
         draft_fields.update({"start_date", "end_date"})
     elif weekend_requested:

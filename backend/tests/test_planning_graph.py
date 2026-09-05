@@ -31,6 +31,8 @@ from app.planning.graph import (
 from app.planning.deep_drive import _ensure_daily_meals
 from app.planning.llm import (
     OllamaRequirementExtractor,
+    _duration_constraint_status,
+    _extract_duration_days,
     deterministic_extract,
     extract_explicit_location_constraints,
     extract_structural_constraints,
@@ -548,6 +550,35 @@ def test_structural_calendar_widens_weekend_with_chinese_duration():
         "end_date": "2026-09-09",
         "_inferred_date_fields": ["end_date", "start_date"],
     }
+
+
+@pytest.mark.parametrize(
+    ("text", "status", "value"),
+    [
+        ("下个月找个周末去杭州，最多31天", "out_of_fallback", 31),
+        ("下个月找个周末去杭州，最多0天", "invalid", 0),
+        ("下个月找个周末去杭州，最多277天", "out_of_fallback", 277),
+        ("这个周末去杭州玩三十一天", "out_of_fallback", 31),
+    ],
+)
+def test_duration_fallback_distinguishes_invalid_and_out_of_range_values(
+    text: str, status: str, value: int
+):
+    assert _duration_constraint_status(text) == (status, value)
+    assert _extract_duration_days(text) is None
+    extracted = extract_structural_constraints(text, date(2026, 9, 4))
+    assert extracted["_duration_constraint_error"] == status
+    assert "start_date" not in extracted
+    assert "end_date" not in extracted
+
+
+def test_duration_fallback_still_widens_a_weekend_for_valid_value():
+    extracted = extract_structural_constraints(
+        "这个周末去杭州玩五天", date(2026, 9, 4)
+    )
+    assert extracted["start_date"] == "2026-09-05"
+    assert extracted["end_date"] == "2026-09-09"
+    assert "_duration_constraint_error" not in extracted
 
 
 def test_structural_calendar_resolves_national_day_holiday():

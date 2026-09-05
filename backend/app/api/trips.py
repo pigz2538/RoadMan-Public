@@ -544,6 +544,24 @@ async def preflight_trip(
         )
 
     requested_days = _requested_trip_days(extracted, payload.answers)
+    duration_constraint_error = str(extracted.get("_duration_constraint_error") or "")
+    if duration_constraint_error and not requested_days:
+        if duration_constraint_error == "invalid":
+            duration_message = "需求中的行程时长无效（必须至少 1 天），请重新输入。"
+        else:
+            duration_message = (
+                "需求中的行程时长超出离线兜底解析范围；请稍后重试需求理解智能体，"
+                f"或直接输入 1–{MAX_TRIP_DAYS} 天以内的时长。"
+            )
+        issues.append(
+            PreflightIssue(
+                code="INVALID_DURATION_CONSTRAINT",
+                field="max_days",
+                severity="error",
+                message=duration_message,
+                answer_type="text",
+            )
+        )
     if requested_days and requested_days > MAX_TRIP_DAYS:
         issues.append(
             PreflightIssue(

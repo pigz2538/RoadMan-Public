@@ -586,6 +586,33 @@ async def test_duration_limit_answer_replaces_agent_extracted_long_duration(clie
     assert body["warnings"]
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("raw_text", "expected_message"),
+    [
+        ("下个月找个周末去杭州，最多0天", "至少 1 天"),
+        ("下个月找个周末去杭州，最多31天", "离线兜底解析范围"),
+    ],
+)
+async def test_preflight_does_not_silently_turn_invalid_duration_into_weekend(
+    client, raw_text: str, expected_message: str
+):
+    response = await client.post(
+        "/api/v1/trips/preflight",
+        json={"raw_text": raw_text, "previous_extracted": {}, "semantic_checked": False},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    issue = next(
+        item for item in body["issues"] if item["code"] == "INVALID_DURATION_CONSTRAINT"
+    )
+    assert issue["field"] == "max_days"
+    assert expected_message in issue["message"]
+    assert body["extracted"].get("start_date") is None
+    assert body["extracted"].get("end_date") is None
+
+
 def test_domestic_geocode_requires_chinese_adcode_and_supported_coordinates():
     assert _is_domestic_geocode(
         {"adcode": "110000"},
